@@ -308,7 +308,13 @@ class MarketplaceScreenshotTour {
             ideFrame {
                 val browseTree = tree("//div[@class='Tree']")
                 browseTree.expandPath("OpenSpec", "Specs", fullMatch = false)
-                browseTree.expandPath("OpenSpec", "Specs", "greeting", fullMatch = false)
+                // Expanding "Specs" is async; the child expand can race the node's arrival and throw
+                // WaitForException on a fast boot. Retry the model-level expand itself (waitUntil
+                // swallows the probe's exception and retries) rather than probing rendered text —
+                // the custom badge cell renderer means hasText can't see the node label.
+                waitUntil("greeting spec node expands") {
+                    browseTree.expandPath("OpenSpec", "Specs", "greeting", fullMatch = false); true
+                }
                 browseTree.clickPath(
                     "OpenSpec", "Specs", "greeting", "Requirement: Friendly greeting", fullMatch = false
                 )
@@ -382,8 +388,10 @@ class MarketplaceScreenshotTour {
             expireNotifications()
             invokeAction("OpenSpec.Validate", now = false)
             waitUntil("validation summary notification", timeout = 3.minutes) {
+                // The Validate balloon body reads "<scope> passed/failed (N errors, M warnings)"
+                // (title "Validate", scoped body) — it no longer contains the literal "Validation".
                 utility(ActionCenterRef::class).getNotifications(project)
-                    .any { it.getContent().contains("Validation") }
+                    .any { it.getContent().contains("failed (") || it.getContent().contains("passed (") }
             }
             openFile("openspec/specs/keyword-in-header/spec.md", project)
             waitUntil("editor settles") { !isCodeAnalysisRunning(project) }
