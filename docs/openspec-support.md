@@ -18,7 +18,7 @@ How this plugin maps to the [OpenSpec](https://github.com/fission-ai/openspec) c
 
 This section is the **single source of truth** for the plugin's per-CLI-version coordination behavior and version facts (current plugin version, minimum/baseline/supported CLI versions). Other docs SHALL link here rather than restating these numbers. Each supported line has an explicit, test-enforced contract (see the per-version behavior contract in `coordination-surfaces`); a change that alters a line's behavior must update this block and its per-version tests.
 
-- **Current plugin version: 0.3.1** (authoritative source: `build.gradle.kts` / the JetBrains Marketplace listing; restated here so other docs have one place to link).
+- **Current plugin version: 0.5.0** (authoritative source: `build.gradle.kts` / the JetBrains Marketplace listing; restated here so other docs have one place to link).
 - **Minimum CLI: 1.3.0.** Below the floor, the plugin shows a one-time upgrade nudge and degrades gracefully to its built-in paths (project detection, init, spec browser, tool window, validation).
 - **Supported CLI lines: `1.3.x`, `1.4.x`, `1.5.x`, and `1.6.x`** — each with the per-line contract below. The plugin's built-in validator follows CLI 1.6 validation semantics (SHALL/MUST-only keyword rule, fence-aware keyword/scenario evaluation, and the advisory INFO hint for skipped delta headers), verified by a verdict-parity contract test against captured 1.6.0 CLI output.
 - **`1.3.x`:** coordination is below its floor — the Coordination tab is read-only (Awareness) only if legacy on-disk state exists, else Hidden; **no coordination write actions**.

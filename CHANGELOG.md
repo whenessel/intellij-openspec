@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v0.5.0
+
 ### Added
 
 - **Validation results now render grouped by file with clickable file:line links and per-severity coloring.** A Validate run no longer prints a flat, single-color block to the OpenSpec console. The report now opens with a verdict line naming the target (e.g. `Validation FAILED — Change \`x\``) and an error/warning/info count line, then groups issues under a per-file header — files containing an error first, then warning-only, then info-only, and within a file by line. Each issue's location renders as a clickable `file:line` link that opens the file at that line in the editor when the path resolves on disk; issues the CLI reports against a non-filesystem identifier degrade to plain, still-colored text rather than a dead link. ERROR, WARNING, and INFO each render in a distinct, theme-driven color, and a clean run shows a concise `✓ Validation PASSED` confirmation instead of an empty block. The improvement applies to every Validate surface (the toolbar and the Project-View scoped Validate); the summary notification is unchanged.
