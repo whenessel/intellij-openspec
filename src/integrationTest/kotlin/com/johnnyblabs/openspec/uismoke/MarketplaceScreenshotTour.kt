@@ -348,9 +348,14 @@ class MarketplaceScreenshotTour {
             // The visual IS the badged tree, so the shot just needs the artifacts expanded.
             ideFrame {
                 val browseTree = tree("//div[@class='Tree']")
-                browseTree.expandPath("OpenSpec", "Changes", "demo-add-farewell", fullMatch = false)
-                waitUntil("the change's artifact nodes render (badged) under the change node") {
-                    hasText("proposal")
+                // Shot 08 left the change node selected but COLLAPSED. Force it open (retry the async
+                // populate race) and verify via the tree PATH — the old hasText("proposal") guard
+                // false-passed on the bottom pipeline panel's "proposal" chip, snapping the collapsed
+                // tree (a visual duplicate of 08). Expanding to the "specs" child forces the change
+                // node open so its badged artifact nodes are actually visible.
+                waitUntil("the change node expands to reveal its badged artifact nodes") {
+                    browseTree.expandPath("OpenSpec", "Changes", "demo-add-farewell", "specs", fullMatch = false)
+                    true
                 }
             }
             snap("09-tree-badges")
