@@ -81,6 +81,12 @@ Paste this HTML into the "Description" field on the plugin edit page:
 
 <ul>
   <li>Hierarchical tree view of specs, changes, and archives</li>
+  <li>Master/detail Browse tab &mdash; a read-only, theme-aware rendered-markdown preview pane beside the tree, so you can read a spec or change artifact without leaving the tool window (single-click to preview, double-click to open the file)</li>
+  <li>Consolidated change-deltas view &mdash; select a change to see everything it modifies at the spec level, grouped by capability and operation (ADDED / MODIFIED / REMOVED / RENAMED) with delta badges, assembled from the OpenSpec CLI</li>
+  <li>Artifact-status badges overlaid on tree node icons (done / ready / blocked / not-created), with change nodes showing an X/Y task-progress count</li>
+  <li>Content-aware search &mdash; the Browse search box matches requirement and scenario text, not just node labels</li>
+  <li>Validate from the Project View context menu, scoped to the clicked change or spec</li>
+  <li>Grouped, navigable validation console &mdash; results grouped by file with clickable file:line links and per-severity coloring</li>
   <li>Visual artifact pipeline with status chips (done / ready / blocked)</li>
   <li>Fast-Forward: one-click change creation + artifact generation</li>
   <li>Generate All: walk the full artifact DAG with progress reporting</li>
@@ -180,12 +186,13 @@ Spec-Driven Development, OpenSpec, AI Integration, Code Generation, Requirements
 
 ## Media / Screenshots
 
-Capture 3-5 screenshots for the listing:
+The tour shots live in [`docs/screenshots/`](screenshots/) — regenerate them with `./gradlew screenshotTour`. Recommended 4-5 for the listing (lead with the viewing/intelligence visuals):
 
-1. **Browse tab** — Tree view showing specs, changes, and archive nodes with an expanded change
-2. **Workflow Action Panel** — Pipeline chips (proposal > design > specs > tasks) showing progress on an active change
-3. **Explore tab** — Assembled project context panel with copy/editor buttons
-4. **Settings panel** — Settings > Tools > OpenSpec configuration with the delivery dropdown visible
+1. **Spec preview** (`07-spec-preview`) — the master/detail Browse tab: tree beside the rendered-markdown preview pane
+2. **Change deltas** (`08-change-deltas`) — the consolidated deltas view, grouped by capability/operation with badges
+3. **Tree badges** (`09-tree-badges`) — a change expanded showing artifact-status badge overlays (done / ready / blocked, X/Y progress)
+4. **Validation console** (`10-validation-console`) — grouped-by-file results with file:line links and per-severity coloring
+5. **Workflow / pipeline** (`02-change-workflow`) — pipeline chips showing progress on an active change
 
 **Tips:**
 - Use the default IntelliJ light theme (most recognizable on the marketplace)

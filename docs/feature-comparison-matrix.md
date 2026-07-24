@@ -2,7 +2,7 @@
 
 A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code extensions.
 
-> **Maintenance: Snapshot** — reviewed per release, not per-change. This plugin's own row is kept current; the VS Code extension data (versions, install counts, features) is a point-in-time competitive survey and may lag reality. **Last reviewed: 2026-07-03** (plugin v0.3.1). For the version-by-version support matrix (what the plugin covers vs. the OpenSpec client), see [OpenSpec Client Coverage](openspec-support.md) instead.
+> **Maintenance: Snapshot** — reviewed per release, not per-change. This plugin's own row is kept current; the VS Code extension data (versions, install counts, features) is a point-in-time competitive survey and may lag reality. **Last reviewed: 2026-07-24** (plugin v0.5.0). For the version-by-version support matrix (what the plugin covers vs. the OpenSpec client), see [OpenSpec Client Coverage](openspec-support.md) instead.
 
 ---
 
@@ -10,7 +10,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 
 | Extension | IDE | Publisher | Version | Installs | Status |
 |---|---|---|---|---|---|
-| **OpenSpec IntelliJ Plugin** | IntelliJ IDEA 2024.2+ | johnnyblabs | 0.3.1 | — | Published |
+| **OpenSpec IntelliJ Plugin** | IntelliJ IDEA 2024.2+ | johnnyblabs | 0.5.0 | — | Published |
 | **OpenSpec** (Codder13) | VS Code | Denis Bolba | 0.0.5 | 1,972 | Community, proposed official |
 | **OpenSpec for Copilot** | VS Code | atman-dev | 1.0.0 | 956 | Community |
 | **OpenSpec VSCode** | VS Code | AngDrew | 1.3.0 | 592 | Community |
@@ -86,6 +86,10 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Changes tree browser | Yes | No | No | Yes | Yes |
 | Archive tree browser | Yes | No | No | No | No |
 | Artifact nodes in tree | Yes (with status icons) | No | No | Partial | Yes |
+| Artifact-status badge overlays on tree icons | Yes (done/ready/blocked + X/Y task progress) | No | No | No | No |
+| Rendered-markdown preview pane (master/detail) | Yes | No | No | No | No |
+| Consolidated change-deltas view (CLI-sourced) | Yes (grouped by capability/operation, badged) | No | No | No | No |
+| Content search (requirement + scenario text) | Yes | No | No | No | No |
 | Tree auto-refresh on file changes | Yes (file watcher) | No | No | No | Yes |
 | Context menu actions on tree nodes | Yes (full action set) | No | No | Partial | No |
 | Workflow Action Panel (below tree) | Yes | No | No | No | No |
@@ -119,7 +123,8 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Auto-validation at phase transitions | Yes | No | No | No | No |
 | Strict validation mode | Yes (setting) | No | No | No | No |
 | Real-time inline validation | Yes (inspections) | No | No | No | No |
-| Validation results in console | Yes | No | No | No | No |
+| Validation results in console | Yes (grouped by file, file:line links, per-severity color) | No | No | No | No |
+| Validate from Project View context menu (scoped) | Yes (change/spec/whole-project) | No | No | No | No |
 
 ---
 
@@ -155,6 +160,10 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 
 ### IntelliJ Plugin (This Plugin)
 - Full IDE-native experience (inspections, annotations, line markers, tool window)
+- Master/detail spec-and-change viewer: a rendered-markdown preview pane beside the tree, with content-aware search over requirement and scenario text
+- Consolidated change-deltas view — everything a change modifies at the spec level, grouped by capability/operation and badged, assembled from the CLI, cross-linked to the per-capability delta diff
+- Artifact-status badge overlays on tree node icons (done / ready / blocked / not-created) with X/Y task-progress on change nodes
+- Grouped, navigable validation console (by file, clickable file:line links, per-severity color) plus a Project-View context-menu Validate scoped to the clicked change or spec
 - Multi-provider Direct API generation with secure credential storage (Claude, OpenAI, Gemini)
 - Visual artifact pipeline with DAG-driven workflow
 - Scaffolding detection preventing false "complete" status

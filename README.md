@@ -9,7 +9,8 @@ An IDE-native client for the [OpenSpec](https://github.com/fission-ai/openspec) 
 
 **Features:**
 
-- **Spec browser** — a tree view of capabilities and requirements with syntax highlighting, real-time validation, editor inspections, and quick-fixes matching the OpenSpec CLI's own parser
+- **Spec browser & viewer** — a master/detail tree of capabilities and requirements beside a rendered-markdown preview pane, with content-aware search (over requirement and scenario text), artifact-status badges on tree icons, and a consolidated change-deltas view that shows everything a change modifies at the spec level
+- **Validation you can navigate** — real-time editor inspections and quick-fixes matching the OpenSpec CLI's own parser, plus a Validate action (from the toolbar or the Project View context menu, scoped to the clicked change or spec) whose results render grouped by file with clickable file:line links and per-severity coloring
 - **Change lifecycle** — create, implement, verify, and archive OpenSpec changes from a dedicated tool window, with schema-aware completeness gates and task-level progress
 - **Works with your AI tooling** — detects 30+ AI coding tools (Claude Code, GitHub Copilot, Cursor, Gemini CLI, and more) and hands generation off to the one you already use, or calls the Anthropic, OpenAI, or Google APIs directly with your own key
 - **Schema authoring** — fork, create, and validate custom workflow schemas, with template editing and resolution-provenance tags straight from the CLI

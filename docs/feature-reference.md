@@ -290,12 +290,14 @@ Requirement headers (`### Requirement:`) are recognized **case-insensitively**, 
 
 **OpenSpec menu > Validate** (or toolbar button)
 
-Validates all specs, changes, and config files. Results appear as IDE notifications.
+Validates all specs, changes, and config files. A summary notification names the target and its error/warning counts; the full, navigable report lands in the OpenSpec **Console** (see below).
 
 | Mode | Behavior |
 |------|----------|
 | **Built-in** | Always available. Validates spec format, delta spec structure, and config. |
 | **CLI-enhanced** | When CLI is installed: runs `openspec validate --all` for full validation including schema rules. |
+
+**Results in the console (grouped, colored, navigable).** The console report opens with a verdict line naming the target (e.g. `Validation FAILED — Change x`) and an error/warning/info count line, then groups issues under a per-file header — files containing an error first, then warning-only, then info-only, and within a file by line. Each issue's location renders as a clickable `file:line` link that opens the file at that line when the path resolves on disk; issues the CLI reports against a non-filesystem identifier degrade to plain, still-colored text rather than a dead link. ERROR, WARNING, and INFO each render in a distinct, theme-driven color, and a clean run shows a concise `✓ Validation PASSED` confirmation. This is the shared report for every Validate surface (toolbar and the Project-View scoped Validate below); file headers are grouping keys only — no per-file valid/invalid verdict is invented.
 
 **Project View context menu > Validate OpenSpec.** Right-click a file under `openspec/` in the standard Project view to validate *its* item in place, scoped to what you clicked: a file under `openspec/specs/<capability>/` validates that spec; a file under an active `openspec/changes/<name>/` validates that change; a file under `openspec/changes/archive/`, the `openspec/` root, or `config.yaml` (and any selection spanning multiple items) falls back to validating the whole project. The menu item appears only when the selection is under `openspec/`. It reuses the same built-in-plus-CLI pipeline (the CLI call is scoped, e.g. `openspec validate <id> --type change|spec`) and reports to the same console — no per-file valid/invalid verdict is invented.
 
