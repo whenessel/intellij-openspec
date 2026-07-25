@@ -472,9 +472,12 @@ class OpenSpecUiSmokeTest {
             invokeAction("OpenSpec.Validate", now = true)
 
             // Stop 1: the summary notification reports the failure (arrives after the
-            // background CLI run + merge completes).
+            // background CLI run + merge completes). The balloon body reads
+            // "<scope> failed (N errors, M warnings)" (title "Validate", scoped body) —
+            // for whole-project validation "whole project failed (…)"; it no longer
+            // contains the literal "Validation".
             waitUntil("validation summary notification raised", timeout = 3.minutes) {
-                notificationContents(this).any { it.contains("Validation failed (") }
+                notificationContents(this).any { it.contains("failed (") }
             }
 
             // Stop 2: the Console tab renders the CLI-PARSED error line — the type/id
