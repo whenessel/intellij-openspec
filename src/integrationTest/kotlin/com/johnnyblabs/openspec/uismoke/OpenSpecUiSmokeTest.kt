@@ -602,20 +602,31 @@ class OpenSpecUiSmokeTest {
      * issue row), NOT click-navigation: opening the file at the caret line is a headless-
      * untestable editor behavior, so the wiring is covered by unit tests instead.
      *
-     * Uses the built-in validator's ERROR (a requirement missing SHALL/MUST), so no host CLI
-     * is required — unlike journey 7, which specifically asserts the CLI-parsed line.
+     * Robust to the CLI-authoritative merge: the missing-SHALL spec fails the verdict in BOTH modes
+     * (the host CLI reports it when present, the built-in validator when absent), and a schemaless
+     * config.yaml yields a non-failing built-in config-schema-required WARNING at config.yaml:1 — a
+     * resolvable, clickable row that renders whether or not the CLI is present (the built-in always
+     * owns config). So the assertions key off group / severity / hyperlink features that survive
+     * either mode, not off the built-in's spec-error path form, which the CLI supersedes when present.
      */
     @Test
     fun validateResultsRenderGroupedFormattedReport() {
         val projectPath = freshDemoProject()
-        // A spec whose requirement lacks SHALL/MUST — the built-in validator flags it as an
-        // ERROR, so the whole-project result fails and the console renders a grouped report.
+        // A spec whose requirement lacks SHALL/MUST — reported as an ERROR (by the CLI when present,
+        // else the built-in), so the whole-project result fails and the console renders a grouped report.
         Files.createDirectories(projectPath.resolve("openspec/specs/formatting-demo"))
         Files.writeString(
             projectPath.resolve("openspec/specs/formatting-demo/spec.md"),
             "# Formatting Demo\n\n## Purpose\nExercises the grouped validation console report.\n\n" +
                 "## Requirements\n\n### Requirement: Records are kept\nRecords are kept somewhere safe.\n\n" +
                 "#### Scenario: Persist\n- **WHEN** a record is created\n- **THEN** it can be read back later\n",
+        )
+        // A schemaless config.yaml — the built-in validator (which owns config in both CLI modes)
+        // emits a non-failing config-schema-required WARNING at line 1: a resolvable, clickable row
+        // that exercises the hyperlink (L<line>) format regardless of whether the host CLI is present.
+        Files.writeString(
+            projectPath.resolve("openspec/config.yaml"),
+            "context: \"grouped-report journey — intentionally no schema field\"\n",
         )
         newContext(projectPath).runIdeWithDriver().useDriverAndCloseIde {
             waitForIndicators(5.minutes)
@@ -639,18 +650,24 @@ class OpenSpecUiSmokeTest {
                 waitUntil("console renders the error/warning/info count line") {
                     hasSubtext("warning")
                 }
-                // The seeded spec's issues group under its file-path header (grouping rendered).
-                waitUntil("console renders the file-group header for the seeded spec") {
-                    hasSubtext("formatting-demo/spec.md")
+                // The seeded spec's error groups under a header naming the capability — the built-in's
+                // file path or the CLI's spec/<id> pseudo-path, both containing "formatting-demo".
+                waitUntil("console renders the group header for the seeded spec") {
+                    hasSubtext("formatting-demo")
                 }
-                // The missing-SHALL row renders with its ERROR severity label (per-severity format).
+                // The spec error renders with its ERROR severity label (per-severity format).
                 waitUntil("console renders the ERROR severity label on a grouped row") {
                     hasSubtext("ERROR")
                 }
-                // ...and its clickable L<line> token. The requirement sits at line 8 of the fixed
-                // seed, so the built-in validator reports the error at line 8 → an "L8" token.
-                waitUntil("console renders the clickable L<line> token for the seeded error") {
-                    hasSubtext("L8")
+                // The schemaless config.yaml groups under its own resolvable header...
+                waitUntil("console renders the resolvable config.yaml group header") {
+                    hasSubtext("config.yaml")
+                }
+                // ...whose non-failing config-schema-required WARNING at line 1 renders as a clickable
+                // L<line> token — exercising the hyperlink format in both CLI-present and CLI-absent
+                // modes (the built-in always owns config), so the coverage doesn't depend on the host CLI.
+                waitUntil("console renders the clickable L<line> token for the config warning") {
+                    hasSubtext("L1")
                 }
             }
         }

@@ -36,6 +36,7 @@
 - [x] 6.4 Regression: a scenarioless main-spec requirement still FAILS with a `spec-scenario-required` ERROR (verified CLI `valid:false`); a genuinely-broken spec (missing requirement, SHOULD-only keyword) and a scenarioless ADDED delta requirement still fail (ERROR where the CLI errors). The captured-CLI `ValidatorVerdictParityTest` must stay green.
 - [x] 6.5 `CliOutputParser` test: a `valid:false` warning-only item is read as failing; a `valid:true` warning-bearing item is read as passing.
 - [x] 6.6 Run `./gradlew build` (suite + JaCoCo floor). Ratchet the coverage floor up if the new tests raise it.
+- [x] 6.7 Update the release-gated uiSmoke journey `validateResultsRenderGroupedFormattedReport` for the CLI-authoritative behavior: it relied on the built-in validator's spec-error file-path + `L8` row, which the CLI supersedes when present. Reseed with a schemaless `config.yaml` (non-failing `config-schema-required` WARNING at line 1 → resolvable, clickable `L1` row that renders in both CLI modes) and assert mode-robust anchors (`formatting-demo` group, `ERROR`, `config.yaml`, `L1`). Compiles; verified at the next release gate (headful, can't run locally). Premised on the release gate running with the CLI installed (the plugin's primary mode).
 
 ## 7. Docs & fidelity
 
