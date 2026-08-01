@@ -33,6 +33,19 @@ convention before commit.
 | `update-{clean,legacy-pending,legacy-pending-regenerated}.txt` | 1.4.1 (noted byte-identical on 1.5.0) | yes — 1.6.0 twins exist | legacy project initialized by CLI 1.3.1 |
 | `coordination-{workspace-list,initiative-list,context-store-list,context-store-doctor}.json` | 1.4.x | **NO — PINNED** | `workspace`/`context-store`/`initiative` commands were removed upstream at 1.5.0; these are the only parse coverage for the still-supported 1.4.x line |
 
+## `1.3.0/` — floor-version parity guard
+
+Captured from CLI **1.3.0** (the plugin's supported floor) by the `builtin-validator-cli-parity`
+change. `validate.json` is a real `validate --all --json` over a two-spec corpus — one valid spec
+whose only issue is a WARNING (`good`, `valid:true`) and one requirement-missing-`SHALL` spec
+(`bad`, `valid:false`, one ERROR + one WARNING). It exists to lock in the cross-version stability of
+the `validate --json` shape the CLI-authoritative merge depends on: the item's `valid` field,
+`issues[].level/message`, `type`, and `id` are byte-identical across 1.3.0 → 1.6.0 (only a top-level
+`root` key was added in 1.5, which the parser ignores). Consumed by
+`CliContractTest.FloorVersionValidateContractV13`, which asserts the parser derives the per-item
+verdict from `valid` on this older, `root`-less shape. Re-capture from a real 1.3.x CLI if the floor
+shape ever changes.
+
 ## `1.5.0/` — store/workset generation set
 
 Captured from CLI 1.5.0 (store/workset surface work; `stores-registry.yaml`/`worksets.yaml`
