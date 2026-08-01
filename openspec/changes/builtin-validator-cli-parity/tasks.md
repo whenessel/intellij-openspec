@@ -18,10 +18,10 @@
 - [x] 3.3 Keep `spec-scenario-required` at ERROR — do NOT demote. Verified against the real 1.6.0 CLI: a scenarioless main-spec requirement is `valid:false` (a Zod `.min(1)` schema ERROR in `base.schema.js` alongside the WARNING guide), so demoting would make the plugin laxer than the CLI. The delta path's `delta-requirement-scenario` also stays ERROR.
 - [x] 3.4 Verify the RFC-keyword rules (`spec-rfc-keywords`, `spec-rfc-keyword-in-header`) and `spec-requirement-required` remain ERROR — unchanged, faithful to the CLI.
 
-## 4. Config double-error removal
+## 4. Config validation is non-failing
 
-- [x] 4.1 In `BuiltInValidator.validateConfig`, remove the `getRequiredConfigFields()` loop that re-emits `config-field-required` for `schema` (already covered by `config-schema-required`). Keep `config-schema-required` as the single ERROR for a missing `schema`.
-- [x] 4.2 Leave `VersionSupport.getRequiredConfigFields()` in place for future baselines but ensure it is no longer wired to a duplicate check. Add an inline comment explaining why the loop was removed.
+- [x] 4.1 In `BuiltInValidator.validateConfig`, demote `config-schema-required` from ERROR to WARNING and remove the redundant `config-field-required` loop. Verified against the real CLI: `openspec validate` never fails on any `config.yaml` state (missing/empty/unknown schema, even malformed YAML all validate clean), so config checks must never fail the verdict. Config validation now emits no ERROR at all.
+- [x] 4.2 Mirror the demotion in `ConfigValidationInspection` (missing-schema squiggle ERROR → WARNING). Leave `VersionSupport.getRequiredConfigFields()` in place for future baselines but no longer wired to a duplicate check; inline comments explain both.
 
 ## 5. strictValidation documentation
 

@@ -12,7 +12,7 @@ The plugin runs its own `BuiltInValidator` and merges it with the CLI as `passed
 **Secondary — make the CLI-absent fallback honest (severity parity):** so the fallback verdict also never exceeds the CLI's default-mode verdict, demote only the rules the real CLI reports `valid` for:
 - `spec-title-required` (missing `# Title`) ERROR → WARNING (the CLI requires no H1 — verified `valid:true`). No `## Purpose`-required ERROR is added — the principle forbids being *more* strict.
 - `spec-scenario-clauses` (WHEN/THEN) ERROR → INFO (the CLI has no such check — verified `valid:true`).
-- Remove the redundant `config-field-required` ERROR for `schema`; `config-schema-required` remains the single ERROR for a missing `schema:` (kept because a missing `schema:` breaks the client outside `validate` via Zod `schema.min(1)`).
+- Config validation is made non-failing: `config-schema-required` ERROR → WARNING, and the redundant `config-field-required` for `schema` is removed. Verified against the real CLI — `openspec validate` never fails on any `config.yaml` state (missing/empty/unknown schema, even malformed YAML all validate clean; upstream defaults a missing schema to `spec-driven`). So config checks are non-failing hygiene nudges only; failing on them would make the plugin stricter than the client.
 - **`spec-scenario-required` stays ERROR.** Contrary to the initial audit, capturing the real 1.6.0 CLI shows a scenarioless main-spec requirement is `valid:false` — it fires a Zod `.min(1)` ERROR (`base.schema.js`) in addition to the WARNING guide (`validator.js`). Demoting it would make the plugin *laxer* than the CLI, so it is left as ERROR (and the delta path's `delta-requirement-scenario` stays ERROR too).
 
 **Housekeeping:**

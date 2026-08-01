@@ -141,23 +141,25 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
         assertTrue(result.passed());
     }
 
-    public void testMissingSchemaTriggersError() throws Exception {
+    public void testMissingSchemaIsANonFailingWarning() throws Exception {
+        // `openspec validate` never reads config.yaml and never fails on a missing schema (upstream
+        // defaults to spec-driven), so this is a WARNING, not an ERROR — the plugin must not fail a
+        // config state the CLI tolerates.
         overwriteFile("openspec/config.yaml",
                 "version: \"1.2.0\"\n\nprofile:\n  name: Test\n");
 
         ValidationResult result = validator.validateConfig();
-        assertTrue("Should have config-schema-required issue",
+        assertTrue("config-schema-required must be a WARNING, not an ERROR",
                 result.issues().stream().anyMatch(i ->
                         "config-schema-required".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.ERROR));
-        assertFalse(result.passed());
-        // Double-error removal: a missing schema raises exactly one ERROR (config-schema-required),
-        // NOT also the redundant config-field-required that the removed required-fields loop emitted.
-        assertTrue("config-field-required must no longer be emitted for a missing schema",
+                        i.severity() == ValidationIssue.Severity.WARNING));
+        assertTrue("a missing schema must NOT fail the verdict", result.passed());
+        // Config validation produces no ERRORs at all — it never fails the verdict.
+        assertTrue("config validation must emit no ERROR-severity issues",
+                result.issues().stream().noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR));
+        // The removed required-fields loop must not re-emit a duplicate config-field-required.
+        assertTrue("config-field-required must no longer be emitted",
                 result.issues().stream().noneMatch(i -> "config-field-required".equals(i.rule())));
-        long errorCount = result.issues().stream()
-                .filter(i -> i.severity() == ValidationIssue.Severity.ERROR).count();
-        assertEquals("a missing schema should raise exactly one ERROR", 1, errorCount);
     }
 
     public void testInvalidSchemaTriggersWarning() throws Exception {
@@ -430,17 +432,21 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                 result.issues().stream().noneMatch(i -> "spec-requirement-required".equals(i.rule())));
     }
 
-    public void testCliAuthoritativeConfigErrorStillFailsWhenCliClean() throws Exception {
-        // The built-in validator still owns config.yaml: a clean CLI does not excuse a missing schema.
+    public void testCliAuthoritativeSurfacesConfigWarningsWithoutFailingWhenCliClean() throws Exception {
+        // The built-in validator still OWNS config.yaml when the CLI is present — but config checks are
+        // non-failing (the CLI never fails on config). A missing schema surfaces as a WARNING alongside
+        // a clean CLI verdict; it does not red the whole-project result.
         overwriteFile("openspec/config.yaml", "version: \"1.2.0\"\n");  // no schema
         refreshVfs();
 
         ValidationResult result = com.johnnyblabs.openspec.actions.OpenSpecValidateAction
                 .combineWithCli(validator, com.johnnyblabs.openspec.actions.ValidateTarget.wholeProject(), cleanCli());
 
-        assertFalse("a missing schema must fail even when the CLI reports specs valid", result.passed());
-        assertTrue("the failure is the built-in config-schema-required ERROR",
-                result.issues().stream().anyMatch(i -> "config-schema-required".equals(i.rule())));
+        assertTrue("a config warning must NOT fail a clean-CLI verdict", result.passed());
+        assertTrue("the config-schema-required WARNING is still surfaced for display",
+                result.issues().stream().anyMatch(i ->
+                        "config-schema-required".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.WARNING));
     }
 
     public void testCliAuthoritativeSingleItemDefersEntirelyToCli() throws Exception {

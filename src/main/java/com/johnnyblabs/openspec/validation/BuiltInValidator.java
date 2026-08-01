@@ -290,8 +290,14 @@ public final class BuiltInValidator {
         }
 
         if (config.getSchema() == null || config.getSchema().isEmpty()) {
-            issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, 1,
-                    "config.yaml must have a 'schema' field", "config-schema-required"));
+            // WARNING, not ERROR. `openspec validate` never reads config.yaml and never fails on a
+            // missing schema — upstream tolerates its absence and defaults to `spec-driven` (verified
+            // against the real CLI: missing/empty/unknown schema and even malformed YAML all validate
+            // clean). So this is a non-failing hygiene nudge, never a verdict-failing error; making it
+            // an ERROR would be stricter than the client the plugin wraps.
+            issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, 1,
+                    "config.yaml has no 'schema' field; OpenSpec defaults to 'spec-driven' — "
+                            + "add one to be explicit", "config-schema-required"));
         } else {
             // Schema-name recognition is CLI-runtime-driven; see SchemaService.getKnownSchemaNames.
             java.util.Set<String> known = getKnownSchemaNames();
