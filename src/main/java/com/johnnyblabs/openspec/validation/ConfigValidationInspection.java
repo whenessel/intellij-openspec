@@ -68,11 +68,15 @@ public class ConfigValidationInspection extends LocalInspectionTool {
             if (!text.contains("schema:")) {
                 PsiElement element = findNonEmptyElement(file, 0);
                 if (element != null) {
+                    // WARNING, not ERROR: OpenSpec tolerates a missing schema and defaults to
+                    // 'spec-driven' (the CLI never fails on it), so this is a hygiene nudge, mirroring
+                    // the built-in validator's config-schema-required WARNING.
                     problems.add(manager.createProblemDescriptor(
                             element,
-                            "OpenSpec config.yaml must contain a 'schema' field",
+                            "OpenSpec config.yaml has no 'schema' field; it defaults to 'spec-driven' "
+                                    + "— add one to be explicit",
                             (LocalQuickFix) null,
-                            ProblemHighlightType.ERROR,
+                            ProblemHighlightType.WARNING,
                             isOnTheFly));
                 }
             }

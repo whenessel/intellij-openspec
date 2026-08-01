@@ -36,8 +36,8 @@ jobs:
       - name: Verify display + CLI prerequisites
         run: |
           command -v Xvfb || echo "WARNING: Xvfb missing — Starter cannot create a virtual display"
-          command -v npm && npm i -g @fission-ai/openspec@1.4.1 \
-            || echo "WARNING: npm missing — the Update journey needs the OpenSpec CLI"
+          command -v npm && npm i -g @fission-ai/openspec@1.6.0 \
+            || echo "WARNING: npm missing — the OpenSpec CLI is needed for the Update and CLI-authoritative validate journeys"
           command -v openspec && openspec --version || true
 
       # Starter downloads its own IDE installer into out/ide-tests (an IDE-sized

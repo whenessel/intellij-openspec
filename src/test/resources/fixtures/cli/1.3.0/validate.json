@@ -1,0 +1,55 @@
+{
+  "items": [
+    {
+      "id": "bad",
+      "type": "spec",
+      "valid": false,
+      "issues": [
+        {
+          "level": "ERROR",
+          "path": "requirements.0.text",
+          "message": "Requirement must contain SHALL or MUST keyword"
+        },
+        {
+          "level": "WARNING",
+          "path": "overview",
+          "message": "Purpose section is too brief (less than 50 characters)"
+        }
+      ],
+      "durationMs": 1
+    },
+    {
+      "id": "good",
+      "type": "spec",
+      "valid": true,
+      "issues": [
+        {
+          "level": "WARNING",
+          "path": "overview",
+          "message": "Purpose section is too brief (less than 50 characters)"
+        }
+      ],
+      "durationMs": 0
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 2,
+      "passed": 1,
+      "failed": 1
+    },
+    "byType": {
+      "change": {
+        "items": 0,
+        "passed": 0,
+        "failed": 0
+      },
+      "spec": {
+        "items": 2,
+        "passed": 1,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0"
+}

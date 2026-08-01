@@ -496,6 +496,20 @@ class CliContractTest {
                             .noneMatch(i -> i.severity() == ValidationIssue.Severity.INFO),
                     "the 1.6 INFO issue rides a valid:true item and must be skipped");
         }
+
+        @Test
+        void warningOnlyInvalidItemReadsAsFailingFromValidField() {
+            // Captured real 1.6.0 `validate --all --strict --json`: a spec whose only issue is a
+            // WARNING (Purpose too brief) is valid:false under --strict. The verdict must come from
+            // the item's `valid` field, not from re-deriving pass/fail off issue severities — the
+            // latter would mis-read this warning-only item as passing (no ERROR present). This is the
+            // captured-output proof of the CLI-authoritative verdict derivation.
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture16("validate-strict-warning-only.json"));
+
+            assertNotNull(result);
+            assertFalse(result.passed(),
+                    "a valid:false item with only a WARNING must be read as failing");
+        }
     }
 
     /**
@@ -555,6 +569,35 @@ class CliContractTest {
             assertTrue(result.issues().stream()
                             .anyMatch(i -> "change/broken-change".equals(i.filePath())),
                     "single-item issue must carry its type/id path from the envelope");
+        }
+    }
+
+    /**
+     * Floor-version parity guard. The plugin's supported CLI floor is 1.3.0, and the CLI-authoritative
+     * merge depends on the {@code validate --json} shape being stable across the supported range. It
+     * is: the item's {@code valid} field, {@code issues[].level/message}, {@code type} and {@code id}
+     * are byte-identical across 1.3.0 → 1.6.0; only a top-level {@code root} key was added in 1.5,
+     * which the parser ignores. This test parses a real captured 1.3.0 {@code validate --all --json}
+     * (root sanitized to {@code /fixture}) and asserts the parser derives the same per-item verdict
+     * from {@code valid} as it does on 1.6.0 — so a future CLI version, or a parser change, that breaks
+     * the cross-version shape assumption fails here rather than silently in the field. Re-capture from
+     * a real floor CLI if it ever changes.
+     */
+    @Nested
+    class FloorVersionValidateContractV13 {
+
+        @Test
+        void derivesVerdictFromValidFieldOnTheFloorShape() {
+            // The 1.3.0 capture has one invalid item ('bad', missing SHALL) and one valid-but-warning
+            // item ('good'). The whole-project verdict fails on the invalid item, and the valid item's
+            // WARNING is not extracted — proving the verdict comes from `valid`, not issue severities,
+            // on the older shape that has no top-level `root` key.
+            ValidationResult result = CliOutputParser.parseJsonOutput(loadFixture("1.3.0/validate.json"));
+
+            assertNotNull(result);
+            assertFalse(result.passed(), "the 1.3.0 capture has an invalid item, so the result fails");
+            assertEquals(1, result.errorCount(),
+                    "only the invalid item's ERROR surfaces; the valid item's warning rides valid:true and is skipped");
         }
     }
 }
