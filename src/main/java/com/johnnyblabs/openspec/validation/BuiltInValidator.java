@@ -89,10 +89,12 @@ public final class BuiltInValidator {
         String content = maskFences(raw);
         String path = file.getPath();
 
-        // Must have title
+        // Should have a title — WARNING, not ERROR. The CLI requires no `# Title` H1 (it derives
+        // the spec name from the directory; its structural gate is `## Purpose`/`## Requirements`),
+        // so erroring here would be stricter than the client we wrap.
         if (!TITLE_PATTERN.matcher(content).find()) {
-            issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, 1,
-                    "Spec file must have a '# Title' heading", "spec-title-required"));
+            issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, 1,
+                    "Spec file should have a '# Title' heading", "spec-title-required"));
         }
 
         // Must have at least one requirement
@@ -124,13 +126,19 @@ public final class BuiltInValidator {
                 }
             }
 
-            // Requirement must have at least one scenario
+            // Requirement must have at least one scenario — ERROR. Empirically, `openspec validate`
+            // reports a scenarioless main-spec requirement as valid:false: it fires a Zod `.min(1)`
+            // schema ERROR (base.schema.js) in addition to the WARNING guide in validator.js.
+            // Demoting this would make the built-in fallback LAXER than the CLI (and would break the
+            // captured-CLI verdict-parity test), so it stays ERROR.
             if (!SCENARIO_PATTERN.matcher(reqContent).find()) {
                 issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
                         "Requirement '" + reqHeader + "' must have at least one '#### Scenario:' block", "spec-scenario-required"));
             }
 
-            // Each scenario must have WHEN and THEN clauses
+            // Scenario WHEN/THEN structure is an authoring hint only — INFO, not a verdict input.
+            // The CLI performs no clause-structure validation (a scenario need only be non-empty),
+            // so flagging it as an ERROR would be stricter than the client we wrap.
             Matcher scenMatcher = SCENARIO_PATTERN.matcher(reqContent);
             while (scenMatcher.find()) {
                 int scenLine = reqLine + lineNumberAt(reqContent, scenMatcher.start()) - 1;
@@ -143,7 +151,7 @@ public final class BuiltInValidator {
                 if (!hasWhen || !hasThen) {
                     String missing = !hasWhen && !hasThen ? "WHEN and THEN"
                             : !hasWhen ? "WHEN" : "THEN";
-                    issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, scenLine,
+                    issues.add(new ValidationIssue(ValidationIssue.Severity.INFO, path, scenLine,
                             "Scenario '" + scenHeader + "' is missing " + missing + " clause(s)", "spec-scenario-clauses"));
                 }
             }
@@ -307,20 +315,12 @@ public final class BuiltInValidator {
                             "Known versions: " + VersionSupport.allVersions(), "config-version-unknown"));
         }
 
-        // Required config fields for declared version
-        VersionSupport version = getVersionSupport();
-        for (String field : version.getRequiredConfigFields()) {
-            boolean present = switch (field) {
-                case "schema" -> config.getSchema() != null && !config.getSchema().isEmpty();
-                case "version" -> config.getVersion() != null && !config.getVersion().isEmpty();
-                default -> false;
-            };
-            if (!present) {
-                issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, 1,
-                        "config.yaml requires '" + field + "' field for version " + version.getVersion(),
-                        "config-field-required"));
-            }
-        }
+        // No separate required-field loop: the only field upstream's Zod requires is `schema`, and a
+        // missing/empty `schema` is already reported once above as `config-schema-required`. The old
+        // loop over VersionSupport.getRequiredConfigFields() re-emitted a second, duplicate ERROR
+        // (`config-field-required`) for the same `schema` field. getRequiredConfigFields() is retained
+        // on VersionSupport for a future config-format baseline that requires a field beyond `schema`;
+        // it is intentionally no longer wired to a duplicate check here.
 
         // `profile:` is not in upstream's Zod schema; the plugin reads it only for tree-view
         // display and AI-prompt context (both null-safe). No required-field issue when absent.

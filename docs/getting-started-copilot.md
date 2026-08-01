@@ -75,7 +75,7 @@ The settings panel has sections stacked vertically: **CLI**, **General**, **Conf
 |-------|-------------|
 | **Schema profile** | The workflow profile used for new changes. Options: `spec-driven` (full proposal → design → specs → tasks pipeline), `tdd` (test-first), `rapid` (lightweight). Editable — you can type a custom profile name. Most users should start with `spec-driven`. |
 | **Auto-refresh tool window on file changes** | When checked (default: on), the tool window tree automatically refreshes when OpenSpec files change on disk. Useful when an external AI tool writes artifact files directly. |
-| **Strict validation (warnings become errors)** | When checked (default: off), validation warnings are promoted to errors. Useful for enforcing strict compliance, but can be noisy during early development. |
+| **Strict validation (warnings become errors)** | When checked (default: off), the built-in validator's warnings are promoted to errors. This is a plugin-side setting only — it is independent of, and never passed to, the OpenSpec CLI's own `--strict` flag. Useful for enforcing strict compliance, but can be noisy during early development. |
 
 ### Config Profile
 

@@ -496,6 +496,20 @@ class CliContractTest {
                             .noneMatch(i -> i.severity() == ValidationIssue.Severity.INFO),
                     "the 1.6 INFO issue rides a valid:true item and must be skipped");
         }
+
+        @Test
+        void warningOnlyInvalidItemReadsAsFailingFromValidField() {
+            // Captured real 1.6.0 `validate --all --strict --json`: a spec whose only issue is a
+            // WARNING (Purpose too brief) is valid:false under --strict. The verdict must come from
+            // the item's `valid` field, not from re-deriving pass/fail off issue severities — the
+            // latter would mis-read this warning-only item as passing (no ERROR present). This is the
+            // captured-output proof of the CLI-authoritative verdict derivation.
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture16("validate-strict-warning-only.json"));
+
+            assertNotNull(result);
+            assertFalse(result.passed(),
+                    "a valid:false item with only a WARNING must be read as failing");
+        }
     }
 
     /**

@@ -80,6 +80,16 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         state.autoRefresh = autoRefresh;
     }
 
+    /**
+     * Whether the plugin's <em>plugin-side</em> strict validation is enabled.
+     *
+     * <p>This is NOT the OpenSpec CLI's {@code --strict} flag and is never passed to the CLI — the
+     * CLI is always invoked in its default mode. When enabled, it escalates selected plugin-side
+     * WARNING rules (e.g. {@code change-artifact-missing}) to ERROR within {@link BuiltInValidator}
+     * and blocks sync on a missing capability in {@code SpecSyncService}. With it disabled (the
+     * default), the built-in validator's fallback verdict does not exceed the CLI's default-mode
+     * verdict for any input the CLI validates.
+     */
     public boolean isStrictValidation() {
         return state.strictValidation;
     }

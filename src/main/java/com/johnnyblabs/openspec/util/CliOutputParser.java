@@ -32,7 +32,13 @@ public final class CliOutputParser {
      * <p>Structural JSON parsing, not regex: 1.6 issue paths like {@code requirements[0]}
      * carry a {@code ]} that breaks any bracket-delimited scan of the issues array.
      * Issues are extracted only from {@code valid: false} items; issues the CLI reports
-     * on valid items (warnings, the 1.6 INFO level) never flip the result.
+     * on valid items (warnings, the 1.6 INFO level) are not surfaced as failures.
+     *
+     * <p>The verdict is derived from each item's own {@code valid} field — the CLI is
+     * authoritative, and this mirrors the client's own rule
+     * ({@code valid = strictMode ? errors===0 && warnings===0 : errors===0}). Deriving it
+     * from the severities of the extracted issues instead would mis-read a warning-only-invalid
+     * item (possible under {@code --strict}) as passing, since such an item carries no ERROR.
      */
     public static ValidationResult parseJsonOutput(String jsonOutput) {
         List<ValidationIssue> issues = new ArrayList<>();
@@ -49,6 +55,7 @@ public final class CliOutputParser {
             // regex behavior of finding nothing.
         }
 
+        boolean allValid = true;
         if (root != null && root.has("items") && root.get("items").isJsonArray()) {
             for (JsonElement element : root.getAsJsonArray("items")) {
                 if (!element.isJsonObject()) {
@@ -56,6 +63,9 @@ public final class CliOutputParser {
                 }
                 JsonObject item = element.getAsJsonObject();
                 boolean valid = item.has("valid") && item.get("valid").getAsBoolean();
+                if (!valid) {
+                    allValid = false;
+                }
                 if (valid || !item.has("issues") || !item.get("issues").isJsonArray()) {
                     continue;
                 }
@@ -77,8 +87,7 @@ public final class CliOutputParser {
             }
         }
 
-        boolean passed = issues.stream().noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR);
-        return new ValidationResult(passed, issues, "cli");
+        return new ValidationResult(allValid, issues, "cli");
     }
 
     /**

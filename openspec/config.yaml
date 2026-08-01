@@ -1,9 +1,13 @@
 schema: spec-driven
-# version: plugin-internal field — drives OpenSpecConfig.getVersion → VersionSupport for the plugin's
-# built-in validator and effective-version resolution. Upstream OpenSpec's Zod schema (project-config.ts)
-# silently strips this key, but the plugin itself REQUIRES it (BuiltInValidator.validateConfig emits
-# config-version-required + config-field-required when missing). Do NOT remove without first refactoring
-# the plugin's version resolution to not depend on this field. See CLAUDE.md "Plugin-internal config fields".
+# version: plugin-internal field, OPTIONAL. Read by OpenSpecConfig.getVersion → VersionSupport as the
+# config-format-axis fallback for effective-version resolution (OpenSpecSettings.getEffectiveVersion,
+# used only when no Settings override is set). Upstream OpenSpec's Zod schema (project-config.ts) does
+# not define this key and ignores it. The plugin does NOT require it: absence resolves to
+# VersionSupport.V1_2 (fromString(null) → V1_2) and raises no validation issue — there is no longer a
+# config-version-required rule, and config-field-required now covers `schema` only. Because VersionSupport
+# currently has a single baseline (V1_2), the value below is inert (it changes no rule or artifact set);
+# only a value other than "1.2.0" would raise a config-version-unknown WARNING. Retained here as the seam
+# for a future config-format bump. See CLAUDE.md "Plugin-internal config fields".
 version: "1.2.0"
 
 profile:

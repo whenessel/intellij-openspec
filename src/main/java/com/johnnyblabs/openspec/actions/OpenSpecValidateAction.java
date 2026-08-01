@@ -61,11 +61,7 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
         new Task.Backgroundable(project, "Validating OpenSpec " + describeTarget(target), true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
-                // Always run built-in validation, scoped to the target.
                 BuiltInValidator validator = project.getService(BuiltInValidator.class);
-                ValidationResult builtInResult = builtInValidate(project, validator, target);
-
-                // Also run CLI validation if available.
                 CliDetectionService detection = project.getService(CliDetectionService.class);
                 ValidationResult finalResult;
                 if (detection != null && detection.isAvailable()) {
@@ -77,13 +73,15 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
                         } else {
                             cliValidation = CliOutputParser.parseTextOutput(cliResult);
                         }
-                        finalResult = ValidationResult.merge(builtInResult, cliValidation);
+                        finalResult = combineWithCli(validator, target, cliValidation);
                     } catch (Exception ex) {
-                        // CLI failed, use built-in only.
-                        finalResult = builtInResult;
+                        // CLI failed to run — fall back to the full built-in validator, never a
+                        // blind pass.
+                        finalResult = builtInValidate(project, validator, target);
                     }
                 } else {
-                    finalResult = builtInResult;
+                    // No CLI available — the built-in validator is the full fallback verdict.
+                    finalResult = builtInValidate(project, validator, target);
                 }
 
                 ValidationResult result = finalResult;
@@ -91,6 +89,28 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
                         .invokeLater(() -> showValidationResults(project, result, target));
             }
         }.queue();
+    }
+
+    /**
+     * Combine a successful CLI verdict with the built-in validator, CLI-authoritative.
+     *
+     * <p>The CLI is authoritative for the artifacts it validates (specs, change deltas) — the built-in
+     * validator must not red a clean CLI. For a whole-project run the built-in validator still owns
+     * {@code config.yaml} (the CLI's {@code validate} never reads it), so the verdict combines the CLI
+     * result with the built-in config-only result. For a single spec/change target there is no config
+     * component, so the CLI verdict stands alone.
+     *
+     * <p>Exposed (static, no side effects beyond reading config) so a test can inject a
+     * fixture-derived or synthetic {@code cliValidation} and assert the combine without shelling out
+     * to the real CLI.
+     */
+    public static ValidationResult combineWithCli(BuiltInValidator validator, ValidateTarget target,
+                                                  ValidationResult cliValidation) {
+        if (target.isWholeProject()) {
+            ValidationResult configResult = validator.validateConfig();
+            return ValidationResult.mergeCliAuthoritative(cliValidation, configResult);
+        }
+        return cliValidation;
     }
 
     /** Built-in validation scoped to the target. Package-private for routing tests. */

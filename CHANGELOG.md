@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Validation no longer reports errors that `openspec validate` wouldn't.** When the OpenSpec CLI is available, a Validate run now defers to the CLI's own verdict for the specs and changes it checks — the plugin's built-in validator no longer overrides a clean CLI with its own stricter opinion, so a project that `openspec validate` reports valid is no longer marked failing in the IDE. The built-in validator still owns `openspec/config.yaml` (which the CLI's `validate` never inspects), so a genuinely broken config is still caught. When the CLI is unavailable, the built-in fallback validator now matches the CLI's default-mode severities: a missing spec `# Title` and a scenario missing its `WHEN`/`THEN` clauses are reported as a warning and an info hint respectively (not errors), while a requirement with no scenario remains an error, matching the CLI. A missing `schema:` in `config.yaml` is reported once, not twice. The "Strict validation" setting is clarified as a plugin-only option (it makes the built-in validator's warnings into errors) that is independent of, and never passed to, the CLI's own `--strict`.
+
 ## v0.5.0
 
 ### Added

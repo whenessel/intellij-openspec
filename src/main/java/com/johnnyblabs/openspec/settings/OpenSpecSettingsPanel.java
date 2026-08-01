@@ -207,7 +207,10 @@ public class OpenSpecSettingsPanel {
         cliTimeoutSpinner = new JSpinner(new SpinnerNumberModel(30, 1, 3600, 1));
 
         autoRefreshCheckbox = new JBCheckBox("Auto-refresh tool window on file changes");
-        strictValidationCheckbox = new JBCheckBox("Strict validation (warnings become errors)");
+        strictValidationCheckbox = new JBCheckBox("Strict validation (plugin-side: warnings become errors)");
+        strictValidationCheckbox.setToolTipText(
+                "Plugin-side only — escalates the built-in validator's warnings to errors. "
+                        + "This is not the OpenSpec CLI's --strict flag and is never passed to the CLI.");
 
         JPanel generalSection = FormBuilder.createFormBuilder()
                 .addLabeledComponent(profileLabelPanel, profileComboRow)

@@ -51,7 +51,11 @@ class CliOutputParserTest {
         }
 
         @Test
-        void parsesWarnings() {
+        void failsWhenItemInvalidEvenWithOnlyWarnings() {
+            // A valid:false item whose only issue is a WARNING (possible under --strict) must be read
+            // as FAILING. The verdict comes from the item's `valid` field, not from re-deriving it
+            // from the extracted issue severities — deriving from severity would mis-read this as
+            // passing (no ERROR present). This is the latent bug the CLI-authoritative change fixes.
             String json = """
                     {
                       "items": [
@@ -62,9 +66,25 @@ class CliOutputParserTest {
                     }
                     """;
             ValidationResult result = CliOutputParser.parseJsonOutput(json);
-            // Only warnings, no errors → passed
-            assertTrue(result.passed());
+            assertFalse(result.passed(), "valid:false item must fail even with only WARNING issues");
             assertEquals(1, result.warningCount());
+        }
+
+        @Test
+        void passesWhenItemValidWithWarnings() {
+            // Conversely, a valid:true item with warnings passes — the warnings are surfaced for
+            // display but do not fail the verdict (the plugin never sends --strict).
+            String json = """
+                    {
+                      "items": [
+                        {"id": "auth", "type": "spec", "valid": true, "issues": [
+                          {"level": "WARNING", "message": "Purpose is brief"}
+                        ]}
+                      ]
+                    }
+                    """;
+            ValidationResult result = CliOutputParser.parseJsonOutput(json);
+            assertTrue(result.passed(), "valid:true item passes even with a WARNING");
         }
 
         @Test

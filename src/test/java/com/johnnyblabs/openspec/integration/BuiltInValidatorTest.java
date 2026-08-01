@@ -36,17 +36,36 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
         assertTrue("Valid specs should produce no errors, got: " + errors, errors.isEmpty());
     }
 
-    public void testMissingTitleTriggersError() {
+    public void testMissingTitleTriggersWarning() {
+        // The CLI requires no `# Title` H1 (it derives the name from the directory), so a missing
+        // title is a WARNING, not an ERROR — the plugin must not exceed the CLI's default verdict.
         myFixture.addFileToProject("openspec/specs/bad-title/spec.md",
                 "## No title heading here\n\n### Requirement: Something\n\nThe system SHALL work.\n");
         refreshVfs();
 
         ValidationResult result = validator.validateSpecs();
-        assertTrue("Should have spec-title-required issue",
+        assertTrue("spec-title-required should be a WARNING, not an ERROR",
                 result.issues().stream().anyMatch(i ->
                         "spec-title-required".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.ERROR &&
+                        i.severity() == ValidationIssue.Severity.WARNING &&
                         i.filePath().contains("bad-title")));
+    }
+
+    public void testUntitledButOtherwiseValidSpecPasses() {
+        // A spec with no `# Title` but a well-formed requirement + scenario is CLI-valid, so the
+        // built-in fallback must pass it (the title WARNING does not fail the verdict).
+        myFixture.addFileToProject("openspec/specs/untitled-ok/spec.md",
+                "## Purpose\n\nDoes a thing.\n\n### Requirement: Something\n\nThe system SHALL work.\n\n" +
+                "#### Scenario: Works\n- **WHEN** invoked\n- **THEN** it works\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateSpecs();
+        assertTrue("untitled-but-valid spec must pass (title is only a WARNING)", result.passed());
+        assertTrue("the sole issue is the spec-title-required WARNING",
+                result.issues().stream().anyMatch(i ->
+                        "spec-title-required".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.WARNING &&
+                        i.filePath().contains("untitled-ok")));
     }
 
     public void testMissingRequirementTriggersError() {
@@ -75,18 +94,38 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                         i.filePath().contains("bad-kw")));
     }
 
-    public void testEmptyScenarioTriggersError() {
+    public void testEmptyScenarioClausesAreInfoAndPass() {
+        // The CLI performs no WHEN/THEN clause validation (a scenario need only be non-empty), so a
+        // missing-clause scenario is an INFO hint that does not fail the verdict.
         myFixture.addFileToProject("openspec/specs/bad-scenario/spec.md",
                 "# Scenario Spec\n\n### Requirement: Bad Scenario\n\nThe system SHALL work.\n\n" +
                 "#### Scenario: Missing clauses\nJust a description with no structured clauses.\n");
         refreshVfs();
 
         ValidationResult result = validator.validateSpecs();
-        assertTrue("Should have spec-scenario-clauses ERROR issue",
+        assertTrue("spec-scenario-clauses should be INFO, not ERROR",
                 result.issues().stream().anyMatch(i ->
                         "spec-scenario-clauses".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.ERROR &&
+                        i.severity() == ValidationIssue.Severity.INFO &&
                         i.filePath().contains("bad-scenario")));
+        assertTrue("a clauseless scenario must not fail the verdict", result.passed());
+    }
+
+    public void testScenarolessRequirementStillErrors() {
+        // Corrected after empirical CLI capture: a scenarioless main-spec requirement is CLI
+        // valid:false (Zod .min(1) schema error), so it stays an ERROR — demoting would make the
+        // plugin laxer than the CLI.
+        myFixture.addFileToProject("openspec/specs/no-scenario/spec.md",
+                "# No Scenario Spec\n\n### Requirement: Needs A Scenario\n\nThe system SHALL work.\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateSpecs();
+        assertTrue("spec-scenario-required must remain an ERROR",
+                result.issues().stream().anyMatch(i ->
+                        "spec-scenario-required".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.ERROR &&
+                        i.filePath().contains("no-scenario")));
+        assertFalse("a scenarioless requirement must fail the verdict", result.passed());
     }
 
     // ---------------------------------------------------------------
@@ -112,6 +151,13 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                         "config-schema-required".equals(i.rule()) &&
                         i.severity() == ValidationIssue.Severity.ERROR));
         assertFalse(result.passed());
+        // Double-error removal: a missing schema raises exactly one ERROR (config-schema-required),
+        // NOT also the redundant config-field-required that the removed required-fields loop emitted.
+        assertTrue("config-field-required must no longer be emitted for a missing schema",
+                result.issues().stream().noneMatch(i -> "config-field-required".equals(i.rule())));
+        long errorCount = result.issues().stream()
+                .filter(i -> i.severity() == ValidationIssue.Severity.ERROR).count();
+        assertEquals("a missing schema should raise exactly one ERROR", 1, errorCount);
     }
 
     public void testInvalidSchemaTriggersWarning() throws Exception {
@@ -354,5 +400,60 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
         assertNotNull("File should exist before delete: " + relativePath, file);
         WriteAction.run(() -> file.delete(this));
         refreshVfs();
+    }
+
+    // ---------------------------------------------------------------
+    // CLI-authoritative merge (OpenSpecValidateAction.combineWithCli)
+    // ---------------------------------------------------------------
+
+    /** A clean CLI verdict, as if `openspec validate` reported every spec/change valid. */
+    private static ValidationResult cleanCli() {
+        return new ValidationResult(true, List.of(), "cli");
+    }
+
+    public void testCliAuthoritativeCleanCliIsNotOverriddenByBuiltInSpecErrors() throws Exception {
+        // Anti-vacuous: the project has a genuinely broken spec (no `### Requirement:` block →
+        // spec-requirement-required ERROR in the built-in validator) but a clean config. With the CLI
+        // reporting specs valid, the whole-project verdict must PASS — the built-in validator's own
+        // spec ERROR must not leak in. This fails if the old `merge(validateAll(), cli)` (which runs
+        // the full built-in over specs) is restored.
+        overwriteFile("openspec/config.yaml", "schema: spec-driven\n");
+        myFixture.addFileToProject("openspec/specs/broken/spec.md",
+                "# Broken\n\nNo requirements section at all.\n");
+        refreshVfs();
+
+        ValidationResult result = com.johnnyblabs.openspec.actions.OpenSpecValidateAction
+                .combineWithCli(validator, com.johnnyblabs.openspec.actions.ValidateTarget.wholeProject(), cleanCli());
+
+        assertTrue("clean CLI + clean config must pass despite a built-in spec ERROR", result.passed());
+        assertTrue("the built-in's spec-requirement-required must NOT enter the verdict",
+                result.issues().stream().noneMatch(i -> "spec-requirement-required".equals(i.rule())));
+    }
+
+    public void testCliAuthoritativeConfigErrorStillFailsWhenCliClean() throws Exception {
+        // The built-in validator still owns config.yaml: a clean CLI does not excuse a missing schema.
+        overwriteFile("openspec/config.yaml", "version: \"1.2.0\"\n");  // no schema
+        refreshVfs();
+
+        ValidationResult result = com.johnnyblabs.openspec.actions.OpenSpecValidateAction
+                .combineWithCli(validator, com.johnnyblabs.openspec.actions.ValidateTarget.wholeProject(), cleanCli());
+
+        assertFalse("a missing schema must fail even when the CLI reports specs valid", result.passed());
+        assertTrue("the failure is the built-in config-schema-required ERROR",
+                result.issues().stream().anyMatch(i -> "config-schema-required".equals(i.rule())));
+    }
+
+    public void testCliAuthoritativeSingleItemDefersEntirelyToCli() throws Exception {
+        // For a single spec/change target there is no config component: a broken config must not
+        // affect a single-item verdict that defers to the CLI.
+        overwriteFile("openspec/config.yaml", "version: \"1.2.0\"\n");  // no schema — broken
+        refreshVfs();
+
+        ValidationResult result = com.johnnyblabs.openspec.actions.OpenSpecValidateAction
+                .combineWithCli(validator, com.johnnyblabs.openspec.actions.ValidateTarget.spec("anything"), cleanCli());
+
+        assertTrue("single-item target defers to the CLI; broken config is not merged in", result.passed());
+        assertTrue("no config issue is merged for a single-item target",
+                result.issues().stream().noneMatch(i -> i.rule() != null && i.rule().startsWith("config-")));
     }
 }

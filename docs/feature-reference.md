@@ -294,12 +294,12 @@ Validates all specs, changes, and config files. A summary notification names the
 
 | Mode | Behavior |
 |------|----------|
-| **Built-in** | Always available. Validates spec format, delta spec structure, and config. |
-| **CLI-enhanced** | When CLI is installed: runs `openspec validate --all` for full validation including schema rules. |
+| **CLI available** | The CLI's own verdict is authoritative for specs and changes (`openspec validate --all`) — the plugin never reports a spec/change error the CLI wouldn't. The built-in validator still checks `config.yaml`, which the CLI's `validate` does not inspect. |
+| **CLI absent** | The built-in validator is the full fallback: spec format, delta-spec structure, and config. Its severities match the CLI's default-mode verdict, so it is never stricter than the CLI — e.g. a missing spec title is a warning and a scenario's missing `WHEN`/`THEN` is an info hint, while a requirement with no scenario is an error (as the CLI reports it). |
 
 **Results in the console (grouped, colored, navigable).** The console report opens with a verdict line naming the target (e.g. `Validation FAILED — Change x`) and an error/warning/info count line, then groups issues under a per-file header — files containing an error first, then warning-only, then info-only, and within a file by line. Each issue's location renders as a clickable `file:line` link that opens the file at that line when the path resolves on disk; issues the CLI reports against a non-filesystem identifier degrade to plain, still-colored text rather than a dead link. ERROR, WARNING, and INFO each render in a distinct, theme-driven color, and a clean run shows a concise `✓ Validation PASSED` confirmation. This is the shared report for every Validate surface (toolbar and the Project-View scoped Validate below); file headers are grouping keys only — no per-file valid/invalid verdict is invented.
 
-**Project View context menu > Validate OpenSpec.** Right-click a file under `openspec/` in the standard Project view to validate *its* item in place, scoped to what you clicked: a file under `openspec/specs/<capability>/` validates that spec; a file under an active `openspec/changes/<name>/` validates that change; a file under `openspec/changes/archive/`, the `openspec/` root, or `config.yaml` (and any selection spanning multiple items) falls back to validating the whole project. The menu item appears only when the selection is under `openspec/`. It reuses the same built-in-plus-CLI pipeline (the CLI call is scoped, e.g. `openspec validate <id> --type change|spec`) and reports to the same console — no per-file valid/invalid verdict is invented.
+**Project View context menu > Validate OpenSpec.** Right-click a file under `openspec/` in the standard Project view to validate *its* item in place, scoped to what you clicked: a file under `openspec/specs/<capability>/` validates that spec; a file under an active `openspec/changes/<name>/` validates that change; a file under `openspec/changes/archive/`, the `openspec/` root, or `config.yaml` (and any selection spanning multiple items) falls back to validating the whole project. The menu item appears only when the selection is under `openspec/`. It reuses the same CLI-authoritative pipeline (the CLI call is scoped, e.g. `openspec validate <id> --type change|spec`) and reports to the same console — no per-file valid/invalid verdict is invented.
 
 Validation also runs automatically at phase transitions (e.g., before archive).
 
@@ -323,7 +323,7 @@ Access via **Settings > Tools > OpenSpec** (or **Preferences > Tools > OpenSpec*
 |---------|---------|
 | **Schema profile** | Workflow profile: `spec-driven`, `tdd`, `rapid`, or custom. |
 | **Auto-refresh** | Automatically refresh the tree when OpenSpec files change on disk. |
-| **Strict validation** | Treat warnings as errors during validation. |
+| **Strict validation** | Plugin-side only: promotes the built-in validator's warnings to errors. This is independent of the OpenSpec CLI's own `--strict` flag and is never passed to the CLI. |
 
 ### Config Profile
 
