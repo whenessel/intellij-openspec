@@ -23,10 +23,9 @@
 - [x] 4.1 In `BuiltInValidator.validateConfig`, demote `config-schema-required` from ERROR to WARNING and remove the redundant `config-field-required` loop. Verified against the real CLI: `openspec validate` never fails on any `config.yaml` state (missing/empty/unknown schema, even malformed YAML all validate clean), so config checks must never fail the verdict. Config validation now emits no ERROR at all.
 - [x] 4.2 Mirror the demotion in `ConfigValidationInspection` (missing-schema squiggle ERROR → WARNING). Leave `VersionSupport.getRequiredConfigFields()` in place for future baselines but no longer wired to a duplicate check; inline comments explain both.
 
-## 5. strictValidation documentation
+## 5. strictValidation — descoped from this change
 
-- [x] 5.1 Add a code comment on the `strictValidation` setting (and its consumers in `BuiltInValidator`/`SpecSyncService`) clarifying it is plugin-only and never passed to the CLI as `--strict`.
-- [x] 5.2 Ensure the settings-panel label/description conveys "plugin-side: warnings become errors (not the CLI's --strict)".
+- [x] 5.1 `strictValidation` is deliberately NOT touched by this change. On-model (openspec-guru) and UX (plugin-ui-specialist) review found the persistent setting is off-model — upstream models strict only as a per-invocation `--strict` flag with no durable state, and the plugin's setting escalates a plugin-invented rule (`change-artifact-missing`) rather than the CLI's strict rules. Removing it (and reworking `change-artifact-missing` → always-WARNING plugin lint, detaching the `SpecSyncService` guard from the "strict" label, and optionally a per-run "Validate (strict)" action) is deferred to a separate `remove-strict-validation-setting` change so this parity fix stays focused. This change makes no claim about strict.
 
 ## 6. Tests
 

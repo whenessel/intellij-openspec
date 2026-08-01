@@ -323,7 +323,7 @@ Access via **Settings > Tools > OpenSpec** (or **Preferences > Tools > OpenSpec*
 |---------|---------|
 | **Schema profile** | Workflow profile: `spec-driven`, `tdd`, `rapid`, or custom. |
 | **Auto-refresh** | Automatically refresh the tree when OpenSpec files change on disk. |
-| **Strict validation** | Plugin-side only: promotes the built-in validator's warnings to errors. This is independent of the OpenSpec CLI's own `--strict` flag and is never passed to the CLI. |
+| **Strict validation** | Treat warnings as errors during validation. |
 
 ### Config Profile
 

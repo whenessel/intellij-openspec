@@ -15,8 +15,7 @@ The plugin runs its own `BuiltInValidator` and merges it with the CLI as `passed
 - Config validation is made non-failing: `config-schema-required` ERROR → WARNING, and the redundant `config-field-required` for `schema` is removed. Verified against the real CLI — `openspec validate` never fails on any `config.yaml` state (missing/empty/unknown schema, even malformed YAML all validate clean; upstream defaults a missing schema to `spec-driven`). So config checks are non-failing hygiene nudges only; failing on them would make the plugin stricter than the client.
 - **`spec-scenario-required` stays ERROR.** Contrary to the initial audit, capturing the real 1.6.0 CLI shows a scenarioless main-spec requirement is `valid:false` — it fires a Zod `.min(1)` ERROR (`base.schema.js`) in addition to the WARNING guide (`validator.js`). Demoting it would make the plugin *laxer* than the CLI, so it is left as ERROR (and the delta path's `delta-requirement-scenario` stays ERROR too).
 
-**Housekeeping:**
-- Document that the plugin's `strictValidation` setting is plugin-only and never the CLI's `--strict`.
+**Out of scope — `strictValidation`:** this change deliberately does not touch the plugin's `strictValidation` setting. On-model and UX review found the persistent setting is off-model (upstream models strict only as a per-invocation `--strict` flag with no durable state, and the plugin's setting escalates a plugin-invented rule rather than the CLI's strict rules). Reworking it — likely removing the persistent setting in favor of a per-run strict choice — is tracked as a separate `remove-strict-validation-setting` change so this parity fix stays focused.
 
 Not in scope: no per-CLI-version rule engine and no version selector — deferring to the live CLI already gives real parity for every version, and this session established there is no reliable per-project CLI-version stamp to key rules off. The `version:`/`profile:` config-pollution cleanup (the plugin's scaffolding writes plugin-only fields into `config.yaml`) is a separate follow-up.
 
@@ -26,7 +25,7 @@ Not in scope: no per-CLI-version rule engine and no version selector — deferri
 <!-- none -->
 
 ### Modified Capabilities
-- `validation`: Introduces a CLI-authoritative merge — when the CLI validates specs/changes, its verdict wins and the built-in validator contributes only `config.yaml` checks; the built-in validator remains the full fallback when the CLI is absent, with the two main-spec severities the CLI reports valid (`spec-title-required` → WARNING, `spec-scenario-clauses` → INFO) demoted so that fallback verdict never exceeds the CLI's (`spec-scenario-required` stays ERROR — the CLI fails it); the redundant `config-field-required`-for-`schema` ERROR is removed; and the plugin-only nature of `strictValidation` is made explicit.
+- `validation`: Introduces a CLI-authoritative merge — when the CLI validates specs/changes, its verdict wins and the built-in validator contributes only `config.yaml` checks; the built-in validator remains the full fallback when the CLI is absent, with the two main-spec severities the CLI reports valid (`spec-title-required` → WARNING, `spec-scenario-clauses` → INFO) demoted so that fallback verdict never exceeds the CLI's (`spec-scenario-required` stays ERROR — the CLI fails it); and the redundant `config-field-required`-for-`schema` ERROR is removed. (`strictValidation` is left untouched — its rework is a separate change.)
 
 ## Impact
 

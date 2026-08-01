@@ -18,7 +18,7 @@ The CLI's `validate` command validates specs and change deltas but **never reads
 **Non-Goals:**
 - No per-CLI-version rule engine and no version selector. Deferring to the live CLI already yields real parity for every installed version; and this session established there is no reliable on-disk stamp of a project's authored CLI version to branch rules on. The built-in fallback tracks a single current generation (1.6).
 - Not adding any check where the plugin is currently *laxer* than the CLI (e.g. `## Purpose`-required, delta-body SHALL/MUST). The principle is one-directional: never *more* strict.
-- Not passing `--strict` to the CLI, and not changing what the plugin's `strictValidation` setting does (only documenting it).
+- Not passing `--strict` to the CLI, and not touching the plugin's `strictValidation` setting at all — its rework (the setting is off-model per on-model + UX review) is deferred to a separate `remove-strict-validation-setting` change.
 - Not doing the `version:`/`profile:` config-pollution cleanup here (separate follow-up).
 
 ## Decisions
@@ -40,7 +40,7 @@ Implementation: `runValidation` calls `validator.validateConfig()` for the confi
 
 **5. Remove the redundant `config-field-required` ERROR for `schema`.** `getRequiredConfigFields()` returns `{schema}` only, so the required-fields loop's sole effect is a duplicate ERROR for a missing `schema:` that `config-schema-required` already reports. Remove the loop; `config-schema-required` is the single source. `getRequiredConfigFields()` stays on `VersionSupport` for future baselines.
 
-**6. Document `strictValidation` as plugin-only.** A note in the spec and a code comment clarifying it escalates plugin WARNINGs to ERRORs within the built-in validator and is never the CLI's `--strict`. No behavior change.
+**6. Leave `strictValidation` untouched (deferred).** An initial draft of this change documented `strictValidation` as "plugin-only, never `--strict`." On-model review (openspec-guru) and UX review (plugin-ui-specialist) then found the persistent setting is off-model — upstream models strict only as a per-invocation flag with no durable state, and the plugin's setting escalates a plugin-invented rule (`change-artifact-missing`), not the CLI's strict rules. Rather than document (and thereby entrench) that, this change removes all strict references and defers the rework to a separate `remove-strict-validation-setting` change (likely: drop the persistent setting; `change-artifact-missing` → always-WARNING plugin lint; detach the `SpecSyncService` guard from the "strict" label; optionally a per-run "Validate (strict)" choice).
 
 ## Risks / Trade-offs
 

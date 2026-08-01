@@ -30,18 +30,6 @@ Because the CLI's `validate` never reads `openspec/config.yaml`, the built-in va
 - **WHEN** the captured real 1.6.0 CLI `--json` fixture is parsed
 - **THEN** the plugin's per-item pass/fail SHALL equal each item's `valid` field for every item in the fixture
 
-### Requirement: Plugin strict-validation is independent of the CLI's --strict
-
-The plugin's `strictValidation` setting SHALL be understood and documented as a plugin-only concept, distinct from the OpenSpec CLI's `--strict` flag. When enabled, it escalates selected plugin-side WARNING rules (e.g. `change-artifact-missing`) to ERROR within the built-in validator. The plugin SHALL NOT pass `--strict` to the CLI as a consequence of this setting; the CLI SHALL always be invoked in its default mode. With the setting disabled (the default), the built-in validator's fallback verdict SHALL NOT exceed the CLI's default-mode verdict for any input the CLI validates.
-
-#### Scenario: Strict setting does not alter the CLI invocation
-- **WHEN** `strictValidation` is enabled and a Validate run shells out to the CLI
-- **THEN** the CLI command SHALL NOT include `--strict`; the setting affects only built-in severities
-
-#### Scenario: Default setting keeps parity with the CLI default verdict
-- **WHEN** `strictValidation` is disabled (default) and a project is validated with the CLI absent
-- **THEN** the built-in fallback SHALL NOT fail any item that `openspec validate` (default mode) reports valid
-
 ## MODIFIED Requirements
 
 ### Requirement: Spec format validation
