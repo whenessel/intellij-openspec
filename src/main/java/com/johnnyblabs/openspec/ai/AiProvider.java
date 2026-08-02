@@ -4,7 +4,10 @@ import java.util.List;
 
 public enum AiProvider {
     NONE("None", List.of()),
-    CLAUDE("Claude", List.of("claude-sonnet-4-5-20250514", "claude-opus-4-20250514", "claude-haiku-4-5-20251001")),
+    // Dateless aliases: Anthropic resolves these to the current snapshot server-side, so the
+    // default (models.get(0)) is always a live model and the list does not need a date bump each
+    // release. Pinning a dated snapshot here previously shipped a fabricated ID that 404'd.
+    CLAUDE("Claude", List.of("claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5")),
     OPENAI("OpenAI", List.of("gpt-4o", "gpt-4o-mini", "o1-mini")),
     GEMINI("Gemini", List.of("gemini-2.5-pro", "gemini-2.5-flash"));
 

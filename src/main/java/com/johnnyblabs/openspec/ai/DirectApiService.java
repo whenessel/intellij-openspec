@@ -138,7 +138,17 @@ public final class DirectApiService {
         }
     }
 
-    private String callClaude(String apiKey, String model, String prompt) throws AiApiException {
+    /**
+     * The required Anthropic API version. This is a fixed, enumerated header value — feature
+     * opt-ins ship via {@code anthropic-beta}, not new version dates — so it is stable.
+     */
+    static final String ANTHROPIC_VERSION = "2023-06-01";
+
+    /**
+     * Builds a Claude Messages API request. Extracted (mirroring {@link #buildGeminiRequest})
+     * so the required {@code anthropic-version} header value is assertable in a unit test.
+     */
+    static HttpRequest buildClaudeRequest(String model, String apiKey, String prompt) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty("max_tokens", MAX_TOKENS);
@@ -150,28 +160,38 @@ public final class DirectApiService {
         messages.add(message);
         body.add("messages", messages);
 
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(CLAUDE_API_URL))
-                    .header("Content-Type", "application/json")
-                    .header("x-api-key", apiKey)
-                    .header("anthropic-version", "2024-06-01")
-                    .timeout(TIMEOUT)
-                    .POST(HttpRequest.BodyPublishers.ofString(new Gson().toJson(body)))
-                    .build();
+        return HttpRequest.newBuilder()
+                .uri(URI.create(CLAUDE_API_URL))
+                .header("Content-Type", "application/json")
+                .header("x-api-key", apiKey)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .timeout(TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(new Gson().toJson(body)))
+                .build();
+    }
 
+    /**
+     * Extracts the generated text from a Claude Messages API response body. Extracted for
+     * contract-testing against captured provider example output.
+     */
+    static String parseClaudeResponse(String body) throws AiApiException {
+        JsonObject responseJson = JsonParser.parseString(body).getAsJsonObject();
+        JsonArray content = responseJson.getAsJsonArray("content");
+        if (content != null && content.size() > 0) {
+            return content.get(0).getAsJsonObject().get("text").getAsString();
+        }
+        throw new AiApiException("Empty response from Claude API");
+    }
+
+    private String callClaude(String apiKey, String model, String prompt) throws AiApiException {
+        try {
+            HttpRequest request = buildClaudeRequest(model, apiKey, prompt);
             HttpResponse<String> response = createHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
                 throw buildApiError("Claude", response.statusCode(), response.body());
             }
-
-            JsonObject responseJson = JsonParser.parseString(response.body()).getAsJsonObject();
-            JsonArray content = responseJson.getAsJsonArray("content");
-            if (content != null && content.size() > 0) {
-                return content.get(0).getAsJsonObject().get("text").getAsString();
-            }
-            throw new AiApiException("Empty response from Claude API");
+            return parseClaudeResponse(response.body());
         } catch (AiApiException e) {
             throw e;
         } catch (Exception e) {
@@ -180,14 +200,26 @@ public final class DirectApiService {
     }
 
     /**
-     * Returns the token limit parameter name for the given OpenAI model.
-     * o1-series models use "max_completion_tokens"; all others use "max_tokens".
+     * Returns the token-limit parameter name for the given OpenAI model. The reasoning family
+     * ({@code o1}/{@code o3}/{@code o4}/{@code gpt-5}) rejects {@code max_tokens} and requires
+     * {@code max_completion_tokens}; non-reasoning chat models use {@code max_tokens}.
      */
     static String openAiTokenParam(String model) {
-        return model.startsWith("o1") ? "max_completion_tokens" : "max_tokens";
+        if (model == null) return "max_tokens";
+        for (String prefix : REASONING_MODEL_PREFIXES) {
+            if (model.startsWith(prefix)) return "max_completion_tokens";
+        }
+        return "max_tokens";
     }
 
-    private String callOpenAi(String apiKey, String model, String prompt) throws AiApiException {
+    private static final java.util.List<String> REASONING_MODEL_PREFIXES =
+            java.util.List.of("o1", "o3", "o4", "gpt-5");
+
+    /**
+     * Builds an OpenAI Chat Completions request. Extracted (mirroring {@link #buildGeminiRequest})
+     * so the model-dependent token-limit parameter placement is assertable.
+     */
+    static HttpRequest buildOpenAiRequest(String model, String apiKey, String prompt) {
         JsonObject body = new JsonObject();
         body.addProperty("model", model);
         body.addProperty(openAiTokenParam(model), MAX_TOKENS);
@@ -199,29 +231,39 @@ public final class DirectApiService {
         messages.add(message);
         body.add("messages", messages);
 
-        try {
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(OPENAI_API_URL))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + apiKey)
-                    .timeout(TIMEOUT)
-                    .POST(HttpRequest.BodyPublishers.ofString(new Gson().toJson(body)))
-                    .build();
+        return HttpRequest.newBuilder()
+                .uri(URI.create(OPENAI_API_URL))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + apiKey)
+                .timeout(TIMEOUT)
+                .POST(HttpRequest.BodyPublishers.ofString(new Gson().toJson(body)))
+                .build();
+    }
 
+    /**
+     * Extracts the generated text from an OpenAI Chat Completions response body. Extracted for
+     * contract-testing against captured provider example output.
+     */
+    static String parseOpenAiResponse(String body) throws AiApiException {
+        JsonObject responseJson = JsonParser.parseString(body).getAsJsonObject();
+        JsonArray choices = responseJson.getAsJsonArray("choices");
+        if (choices != null && choices.size() > 0) {
+            return choices.get(0).getAsJsonObject()
+                    .getAsJsonObject("message")
+                    .get("content").getAsString();
+        }
+        throw new AiApiException("Empty response from OpenAI API");
+    }
+
+    private String callOpenAi(String apiKey, String model, String prompt) throws AiApiException {
+        try {
+            HttpRequest request = buildOpenAiRequest(model, apiKey, prompt);
             HttpResponse<String> response = createHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
                 throw buildApiError("OpenAI", response.statusCode(), response.body());
             }
-
-            JsonObject responseJson = JsonParser.parseString(response.body()).getAsJsonObject();
-            JsonArray choices = responseJson.getAsJsonArray("choices");
-            if (choices != null && choices.size() > 0) {
-                return choices.get(0).getAsJsonObject()
-                        .getAsJsonObject("message")
-                        .get("content").getAsString();
-            }
-            throw new AiApiException("Empty response from OpenAI API");
+            return parseOpenAiResponse(response.body());
         } catch (AiApiException e) {
             throw e;
         } catch (Exception e) {
@@ -260,6 +302,23 @@ public final class DirectApiService {
                 .build();
     }
 
+    /**
+     * Extracts the generated text from a Gemini generateContent response body. Extracted for
+     * contract-testing against captured provider example output.
+     */
+    static String parseGeminiResponse(String body) throws AiApiException {
+        JsonObject responseJson = JsonParser.parseString(body).getAsJsonObject();
+        JsonArray candidates = responseJson.getAsJsonArray("candidates");
+        if (candidates != null && candidates.size() > 0) {
+            JsonObject content = candidates.get(0).getAsJsonObject().getAsJsonObject("content");
+            JsonArray responseParts = content.getAsJsonArray("parts");
+            if (responseParts != null && responseParts.size() > 0) {
+                return responseParts.get(0).getAsJsonObject().get("text").getAsString();
+            }
+        }
+        throw new AiApiException("Empty response from Gemini API");
+    }
+
     private String callGemini(String apiKey, String model, String prompt) throws AiApiException {
         try {
             HttpRequest request = buildGeminiRequest(model, apiKey, prompt);
@@ -268,17 +327,7 @@ public final class DirectApiService {
             if (response.statusCode() != 200) {
                 throw buildApiError("Gemini", response.statusCode(), response.body());
             }
-
-            JsonObject responseJson = JsonParser.parseString(response.body()).getAsJsonObject();
-            JsonArray candidates = responseJson.getAsJsonArray("candidates");
-            if (candidates != null && candidates.size() > 0) {
-                JsonObject content = candidates.get(0).getAsJsonObject().getAsJsonObject("content");
-                JsonArray responseParts = content.getAsJsonArray("parts");
-                if (responseParts != null && responseParts.size() > 0) {
-                    return responseParts.get(0).getAsJsonObject().get("text").getAsString();
-                }
-            }
-            throw new AiApiException("Empty response from Gemini API");
+            return parseGeminiResponse(response.body());
         } catch (AiApiException e) {
             throw e;
         } catch (Exception e) {

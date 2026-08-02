@@ -118,6 +118,13 @@ tasks.jacocoTestReport {
 // just below current coverage. New-code test quality is governed by the OpenSpec `tasks`
 // rule ("tests SHALL verify real behavior") and the CLAUDE.md contract-test convention.
 //
+// BASELINE (measured 2026-08-02, fix-direct-api-provider-compliance): INSTRUCTION 39.30%,
+// LINE 36.96%, BRANCH 36.32%. Raised from the 2026-07-23 add-validate-project-view-menu baseline
+// (INSTRUCTION 37.96%, LINE 35.68%, BRANCH 34.94%) by extracting the three Direct-API response
+// parsers + the Claude/OpenAI request builders into static seams and contract-testing them against
+// captured provider example responses — a block previously reachable only via a live HTTP call,
+// now deterministically covered. Floors raised to ~0.006 below measured (LINE kept a touch lower
+// for the known CLI-integration line-coverage wobble). Prior baseline detail retained below.
 // BASELINE (measured 2026-07-23, add-validate-project-view-menu): INSTRUCTION 37.96%,
 // LINE 35.68%, BRANCH 34.94%. (Raised from the add-tree-status-badges baseline — INSTRUCTION
 // 37.53%, LINE 35.28%, BRANCH 34.52% — by the Project-View scoped Validate work: the pure
@@ -160,21 +167,21 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "INSTRUCTION"
                 value = "COVEREDRATIO"
-                minimum = "0.373".toBigDecimal()
+                minimum = "0.387".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.350".toBigDecimal()
+                minimum = "0.362".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "BRANCH"
                 value = "COVEREDRATIO"
-                minimum = "0.343".toBigDecimal()
+                minimum = "0.356".toBigDecimal()
             }
         }
     }
