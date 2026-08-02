@@ -348,7 +348,10 @@ public final class CoordinationPanel extends JPanel {
         }
 
         if (toolbar != null) {
-            toolbar.updateActionsImmediately();
+            // updateActionsImmediately() is deprecated; updateActionsAsync() is the supported
+            // replacement. applyTier runs on the EDT (@RequiresEdt satisfied) and this is a
+            // fire-and-forget toolbar refresh, so the returned Future is intentionally ignored.
+            toolbar.updateActionsAsync();
         }
     }
 

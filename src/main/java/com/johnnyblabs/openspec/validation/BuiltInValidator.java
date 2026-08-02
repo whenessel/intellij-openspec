@@ -378,7 +378,7 @@ public final class BuiltInValidator {
                     || ApplicationManager.getApplication().isDispatchThread()) {
                 return new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
             }
-            return ReadAction.computeCancellable(() -> new String(file.contentsToByteArray(), StandardCharsets.UTF_8));
+            return ReadAction.compute(() -> new String(file.contentsToByteArray(), StandardCharsets.UTF_8));
         } catch (IOException e) {
             return null;
         }

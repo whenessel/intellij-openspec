@@ -151,7 +151,7 @@ public final class ChangeService {
                             metadata = yaml.loadAs(is, ChangeMetadata.class);
                         }
                     } else {
-                        metadata = ReadAction.computeCancellable(() -> {
+                        metadata = ReadAction.compute(() -> {
                             try (InputStream is = metaFile.getInputStream()) {
                                 Yaml yaml = new Yaml(new Constructor(ChangeMetadata.class, new LoaderOptions()));
                                 return yaml.loadAs(is, ChangeMetadata.class);
