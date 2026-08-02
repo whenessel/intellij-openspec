@@ -1,18 +1,15 @@
 name: UI Smoke Journeys
 
-# Execution policy (spec: ui-smoke-journeys): manual dispatch + release tags ONLY.
-# Never a required check on pull requests — UI tests boot a full IDE per journey and
-# are the flakiest test class; they gate releases, not merges.
-#
-# First-dispatch checklist (empirical runner verification, tasks.md 3.2): the runner
-# needs xvfb (Starter auto-starts a virtual display when DISPLAY is absent but the
-# xvfb binary must exist) and node/npm for the OpenSpec CLI used by the Update
-# journey. If the runner cannot satisfy these, the documented fallback applies:
-# run `gradle uiSmoke` locally as part of release-prep instead of CI.
+# Execution policy (spec: ui-smoke-journeys): MANUAL DISPATCH ONLY. The self-hosted
+# runner cannot boot a headful IDE (no virtual display), so an automatic run on a
+# release tag is a guaranteed false-red that gates nothing real — the actual
+# publish runs from GitHub's release.yml. The AUTHORITATIVE release gate is the
+# maintainer's local `caffeinate -dimsu ./gradlew uiSmoke` run during release-prep
+# (release-prep step 4b), never this CI job. This workflow is kept dispatchable so the
+# suite can be run on demand if the runner ever gains a display (xvfb + node/npm for
+# the OpenSpec CLI the Update/validate journeys need).
 on:
   workflow_dispatch:
-  push:
-    tags: ['v*']
 
 env:
   PATH: /opt/gradle-9.0.0/bin:/opt/apache-maven-3.9.9/bin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
