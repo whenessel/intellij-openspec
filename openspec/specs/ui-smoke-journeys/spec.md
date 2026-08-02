@@ -7,7 +7,7 @@ Automated rendered-UI smoke coverage: scope, journeys, execution policy, and fla
 
 ### Requirement: Rendered-UI smoke journeys exist
 
-The project SHALL maintain a small suite (currently seven) of automated UI smoke journeys that drive a real sandbox IDE with the plugin installed, asserting presence and wiring of rendered surfaces. Journeys SHALL assert component presence and wiring, not textual prose or pixels, and SHALL NOT mutate durable user state (dialog journeys exit via cancel; no archive is performed). A journey that must exercise state-writing actions SHALL isolate that state to journey-scoped temporary locations — e.g. an isolated OpenSpec data directory injected via the IDE process environment — so nothing outlives the journey or touches the user's real data.
+The project SHALL maintain a small suite (currently eleven) of automated UI smoke journeys that drive a real sandbox IDE with the plugin installed, asserting presence and wiring of rendered surfaces. Journeys SHALL assert component presence and wiring, not textual prose or pixels, and SHALL NOT mutate durable user state (dialog journeys exit via cancel; no archive is performed). A journey that must exercise state-writing actions SHALL isolate that state to journey-scoped temporary locations — e.g. an isolated OpenSpec data directory injected via the IDE process environment — so nothing outlives the journey or touches the user's real data.
 
 #### Scenario: Open-and-render journey
 - **WHEN** the smoke suite opens a seeded demo project
@@ -36,6 +36,22 @@ The project SHALL maintain a small suite (currently seven) of automated UI smoke
 #### Scenario: Validate-results journey (CLI-parsed errors reach the rendered results)
 - **WHEN** the smoke suite, on a 1.6+ host CLI, seeds a spec whose requirement lacks SHALL/MUST, opens the plugin tool window, and triggers the Validate action
 - **THEN** it SHALL assert the validation summary notification reports the failure and that the plugin's Console surface renders the CLI-parsed error line for that spec (identified by the CLI parser's `type/id` path form, not satisfiable by the built-in validator's duplicate); on a host CLI below 1.6 the journey SHALL be skipped, not failed
+
+#### Scenario: Spec-viewer preview journey
+- **WHEN** the smoke suite selects a spec's requirement node in the Browse tree (via the tree model API)
+- **THEN** it SHALL assert the preview pane renders the selected spec's markdown, detected by the preview pane's accessible name flipping to its rendered state (a surface visible only after the selection → pooled-read → render wiring fires)
+
+#### Scenario: Change-deltas preview journey
+- **WHEN** the smoke suite, on a 1.6+ host CLI, selects a change node whose seeded delta the consolidated view can badge
+- **THEN** it SHALL assert the preview pane renders the change's CLI-sourced deltas grouped by capability with operation badges, detected by the pane's badged-deltas accessible-name state; on a host CLI below 1.6 the journey SHALL be skipped, not failed
+
+#### Scenario: Grouped validation report journey
+- **WHEN** the smoke suite seeds a project with a deliberate spec error and a schemaless config, opens the tool window, and triggers the Validate action
+- **THEN** it SHALL assert the Console renders the structured report — the FAILED verdict line naming the target, the error/warning/info count line, the per-capability group headers, a severity label on a grouped row, and a clickable line-number token on the resolvable config warning — so the grouped, per-severity, hyperlinked format is exercised end to end
+
+#### Scenario: Validate (Strict) disclosure journey
+- **WHEN** the smoke suite opens the tool window and invokes the `OpenSpec.ValidateStrict` action
+- **THEN** it SHALL assert the strict run discloses itself in surfaces a default Validate never produces — the summary balloon title `Validate (strict)` and the Console echo of the `--strict` command flag — targeting the strict-specific wiring rather than the verdict
 
 ### Requirement: Smoke journeys never gate ordinary PRs
 
