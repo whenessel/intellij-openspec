@@ -55,7 +55,11 @@ public final class ExploreContextService {
         OpenSpecConfig config = configService.getConfig();
         if (config != null) {
             context.append("## Project Config\n");
-            context.append("- Version: ").append(config.getVersion()).append("\n");
+            // Only emit version: when present. It is a plugin-internal, display-only field the plugin
+            // no longer scaffolds; a schema-only config has none, and appending "Version: null" is noise.
+            if (config.getVersion() != null && !config.getVersion().isEmpty()) {
+                context.append("- Version: ").append(config.getVersion()).append("\n");
+            }
             if (config.getSchema() != null) {
                 context.append("- Schema: ").append(config.getSchema()).append("\n");
             }

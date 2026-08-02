@@ -105,15 +105,14 @@ public final class TemplateProvider {
                 """.formatted(status, LocalDate.now());
     }
 
-    public static String configYamlTemplate(String schema, String version) {
-        return """
-                schema: %s
-                version: "%s"
-                profile:
-                  name: default
-                context: ""
-                rules: {}
-                """.formatted(schema, version);
+    /**
+     * A fresh {@code openspec/config.yaml}, matching upstream {@code openspec init}: a single
+     * {@code schema:} line and nothing else. The plugin deliberately does NOT write the plugin-invented
+     * {@code version:}/{@code profile:} fields (upstream's Zod schema ignores them; they are cosmetic
+     * display-only) or empty {@code context:}/{@code rules:} — that pollutes a file upstream owns.
+     */
+    public static String configYamlTemplate(String schema) {
+        return "schema: %s\n".formatted(schema);
     }
 
 }

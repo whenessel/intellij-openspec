@@ -203,20 +203,19 @@ If your project doesn't have OpenSpec yet, initialize it:
    ```
 4. Check the **OpenSpec tool window** (right sidebar) — you should see a tree with **Specs**, **Changes**, and **Archive** nodes
 
-The `config.yaml` defines your project context. Open it and verify it looks reasonable:
+The scaffolded `config.yaml` declares your project's workflow schema — matching upstream `openspec init`:
 
 ```yaml
 schema: spec-driven
-version: "1.2.0"
-
-profile:
-  name: MyProject
-  description: A brief description of your project
-  language: Java 21
-  framework: Spring Boot 3.x
 ```
 
-> **Tip:** The more specific your `config.yaml` profile is, the better the AI-generated artifacts will be. Add your actual framework, language version, and a meaningful description.
+> **Tip:** Add a `context:` block describing your project — its language, framework, and purpose — to improve AI-generated artifacts. The Explore prompt includes your `config.yaml` `context:`, so the more specific it is, the better the results:
+>
+> ```yaml
+> schema: spec-driven
+> context: >
+>   A Spring Boot 3.x service in Java 21 that manages orders and payments.
+> ```
 
 ### Step 1: Propose a Change
 

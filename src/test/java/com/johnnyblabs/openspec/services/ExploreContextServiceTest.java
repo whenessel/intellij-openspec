@@ -89,6 +89,28 @@ class ExploreContextServiceTest {
             assertTrue(context.contains("**Rules:**"));
             assertTrue(context.contains("**services**: All services SHALL be project services"));
         }
+
+        @Test
+        void omitsVersionLineWhenVersionAbsent() {
+            // A schema-only config (the new scaffold shape) has no version:. The AI context must NOT
+            // emit "- Version: null" — the line is omitted entirely when the field is absent.
+            when(project.getService(ConfigService.class)).thenReturn(configService);
+            when(project.getService(ChangeService.class)).thenReturn(changeService);
+            when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
+            when(project.getBasePath()).thenReturn("/nonexistent");
+            when(changeService.getActiveChanges()).thenReturn(List.of());
+            when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
+
+            OpenSpecConfig config = new OpenSpecConfig(); // schema-only: no version:
+            config.setSchema("spec-driven");
+            when(configService.getConfig()).thenReturn(config);
+
+            String context = service.assembleContext();
+
+            assertFalse(context.contains("Version: null"), "must never emit 'Version: null'");
+            assertFalse(context.contains("- Version:"), "the Version: line is omitted entirely when absent");
+            assertTrue(context.contains("Schema: spec-driven"), "schema still appears");
+        }
     }
 
     @Nested
