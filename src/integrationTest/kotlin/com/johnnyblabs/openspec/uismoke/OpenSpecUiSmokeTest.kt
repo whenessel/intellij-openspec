@@ -97,6 +97,7 @@ class OpenSpecUiSmokeTest {
     @Remote("com.intellij.notification.Notification")
     interface NotificationRef {
         fun getContent(): String
+        fun getTitle(): String
     }
 
     private fun freshDemoProject(): Path {
@@ -203,6 +204,13 @@ class OpenSpecUiSmokeTest {
         return driver.utility(ActionCenterRef::class)
             .getNotifications(project)
             .map { it.getContent() }
+    }
+
+    private fun notificationTitles(driver: Driver): List<String> {
+        val project = driver.singleProject()
+        return driver.utility(ActionCenterRef::class)
+            .getNotifications(project)
+            .map { it.getTitle() }
     }
 
     /**
@@ -668,6 +676,50 @@ class OpenSpecUiSmokeTest {
                 // modes (the built-in always owns config), so the coverage doesn't depend on the host CLI.
                 waitUntil("console renders the clickable L<line> token for the config warning") {
                     hasSubtext("L1")
+                }
+            }
+        }
+    }
+
+    // ---- Journey 11 — Validate (Strict) discloses the strict run -------------------
+
+    /**
+     * Journey 11 — the per-run Validate (Strict) action (change remove-strict-validation-setting).
+     * Invoking OpenSpec.ValidateStrict runs a strict validation that DISCLOSES itself in two
+     * rendered surfaces a plain Validate never produces: the summary balloon's title is
+     * "Validate (strict)" (strict is never a silent mode), and the Console echoes the
+     * `openspec validate --strict` command line. Both disclosures are verdict-independent — the
+     * seeded demo project fails validation either way — so the assertions target the
+     * strict-SPECIFIC wiring, not the verdict: a default Validate run (title "Validate", a command
+     * line without `--strict`) cannot satisfy them. The strict SEMANTICS (warnings-count-as-
+     * failures verdict flip) are unit-tested in OpenSpecValidateStrictTest / the summaryText and
+     * applyStrictFallbackVerdict tests; this journey covers the action→run→disclosure UI wiring.
+     */
+    @Test
+    fun validateStrictActionDisclosesStrictRun() {
+        newContext(freshDemoProject()).runIdeWithDriver().useDriverAndCloseIde {
+            waitForIndicators(5.minutes)
+
+            // Show the tool window so the Console panel is registered — otherwise Validate falls
+            // back to a summary-only notification and the `--strict` command echo has no surface.
+            withContext(OnDispatcher.EDT) { getToolWindow("OpenSpec").show() }
+            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Specs") } }
+
+            invokeAction("OpenSpec.ValidateStrict", now = true)
+
+            // Stop 1: the strict run discloses itself in the summary balloon — its title is
+            // "Validate (strict)" (a default Validate titles it "Validate"), so strict is never a
+            // silent mode. Verdict-independent; read from the notification title, not its body.
+            waitUntil("strict validation balloon titled 'Validate (strict)'", timeout = 3.minutes) {
+                notificationTitles(this).any { it.contains("Validate (strict)") }
+            }
+
+            // Stop 2: the Console echoes the `openspec validate --strict` command line — the
+            // strict-specific `--strict` flag a default Validate never emits, proving the strict
+            // path (not the default) ran end to end.
+            ideFrame {
+                waitUntil("console echoes the --strict flag", timeout = 2.minutes) {
+                    hasSubtext("--strict")
                 }
             }
         }
