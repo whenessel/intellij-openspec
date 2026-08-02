@@ -158,63 +158,32 @@ class TemplateProviderTest {
 
     @Test
     void configYamlTemplate_isValidYaml() {
-        String result = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
+        String result = TemplateProvider.configYamlTemplate("spec-driven");
         Yaml yaml = new Yaml();
         Map<String, Object> parsed = yaml.load(result);
         assertNotNull(parsed, "Must produce valid YAML");
     }
 
     @Test
-    void configYamlTemplate_hasSchemaAndVersion() {
-        String result = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
+    void configYamlTemplate_isSchemaOnly() {
+        // Matches upstream `openspec init` — a single schema: line and nothing else. The plugin no
+        // longer writes the plugin-invented version:/profile: or empty context:/rules: into a fresh
+        // config.yaml (they were display-only fields upstream ignores).
+        String result = TemplateProvider.configYamlTemplate("spec-driven");
         Yaml yaml = new Yaml();
         Map<String, Object> parsed = yaml.load(result);
 
         assertEquals("spec-driven", parsed.get("schema"));
-        assertEquals("1.2.0", parsed.get("version"));
-    }
-
-    @Test
-    void configYamlTemplate_hasProfile() {
-        String result = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
-        Yaml yaml = new Yaml();
-        Map<String, Object> parsed = yaml.load(result);
-
-        assertNotNull(parsed.get("profile"), "config must have profile");
-        @SuppressWarnings("unchecked")
-        Map<String, Object> profile = (Map<String, Object>) parsed.get("profile");
-        assertEquals("default", profile.get("name"));
-    }
-
-    @Test
-    void configYamlTemplate_contextIsString() {
-        String result = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
-        Yaml yaml = new Yaml();
-        Map<String, Object> parsed = yaml.load(result);
-
-        // context must be a string (not a list) per OpenSpec 1.2.0
-        Object context = parsed.get("context");
-        assertTrue(context instanceof String,
-                "context must be a String per OpenSpec 1.2.0, got: " +
-                        (context != null ? context.getClass().getSimpleName() : "null"));
-    }
-
-    @Test
-    void configYamlTemplate_rulesIsMap() {
-        String result = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
-        Yaml yaml = new Yaml();
-        Map<String, Object> parsed = yaml.load(result);
-
-        // rules must be a map (not a list) per OpenSpec 1.2.0
-        Object rules = parsed.get("rules");
-        assertTrue(rules instanceof Map,
-                "rules must be a Map per OpenSpec 1.2.0, got: " +
-                        (rules != null ? rules.getClass().getSimpleName() : "null"));
+        assertEquals(1, parsed.size(), "schema-only config has exactly one key");
+        assertFalse(parsed.containsKey("version"), "no plugin-invented version: is written");
+        assertFalse(parsed.containsKey("profile"), "no plugin-invented profile: is written");
+        assertFalse(parsed.containsKey("context"), "no empty context: is written");
+        assertFalse(parsed.containsKey("rules"), "no empty rules: is written");
     }
 
     @Test
     void configYamlTemplate_schemaParameterApplied() {
-        String tdd = TemplateProvider.configYamlTemplate("tdd", "1.2.0");
+        String tdd = TemplateProvider.configYamlTemplate("tdd");
         Yaml yaml = new Yaml();
         Map<String, Object> parsed = yaml.load(tdd);
         assertEquals("tdd", parsed.get("schema"));

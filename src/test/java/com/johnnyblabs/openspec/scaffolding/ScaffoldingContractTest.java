@@ -34,18 +34,19 @@ class ScaffoldingContractTest {
 
     @Test
     void configTemplate_isParsableBySnakeYaml() {
-        String template = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
+        String template = TemplateProvider.configYamlTemplate("spec-driven");
         Yaml yaml = new Yaml(new Constructor(OpenSpecConfig.class, new LoaderOptions()));
         OpenSpecConfig config = yaml.loadAs(template, OpenSpecConfig.class);
 
         assertNotNull(config);
         assertEquals("spec-driven", config.getSchema());
-        assertEquals("1.2.0", config.getVersion());
+        assertNull(config.getVersion(),
+                "schema-only template writes no version: (matches upstream openspec init)");
     }
 
     @Test
     void configTemplate_schemaIsRecognizedByVersionSupport() {
-        String template = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
+        String template = TemplateProvider.configYamlTemplate("spec-driven");
         Yaml yaml = new Yaml(new Constructor(OpenSpecConfig.class, new LoaderOptions()));
         OpenSpecConfig config = yaml.loadAs(template, OpenSpecConfig.class);
 
@@ -75,7 +76,7 @@ class ScaffoldingContractTest {
         settings.setDefaultSchema("workspace-planning");
 
         String schema = settings.getEffectiveSchema(project);
-        String template = TemplateProvider.configYamlTemplate(schema, "1.2.0");
+        String template = TemplateProvider.configYamlTemplate(schema);
 
         Yaml yaml = new Yaml(new Constructor(OpenSpecConfig.class, new LoaderOptions()));
         OpenSpecConfig config = yaml.loadAs(template, OpenSpecConfig.class);
@@ -93,7 +94,7 @@ class ScaffoldingContractTest {
         settings.setDefaultSchema("");
 
         String schema = settings.getEffectiveSchema(project);
-        String template = TemplateProvider.configYamlTemplate(schema, "1.2.0");
+        String template = TemplateProvider.configYamlTemplate(schema);
 
         Yaml yaml = new Yaml(new Constructor(OpenSpecConfig.class, new LoaderOptions()));
         OpenSpecConfig config = yaml.loadAs(template, OpenSpecConfig.class);
@@ -116,13 +117,14 @@ class ScaffoldingContractTest {
     @Test
     void configTemplate_passesBuiltInValidation() {
         // Validate the same checks BuiltInValidator.validateConfig() does
-        String template = TemplateProvider.configYamlTemplate("spec-driven", "1.2.0");
+        String template = TemplateProvider.configYamlTemplate("spec-driven");
         Yaml yaml = new Yaml(new Constructor(OpenSpecConfig.class, new LoaderOptions()));
         OpenSpecConfig config = yaml.loadAs(template, OpenSpecConfig.class);
 
         assertNotNull(config.getSchema(), "schema must not be null");
         assertFalse(config.getSchema().isEmpty(), "schema must not be empty");
-        assertFalse(config.getProfile().isEmpty(), "profile should not be empty");
+        assertTrue(config.getProfile() == null || config.getProfile().isEmpty(),
+                "schema-only config writes no profile: entries (validation accepts its absence)");
     }
 
     // --- Change artifacts match v1.2.0 required set ---
