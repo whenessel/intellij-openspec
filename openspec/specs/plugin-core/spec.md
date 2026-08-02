@@ -7,7 +7,7 @@ Core infrastructure: project detection, configuration, file operations, API comp
 
 ### Requirement: Project detection and initialization
 
-The plugin SHALL detect OpenSpec projects by checking for `openspec/` and provide initialization via CLI delegation with built-in fallback. The built-in fallback SHALL honor the user's configured Default schema preference when writing `openspec/config.yaml`, falling back to `spec-driven` only when no preference is set.
+The plugin SHALL detect OpenSpec projects by checking for `openspec/` and provide initialization via CLI delegation with built-in fallback. The built-in fallback SHALL honor the user's configured Default schema preference when writing `openspec/config.yaml`, falling back to `spec-driven` only when no preference is set. The built-in fallback SHALL write **only the fields upstream `openspec init` writes** — a `schema:` line and nothing else — and SHALL NOT write plugin-invented fields (`version:`, `profile:`) or empty upstream fields (`context: ""`, `rules: {}`) that upstream's Zod schema ignores. The plugin MAY still read `version:`/`profile:` from an existing (legacy) `config.yaml` for display, but SHALL NOT emit them into a config it generates.
 
 #### Scenario: Project detection
 - **WHEN** a project is opened in the IDE
@@ -28,6 +28,14 @@ The plugin SHALL detect OpenSpec projects by checking for `openspec/` and provid
 #### Scenario: Default schema fallback when unset
 - **WHEN** the user has not set Default schema (the setting is empty), and the built-in init path runs
 - **THEN** the generated `openspec/config.yaml` SHALL contain `schema: spec-driven` (preserving the prior default behavior)
+
+#### Scenario: Built-in init writes a schema-only config
+- **WHEN** the built-in init path generates `openspec/config.yaml`
+- **THEN** the file SHALL contain a `schema:` line and SHALL NOT contain a `version:` field, a `profile:` block, or empty `context:`/`rules:` entries — matching upstream `openspec init`, which writes only `schema:`
+
+#### Scenario: Legacy config with plugin-invented fields still reads
+- **WHEN** an existing `openspec/config.yaml` (from a prior plugin version) contains `version:` and/or `profile:`
+- **THEN** the plugin SHALL still parse it and still surface those values in the tree view — only newly-scaffolded configs omit them
 
 ### Requirement: Configuration parsing
 
