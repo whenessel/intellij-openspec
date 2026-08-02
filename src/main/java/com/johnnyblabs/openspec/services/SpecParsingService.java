@@ -94,7 +94,7 @@ public final class SpecParsingService {
                     || ApplicationManager.getApplication().isDispatchThread()) {
                 content = new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
             } else {
-                content = ReadAction.computeCancellable(() -> new String(file.contentsToByteArray(), StandardCharsets.UTF_8));
+                content = ReadAction.compute(() -> new String(file.contentsToByteArray(), StandardCharsets.UTF_8));
             }
             return parseSpecContent(content, domain, file.getPath());
         } catch (IOException e) {

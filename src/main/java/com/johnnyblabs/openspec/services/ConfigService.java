@@ -62,7 +62,7 @@ public final class ConfigService {
                 }
             } else {
                 VirtualFile cfgFile = configFile;
-                raw = ReadAction.computeCancellable(() -> {
+                raw = ReadAction.compute(() -> {
                     try (InputStream is = cfgFile.getInputStream()) {
                         return new Yaml().load(is);
                     }
