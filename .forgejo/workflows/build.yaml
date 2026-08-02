@@ -87,7 +87,7 @@ jobs:
       - name: SBOM → Dependency-Track
         if: always()
         run: |
-          gradle cyclonedxBom
+          gradle cyclonedxDirectBom
           curl -sf -X POST "$DTRACK_URL/api/v1/bom" \
             -H "X-Api-Key: $DT_API_KEY" \
             -F "autoCreate=true" \
