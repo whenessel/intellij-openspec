@@ -9,7 +9,7 @@
 
 ## Implementation Tasks
 
-- [ ] 1.1 Add a `WeightedSearchEverywhereContributor` + `SearchEverywhereContributorFactory` (new `.../search/` package) that fetches off-EDT via `SpecParsingService.parseAllSpecs()` + `SpecContentMatcher`, is `DumbAware`, and navigates to a requirement via `RequirementAnchors`; register the EP `com.intellij.searchEverywhereContributor` in `plugin.xml`.
+- [x] 1.1 Add a `WeightedSearchEverywhereContributor` + `SearchEverywhereContributorFactory` (new `.../search/` package) that fetches off-EDT via `SpecParsingService.parseAllSpecs()` + `SpecContentMatcher`, is `DumbAware`, and navigates to a requirement via `RequirementAnchors`; register the EP `com.intellij.searchEverywhereContributor` in `plugin.xml`.
 - [ ] 1.2 Drop `buildSpecsNode`/`buildArchiveNode`/`buildConfigNode` from `SpecTreeModel`; prune the now-dead `TreeNodeType.SPECS/SPEC_DOMAIN/REQUIREMENT/ARCHIVE/CONFIG/CONFIG_ENTRY` and `filterNode`. Keep the Changes subtree (`resolveChangeName` already keys off `CHANGE`/`CHANGE_DONE`).
 - [ ] 1.3 Remove/repurpose the always-on tree search field in `OpenSpecToolWindowPanel`; reframe the preview to render for change nodes only (plain specs open in the editor), **preserving** the preview accessible-name state machine.
 - [ ] 1.4 Keep `SpecPreviewRenderer` + `SpecContentMatcher` + `SpecParsingService` (reused/inert, still unit-tested).

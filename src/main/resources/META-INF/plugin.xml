@@ -11,6 +11,11 @@
     <depends>org.jetbrains.plugins.yaml</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <!-- Search Everywhere: content search over spec requirement bodies + scenario text
+             (re-homes the reach the retired Browse-tree content-search field provided). -->
+        <searchEverywhereContributor
+                implementation="com.johnnyblabs.openspec.search.SpecSearchEverywhereContributorFactory"/>
+
         <!-- Services -->
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.OpenSpecProjectService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.ConfigService"/>
