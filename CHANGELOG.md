@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v0.6.0
+
 ### Changed
 
 - **New projects get a cleaner `openspec/config.yaml`.** The plugin now scaffolds only the upstream `schema:` field — matching `openspec init` — and no longer writes the plugin-internal `version:`/`profile:` fields (or empty `context:`/`rules:`) that the OpenSpec CLI ignores. Existing configs are fully unaffected: a `config.yaml` that already carries `version:`/`profile:` still parses and still shows those values in the tree. Also fixes a stray `Version: null` line that could appear in the Explore AI context when a config had no `version:`.
