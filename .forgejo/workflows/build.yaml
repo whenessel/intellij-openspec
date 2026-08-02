@@ -3,8 +3,27 @@ name: Build & Verify
 on:
   push:
     branches: [main]
+    # Skip CI when a push touches ONLY non-source, non-gradle-tested paths. docs/** and the root
+    # README/CHANGELOG are deliberately NOT ignored — DocumentationHygieneTest validates them.
+    paths-ignore:
+      - 'openspec/**'
+      - '.claude/**'
+      - '.githooks/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '.forgejo/workflows/ui-smoke.yaml'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'openspec/**'
+      - '.claude/**'
+      - '.githooks/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - '.forgejo/workflows/ui-smoke.yaml'
+  # Manual trigger — runs both jobs including the heavy Plugin Verifier on demand (e.g. to verify a
+  # PR branch before merge without waiting for the post-merge run).
+  workflow_dispatch:
 
 # Cancel any in-flight build for the same workflow + ref when a new push lands.
 # Matches the GitHub Actions concurrency contract — Forgejo Actions supports GitHub-compatible syntax.
@@ -95,6 +114,13 @@ jobs:
           path: build/distributions/*-signed.zip
 
   verify:
+    # The Plugin Verifier is heavy (downloads ~19.5 GB of IDE distributions) and runs on a SHARED
+    # host, so it is gated to push-to-main and manual dispatch — it does NOT run on every PR push,
+    # which storms the shared runner for hours (homelab-admin#333). PR-time platform-API safety comes
+    # from the local pre-push verifyPlugin gate (.githooks/pre-push runs it when a push changes a
+    # com.intellij.* reference); this CI job is the post-merge backstop, runnable on a PR on demand
+    # via workflow_dispatch when a change needs a full pre-merge verify.
+    if: github.event_name != 'pull_request'
     runs-on: java-21
     steps:
       - uses: actions/checkout@v4
