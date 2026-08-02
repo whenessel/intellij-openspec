@@ -122,6 +122,12 @@ jobs:
       - name: Upload test results
         uses: actions/upload-artifact@v7
         if: always()
+        # Best-effort: a GitHub artifact-backend hiccup on FinalizeArtifact ("404 artifact
+        # not found") must NOT red a leg whose Build-and-Test step already passed — the
+        # test outcome is the signal, the results upload is a convenience. Without this,
+        # an upload flake on the Windows leg reddened the whole cross-platform matrix and
+        # produced a false-red on a release commit (2026-08-02 retro).
+        continue-on-error: true
         with:
           name: test-results-${{ matrix.os }}
           path: build/test-results/test/
