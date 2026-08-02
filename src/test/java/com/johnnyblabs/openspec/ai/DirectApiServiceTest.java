@@ -6,6 +6,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -155,34 +157,56 @@ class DirectApiServiceTest {
     @Nested
     class OpenAiTokenParam {
 
-        @Test
-        void gpt4o_usesMaxTokens() {
-            assertEquals("max_tokens", DirectApiService.openAiTokenParam("gpt-4o"));
+        // Reasoning family reject max_tokens and require max_completion_tokens.
+        @ParameterizedTest
+        @ValueSource(strings = {"o1", "o1-mini", "o1-preview", "o3", "o3-mini", "o4-mini", "gpt-5", "gpt-5-mini"})
+        void reasoningModels_useMaxCompletionTokens(String model) {
+            assertEquals("max_completion_tokens", DirectApiService.openAiTokenParam(model),
+                    model + " is a reasoning model and must use max_completion_tokens");
+        }
+
+        // Negative anchors: chat models must NOT be swept into the reasoning path. These are
+        // load-bearing — without them an over-broad predicate would still pass.
+        @ParameterizedTest
+        @ValueSource(strings = {"gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"})
+        void chatModels_useMaxTokens(String model) {
+            assertEquals("max_tokens", DirectApiService.openAiTokenParam(model),
+                    model + " is a chat model and must use max_tokens");
         }
 
         @Test
-        void gpt4oMini_usesMaxTokens() {
-            assertEquals("max_tokens", DirectApiService.openAiTokenParam("gpt-4o-mini"));
+        void nullModel_defaultsToMaxTokens() {
+            assertEquals("max_tokens", DirectApiService.openAiTokenParam(null));
+        }
+    }
+
+    @Nested
+    class BuildClaudeRequest {
+
+        @Test
+        void setsCurrentAnthropicVersionHeader() {
+            var request = DirectApiService.buildClaudeRequest("claude-sonnet-4-5", "k", "p");
+            assertEquals("2023-06-01",
+                    request.headers().firstValue("anthropic-version").orElse(null),
+                    "anthropic-version must be the current required value 2023-06-01");
         }
 
         @Test
-        void o1Mini_usesMaxCompletionTokens() {
-            assertEquals("max_completion_tokens", DirectApiService.openAiTokenParam("o1-mini"));
+        void setsApiKeyHeaderNotInUrl() {
+            var request = DirectApiService.buildClaudeRequest("claude-sonnet-4-5", "test-secret-key", "p");
+            assertEquals("test-secret-key", request.headers().firstValue("x-api-key").orElse(null));
+            assertFalse(request.uri().toString().contains("test-secret-key"),
+                    "URL must not contain the API key: " + request.uri());
         }
 
         @Test
-        void o1Preview_usesMaxCompletionTokens() {
-            assertEquals("max_completion_tokens", DirectApiService.openAiTokenParam("o1-preview"));
-        }
-
-        @Test
-        void o1_usesMaxCompletionTokens() {
-            assertEquals("max_completion_tokens", DirectApiService.openAiTokenParam("o1"));
-        }
-
-        @Test
-        void gpt35_usesMaxTokens() {
-            assertEquals("max_tokens", DirectApiService.openAiTokenParam("gpt-3.5-turbo"));
+        void usesPostToMessagesEndpoint() {
+            var request = DirectApiService.buildClaudeRequest("claude-sonnet-4-5", "k", "p");
+            assertEquals("POST", request.method());
+            assertTrue(request.uri().toString().endsWith("/v1/messages"),
+                    "URI must be the Messages endpoint: " + request.uri());
+            assertEquals("application/json",
+                    request.headers().firstValue("Content-Type").orElse(null));
         }
     }
 
@@ -230,11 +254,16 @@ class DirectApiServiceTest {
     class AiProviderModels {
 
         @Test
-        void claudeModelsAreCurrent() {
+        void claudeModelsAreDatelessAliases() {
+            // Strengthened from a prefix-only check (which passed for the fabricated dated ID that
+            // shipped the C1 404). Every Claude entry must be a dateless family alias with no
+            // 8-digit snapshot suffix. The primary C1 guard lives in AiProviderTest.
             var models = AiProvider.CLAUDE.getModels();
             assertFalse(models.isEmpty());
-            assertTrue(models.stream().allMatch(m -> m.startsWith("claude-")),
-                    "All Claude models should start with claude-");
+            assertTrue(models.stream().allMatch(m -> m.matches("^claude-(sonnet|opus|haiku)-\\d+(-\\d+)?$")),
+                    "Claude models must be dateless aliases claude-<family>-<major>[-<minor>]: " + models);
+            assertTrue(models.stream().noneMatch(m -> m.matches(".*-\\d{8}$")),
+                    "Claude models must not carry an 8-digit snapshot date: " + models);
         }
 
         @Test

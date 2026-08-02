@@ -86,6 +86,20 @@ class AiProviderTest {
         }
 
         @Test
+        void claudeDefaultIsDatelessAlias() {
+            // C1 regression guard. The prior default `claude-sonnet-4-5-20250514` was a fabricated
+            // dated ID that 404'd; the old test only checked a `claude-` prefix, so it passed.
+            // Assert the structural invariant (dateless family alias) without pinning an exact
+            // minor version — a legitimate `claude-sonnet-4-6` refresh must stay green.
+            String def = AiProvider.CLAUDE.getDefaultModel();
+            assertFalse(def.isBlank());
+            assertTrue(def.matches("^claude-(sonnet|opus|haiku)-\\d+(-\\d+)?$"),
+                    "Claude default must be a dateless alias claude-<family>-<major>[-<minor>], was: " + def);
+            assertFalse(def.matches(".*-\\d{8}$"),
+                    "Claude default must not carry an 8-digit snapshot date (the C1 fabrication bug): " + def);
+        }
+
+        @Test
         void openaiHasModels() {
             assertFalse(AiProvider.OPENAI.getModels().isEmpty());
             assertNotNull(AiProvider.OPENAI.getDefaultModel());
