@@ -4,7 +4,7 @@
 
 ## Pre-implementation checks (agent triggers)
 
-- [ ] 0.1 **openspec-guru** — confirm "specs viewed only in the editor + content-search in Search Everywhere (no in-panel spec viewer/tree)" carries no upstream-model conflict before deleting the in-panel spec surface. (Provisional read in design.md: presentation-only, on-model.)
+- [x] 0.1 **openspec-guru** — confirm "specs viewed only in the editor + content-search in Search Everywhere (no in-panel spec viewer/tree)" carries no upstream-model conflict before deleting the in-panel spec surface. **PASS (verified vs CLI 1.6.0):** upstream models specs as list/show/validate only — no status/progress/coverage — so the in-panel Specs tree + plain-spec preview is presentation, not a model concept; removing it drops zero upstream state (list→Project View + SE contributor, show→editor Markdown, validate→untouched). Re-homed content-search is a text search over spec source markdown (no persistent per-spec state), categorically unlike the removed @spec scorecard. Retained Changes/deltas/coordination surfaces all on-model. Spec-hygiene note: update `tree-view` + `spec-viewer` Modified-Capability scenarios in lockstep.
 - [ ] 0.2 **jetbrains-platform-guru** — feasibility already confirmed (legacy `SearchEverywhereContributor` viable on 242; do NOT touch the 2025.12/2026.2 SE API). Re-confirm only if the target floor moves.
 
 ## Implementation Tasks
