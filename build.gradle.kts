@@ -7,7 +7,7 @@ plugins {
     id("org.jetbrains.intellij.platform")
     id("org.jetbrains.changelog") version "2.2.1"
     id("org.sonarqube") version "7.3.1.8318"
-    id("org.cyclonedx.bom") version "2.4.1"
+    id("org.cyclonedx.bom") version "3.3.0"
     // Kotlin exists ONLY for the uiSmoke integration-test source set — the Starter/Driver
     // UI-test DSL is Kotlin-idiomatic (extension receivers, kotlin.time) and impractical
     // from Java. Production code and unit tests remain pure Java; kotlin-stdlib is
@@ -247,12 +247,19 @@ sonar {
 // CycloneDX SBOM for dependency/CVE/license visibility. Scoped to runtimeClasspath — the
 // IntelliJ Platform SDK graph is huge and mostly provided/test noise, so an unscoped SBOM would
 // drown the real deps. Emits build/reports/bom.json, uploaded to the analysis server in CI.
-tasks.cyclonedxBom {
-    includeConfigs.set(listOf("runtimeClasspath"))
-    // The 2.4.x plugin deprecated outputFormat/outputName in favor of the json/xmlOutput
-    // file properties. Pin jsonOutput to build/reports/bom.json — the exact path CI
-    // uploads to the dependency server. (The plugin also emits bom.xml alongside it;
-    // harmless — build/reports is ephemeral and only bom.json is uploaded.)
+//
+// We configure `cyclonedxDirectBom` (the per-project SBOM), not the `cyclonedxBom` aggregate:
+// this is a single-module build, and in the 3.x plugin `includeConfigs`/scoping lives on the
+// direct task while `cyclonedxBom` only merges per-project direct BOMs. CI invokes
+// `cyclonedxDirectBom` to match. (The 3.x plugin — 3.2.4+'s withPluginClassLoader ClassLoader
+// isolation — is also what lets the SBOM survive the IntelliJ Platform Gradle Plugin's bundled
+// Jackson; the older 2.4.1 plugin failed cyclonedxBom under the platform plugin's Jackson 2.18.)
+tasks.cyclonedxDirectBom {
+    // 3.x takes includeConfigs as a plain assignment (no .set()).
+    includeConfigs = listOf("runtimeClasspath")
+    // Pin jsonOutput to build/reports/bom.json — the exact path CI uploads to the dependency
+    // server (3.x defaults it to build/reports/cyclonedx/bom.json). The plugin also emits
+    // bom.xml alongside it; harmless — build/reports is ephemeral and only bom.json is uploaded.
     jsonOutput.set(layout.buildDirectory.file("reports/bom.json"))
 }
 
