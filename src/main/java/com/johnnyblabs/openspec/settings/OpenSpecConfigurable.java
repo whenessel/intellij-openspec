@@ -50,7 +50,6 @@ public class OpenSpecConfigurable implements Configurable {
                 || !panel.getCliPath().equals(safe(settings.getCliPath()))
                 || !panel.getProfile().equals(safe(settings.getProfile()))
                 || panel.isAutoRefresh() != settings.isAutoRefresh()
-                || panel.isStrictValidation() != settings.isStrictValidation()
                 || panel.getCliTimeout() != settings.getCliTimeoutSeconds()
                 || !panel.getAiProvider().equals(safe(settings.getAiProvider(), "NONE"))
                 || !panel.getAiModel().equals(safe(settings.getAiModel()))
@@ -79,7 +78,6 @@ public class OpenSpecConfigurable implements Configurable {
         settings.setVersionOverride(panel.getVersionOverride());
         settings.setCliPath(panel.getCliPath());
         settings.setAutoRefresh(panel.isAutoRefresh());
-        settings.setStrictValidation(panel.isStrictValidation());
         settings.setCliTimeoutSeconds(panel.getCliTimeout());
         settings.setAiProvider(panel.getAiProvider());
         settings.setAiModel(panel.getAiModel());
@@ -135,7 +133,6 @@ public class OpenSpecConfigurable implements Configurable {
         panel.setCliPath(settings.getCliPath());
         panel.setProfile(settings.getProfile());
         panel.setAutoRefresh(settings.isAutoRefresh());
-        panel.setStrictValidation(settings.isStrictValidation());
         panel.setCliTimeout(settings.getCliTimeoutSeconds());
         panel.setAiProvider(settings.getAiProvider());
         panel.setAiModel(settings.getAiModel());

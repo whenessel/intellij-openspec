@@ -70,18 +70,22 @@ class SpecSyncPostMergeTest {
     }
 
     @Test
-    void modifiedUnmatched_strictMode_reportsError() {
-        // Strict mode produces an ERROR-prefixed warning
+    void modifiedUnmatched_surfacesAlwaysOnGuard() {
+        // The MODIFIED-target-missing guard is ALWAYS on — it is no longer gated on a persistent
+        // strict setting (that setting was removed). It surfaces the sync-modified-target-missing rule
+        // and skips the operation, with no strict/lenient distinction and no ERROR-prefix.
+        String original = "# Workflow\n\n## Requirements\n\n### Requirement: Exists\n"
+                + "The system SHALL exist.\n\n#### Scenario: S\n- **WHEN** x\n- **THEN** y\n";
         DeltaSpecOperation modOp = new DeltaSpecOperation(
                 OperationType.MODIFIED, "workflow", "Nonexistent",
                 "### Requirement: Nonexistent\nUpdated.\n\n#### Scenario: S\n- **WHEN** x\n- **THEN** y\n",
                 null, null);
         List<String> warnings = new ArrayList<>();
-        // Simulate strict mode warning format
-        String strictWarning = "ERROR: MODIFIED requirement 'Nonexistent' not found in workflow (strict mode — sync blocked for this capability)";
-        warnings.add(strictWarning);
-        assertTrue(warnings.getFirst().startsWith("ERROR:"));
-        assertTrue(warnings.getFirst().contains("strict mode"));
+        String result = applyModified(original, modOp, warnings);
+        assertEquals(1, warnings.size());
+        assertTrue(warnings.getFirst().contains("sync-modified-target-missing"), "names the always-on guard");
+        assertFalse(warnings.getFirst().startsWith("ERROR:"), "no strict-mode ERROR prefix — the setting is removed");
+        assertEquals(original, result, "the unmatched MODIFIED op is skipped, content unchanged");
     }
 
     @Test
@@ -119,7 +123,10 @@ class SpecSyncPostMergeTest {
     private String applyModified(String content, DeltaSpecOperation op, List<String> warnings) {
         int[] range = findRequirementBlock(content, op.requirementName());
         if (range == null) {
-            warnings.add("MODIFIED: requirement '" + op.requirementName() + "' not found in " + op.capabilityName());
+            // Mirrors SpecSyncService.applyModified — the always-on sync-modified-target-missing guard.
+            warnings.add("MODIFIED requirement '" + op.requirementName() + "' not found in "
+                    + op.capabilityName() + " — this delta can't be applied; review before syncing "
+                    + "[sync-modified-target-missing]");
             return content;
         }
         return content.substring(0, range[0]) + op.content() + content.substring(range[1]);

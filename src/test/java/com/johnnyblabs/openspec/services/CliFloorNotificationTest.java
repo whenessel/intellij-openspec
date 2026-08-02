@@ -1,6 +1,7 @@
 package com.johnnyblabs.openspec.services;
 
 import com.intellij.openapi.project.Project;
+import com.johnnyblabs.openspec.settings.OpenSpecSettings;
 import com.johnnyblabs.openspec.util.OpenSpecFileUtil;
 import com.johnnyblabs.openspec.util.OpenSpecNotifier;
 import kotlin.Unit;
@@ -31,6 +32,7 @@ class CliFloorNotificationTest {
     @Mock Project project;
     @Mock CliDetectionService cliDetection;
     @Mock AiToolDetectionService aiDetection;
+    @Mock OpenSpecSettings settings;
     @Mock Continuation<? super Unit> continuation;
 
     private OpenSpecProjectService.StartupDetection startup() {
@@ -40,6 +42,9 @@ class CliFloorNotificationTest {
     private void wireServices() {
         when(project.getService(CliDetectionService.class)).thenReturn(cliDetection);
         when(project.getService(AiToolDetectionService.class)).thenReturn(aiDetection);
+        // StartupDetection also runs the one-time strict-removal migration check; default it to no-op.
+        when(project.getService(OpenSpecSettings.class)).thenReturn(settings);
+        when(settings.consumeStrictMigrationNotice()).thenReturn(false);
     }
 
     @Test

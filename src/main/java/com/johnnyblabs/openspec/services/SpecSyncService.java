@@ -347,18 +347,13 @@ public final class SpecSyncService {
     String applyModified(String content, DeltaSpecOperation op, List<String> warnings) {
         int[] range = findRequirementBlock(content, op.requirementName());
         if (range == null) {
-            boolean strict = false;
-            try {
-                strict = OpenSpecSettings.getInstance(project).isStrictValidation();
-            } catch (Exception ignored) {
-                // Settings unavailable (e.g., unit test context) — default to lenient
-            }
-            if (strict) {
-                warnings.add("ERROR: MODIFIED requirement '" + op.requirementName()
-                        + "' not found in " + op.capabilityName() + " (strict mode — sync blocked for this capability)");
-            } else {
-                warnings.add("MODIFIED: requirement '" + op.requirementName() + "' not found in " + op.capabilityName());
-            }
+            // sync-modified-target-missing: an always-on sync-safety guard, NOT gated on any setting.
+            // A MODIFIED delta whose target requirement can't be found in the main spec genuinely
+            // cannot be applied; surface it (the sync preview is the decision point) and skip the op.
+            // (Formerly branched on the removed persistent strictValidation setting.)
+            warnings.add("MODIFIED requirement '" + op.requirementName() + "' not found in "
+                    + op.capabilityName() + " — this delta can't be applied; review before syncing "
+                    + "[sync-modified-target-missing]");
             return content;
         }
         return content.substring(0, range[0]) + op.content() + content.substring(range[1]);

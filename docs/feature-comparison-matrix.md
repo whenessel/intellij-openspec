@@ -121,7 +121,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Delta spec validation | Yes | No | No | No | No |
 | Per-change validation | Yes | No | No | No | No |
 | Auto-validation at phase transitions | Yes | No | No | No | No |
-| Strict validation mode | Yes (setting) | No | No | No | No |
+| Strict validation | Yes (per-run "Validate (Strict)" action → `--strict`) | No | No | No | No |
 | Real-time inline validation | Yes (inspections) | No | No | No | No |
 | Validation results in console | Yes (grouped by file, file:line links, per-severity color) | No | No | No | No |
 | Validate from Project View context menu (scoped) | Yes (change/spec/whole-project) | No | No | No | No |

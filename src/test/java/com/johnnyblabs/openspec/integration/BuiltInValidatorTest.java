@@ -268,11 +268,19 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
     }
 
     public void testMissingArtifactTriggersWarning() {
-        // test-change has proposal but no design.md or tasks.md
+        // test-change has proposal but no design.md or tasks.md. change-artifact-missing is ALWAYS a
+        // non-failing WARNING (a plugin-invented lint the CLI never checks) — never escalated to ERROR
+        // by any setting. A per-run strict validation fails the verdict on it via the strict
+        // warnings-count rule (OpenSpecValidateAction), not by re-severity-ing it here.
         ValidationResult result = validator.validateChanges();
-        assertTrue("Should have change-artifact-missing issue for missing artifacts",
+        assertTrue("change-artifact-missing must be a non-failing WARNING (never ERROR)",
                 result.issues().stream().anyMatch(i ->
-                        "change-artifact-missing".equals(i.rule())));
+                        "change-artifact-missing".equals(i.rule())
+                                && i.severity() == ValidationIssue.Severity.WARNING));
+        assertTrue("change-artifact-missing must never be emitted as an ERROR",
+                result.issues().stream().noneMatch(i ->
+                        "change-artifact-missing".equals(i.rule())
+                                && i.severity() == ValidationIssue.Severity.ERROR));
     }
 
     public void testChangeWithIncompatibleSchemaTriggersWarning() throws Exception {

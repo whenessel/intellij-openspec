@@ -162,6 +162,11 @@
                     text="Validate"
                     description="Validate changes and specs"
                     icon="/icons/requirement.svg"/>
+            <action id="OpenSpec.ValidateStrict"
+                    class="com.johnnyblabs.openspec.actions.OpenSpecValidateStrictAction"
+                    text="Validate (Strict)"
+                    description="Validate with --strict (warnings count as failures) — matches CI's &quot;openspec validate --strict&quot;"
+                    icon="/icons/requirement.svg"/>
             <action id="OpenSpec.List"
                     class="com.johnnyblabs.openspec.actions.OpenSpecListAction"
                     text="List"
@@ -194,7 +199,12 @@
         <!-- Tool window toolbar actions -->
         <group id="OpenSpec.ToolWindowToolbar">
             <reference ref="OpenSpec.Refresh"/>
-            <reference ref="OpenSpec.Validate"/>
+            <!-- Compact "Validate ▾" dropdown: the default Validate plus the per-run strict variant. -->
+            <group id="OpenSpec.ValidateToolbarGroup" text="Validate" popup="true"
+                   icon="/icons/requirement.svg">
+                <reference ref="OpenSpec.Validate"/>
+                <reference ref="OpenSpec.ValidateStrict"/>
+            </group>
             <reference ref="OpenSpec.Propose"/>
             <reference ref="OpenSpec.Ff"/>
             <separator/>

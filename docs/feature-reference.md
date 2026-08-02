@@ -292,6 +292,8 @@ Requirement headers (`### Requirement:`) are recognized **case-insensitively**, 
 
 Validates all specs, changes, and config files. A summary notification names the target and its error/warning counts; the full, navigable report lands in the OpenSpec **Console** (see below).
 
+**OpenSpec menu > Validate (Strict)** (or the toolbar Validate dropdown, or Find Action). A per-run strict validation that mirrors the CLI's `openspec validate --strict` — warnings count as failures. Strict is a per-invocation choice, not a persistent setting: the default Validate is unaffected, and a strict run is always disclosed (the summary reads `Validate (strict)`, adds `— strict: warnings count as failures` on a warnings-only failure, and the console echoes `--strict`), so a strict verdict is never a hidden mode. It means the same thing whether or not the CLI is available.
+
 | Mode | Behavior |
 |------|----------|
 | **CLI available** | The CLI's own verdict is authoritative for specs and changes (`openspec validate --all`) — the plugin never reports a spec/change error the CLI wouldn't. The built-in validator still surfaces `config.yaml` guidance (which the CLI's `validate` does not inspect), but only as non-failing warnings — config never reds a project the CLI reports clean. |
@@ -323,7 +325,6 @@ Access via **Settings > Tools > OpenSpec** (or **Preferences > Tools > OpenSpec*
 |---------|---------|
 | **Schema profile** | Workflow profile: `spec-driven`, `tdd`, `rapid`, or custom. |
 | **Auto-refresh** | Automatically refresh the tree when OpenSpec files change on disk. |
-| **Strict validation** | Treat warnings as errors during validation. |
 
 ### Config Profile
 
