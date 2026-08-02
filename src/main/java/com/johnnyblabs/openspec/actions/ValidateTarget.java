@@ -17,20 +17,29 @@ import com.johnnyblabs.openspec.util.OpenSpecFileUtil;
  * <em>archived</em> change name is never forwarded as {@code --type change} (which
  * the CLI rejects with a misleading "No deltas found" error).</p>
  */
-public record ValidateTarget(Kind kind, String id) {
+public record ValidateTarget(Kind kind, String id, boolean strict) {
 
     public enum Kind {SPEC, CHANGE, WHOLE_PROJECT}
 
     public static ValidateTarget wholeProject() {
-        return new ValidateTarget(Kind.WHOLE_PROJECT, null);
+        return new ValidateTarget(Kind.WHOLE_PROJECT, null, false);
     }
 
     public static ValidateTarget spec(String id) {
-        return new ValidateTarget(Kind.SPEC, id);
+        return new ValidateTarget(Kind.SPEC, id, false);
     }
 
     public static ValidateTarget change(String id) {
-        return new ValidateTarget(Kind.CHANGE, id);
+        return new ValidateTarget(Kind.CHANGE, id, false);
+    }
+
+    /**
+     * A copy of this target with per-run strict validation enabled. Strict is a per-invocation
+     * choice (the {@code OpenSpec.ValidateStrict} action), never persisted — it maps to the CLI's
+     * {@code validate --strict} and flips the built-in fallback verdict to fail on warnings.
+     */
+    public ValidateTarget withStrict() {
+        return new ValidateTarget(kind, id, true);
     }
 
     public boolean isWholeProject() {

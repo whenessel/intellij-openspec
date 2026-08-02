@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Changed
+
+- **Strict validation is now a per-run choice, not a persistent setting.** The always-on "Strict validation" checkbox in Settings is gone; instead, a new **Validate (Strict)** action — in the OpenSpec tool-window's Validate dropdown, the OpenSpec menu, and Find Action — runs a single strict validation on demand, mirroring the CLI's `openspec validate --strict` (warnings count as failures). This makes strict results reproducible and never a hidden mode: a strict run is disclosed in the summary (`Validate (strict)`, and `— strict: warnings count as failures` when it fails on warnings only) and echoes `--strict` in the console. Strict means the same thing whether or not the CLI is available. If you had the old setting enabled, a one-time notice points you to the new action. Separately, a change missing an optional artifact (`design.md`/`tasks.md`) is now always a plain warning, and a spec-sync that targets a missing requirement always surfaces a clear "can't be applied" guard in the sync preview.
+
 ### Fixed
 
 - **Validation no longer reports errors that `openspec validate` wouldn't.** When the OpenSpec CLI is available, a Validate run now defers to the CLI's own verdict for the specs and changes it checks — the plugin's built-in validator no longer overrides a clean CLI with its own stricter opinion, so a project that `openspec validate` reports valid is no longer marked failing in the IDE. Config checks (`openspec/config.yaml`) are now non-failing: because `openspec validate` never fails on config, a missing `schema:` is a warning (OpenSpec defaults it to `spec-driven`) rather than an error, and config validation never reds a project the CLI reports clean. When the CLI is unavailable, the built-in fallback validator matches the CLI's default-mode severities: a missing spec `# Title` and a scenario missing its `WHEN`/`THEN` clauses are reported as a warning and an info hint respectively (not errors), while a requirement with no scenario remains an error, matching the CLI.

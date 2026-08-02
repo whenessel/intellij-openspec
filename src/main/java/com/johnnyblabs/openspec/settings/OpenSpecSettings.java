@@ -80,12 +80,20 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         state.autoRefresh = autoRefresh;
     }
 
-    public boolean isStrictValidation() {
-        return state.strictValidation;
-    }
-
-    public void setStrictValidation(boolean strict) {
-        state.strictValidation = strict;
+    /**
+     * One-time migration signal for the removed persistent strict-validation setting. Returns
+     * {@code true} exactly once — for a user who had the old checkbox ON and hasn't yet been notified —
+     * then records the notice so it never fires again. Strict is now a per-run choice (the
+     * {@code OpenSpec.ValidateStrict} action); this only routes a prior strict-on user to it. A user on
+     * the default (off) never gets a signal. Package-visible for the migration-trigger + tests.
+     */
+    public boolean consumeStrictMigrationNotice() {
+        if (state.strictValidation && !state.migratedStrictNotice) {
+            state.migratedStrictNotice = true;
+            state.strictValidation = false; // clear the orphaned preference; the notice fires once
+            return true;
+        }
+        return false;
     }
 
     public String getAiProvider() {
@@ -218,7 +226,15 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         /** Workflow profile preset: {@code "core"}, {@code "custom"}, or {@code ""} (CLI default). See {@link OpenSpecSettings#getProfile()}. */
         public String profile = "";
         public boolean autoRefresh = true;
+        /**
+         * Migration-only (strict is now a per-run action, not a setting). Read once by
+         * {@link OpenSpecSettings#consumeStrictMigrationNotice()} to route a prior strict-on user to the
+         * new action, then cleared. Retained one release so an existing {@code openspec.xml} with this
+         * option loads cleanly; scheduled for removal thereafter.
+         */
         public boolean strictValidation = false;
+        /** Guards the one-time strict-removal migration notice; see {@code consumeStrictMigrationNotice()}. */
+        public boolean migratedStrictNotice = false;
         public String aiProvider = "NONE";
         public String aiModel = "";
         public String preferredDeliveryMethod = "";

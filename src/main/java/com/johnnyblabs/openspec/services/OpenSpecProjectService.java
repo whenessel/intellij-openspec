@@ -81,6 +81,20 @@ public final class OpenSpecProjectService {
                 }
             }
 
+            // One-time migration: the persistent "Strict validation" setting was removed in favor of a
+            // per-run "Validate (Strict)" action. Route a user who had it enabled to the new action;
+            // default (off) users see nothing. Fires exactly once (guarded in settings).
+            com.johnnyblabs.openspec.settings.OpenSpecSettings settings =
+                    com.johnnyblabs.openspec.settings.OpenSpecSettings.getInstance(project);
+            if (settings != null && settings.consumeStrictMigrationNotice()) {
+                OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_SYSTEM,
+                        "Strict validation is now per-run",
+                        "The always-on \"Strict validation\" setting has been removed. Run "
+                                + "\"Validate (Strict)\" from the OpenSpec toolbar (the Validate dropdown) or "
+                                + "menu when you want warnings to count as failures.",
+                        com.intellij.notification.NotificationType.INFORMATION);
+            }
+
             AiToolDetectionService aiDetection = project.getService(AiToolDetectionService.class);
             if (aiDetection != null) {
                 aiDetection.detect();

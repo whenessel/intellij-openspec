@@ -180,7 +180,6 @@ public final class BuiltInValidator {
 
     private ValidationResult validateSingleChange(Change change) {
         List<ValidationIssue> issues = new ArrayList<>();
-        boolean strict = OpenSpecSettings.getInstance(project).isStrictValidation();
         VersionSupport version = getVersionSupport();
         Set<String> required = version.getRequiredArtifacts();
         String changePath = change.getPath();
@@ -195,9 +194,11 @@ public final class BuiltInValidator {
             if ("specs".equals(artifact)) continue;
             String fileName = artifact + ".md";
             if (!change.getArtifactFiles().contains(fileName)) {
-                ValidationIssue.Severity severity = strict
-                        ? ValidationIssue.Severity.ERROR : ValidationIssue.Severity.WARNING;
-                issues.add(new ValidationIssue(severity, changePath, 1,
+                // Always a non-failing WARNING — this is a plugin-invented lint (the CLI never checks
+                // tasks.md/design.md presence). A per-run strict validation fails the verdict on it via
+                // the strict warnings-count-as-failures rule (OpenSpecValidateAction), not by escalating
+                // the severity here. Strict is no longer a persistent setting.
+                issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, changePath, 1,
                         "Change '" + change.getName() + "' should have " + fileName, "change-artifact-missing"));
             }
         }

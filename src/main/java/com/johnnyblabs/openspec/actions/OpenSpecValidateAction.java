@@ -73,15 +73,19 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
                         } else {
                             cliValidation = CliOutputParser.parseTextOutput(cliResult);
                         }
+                        // The CLI verdict is already strict-aware (cliArgs passed --strict when the
+                        // run is strict); config stays non-failing, so no fallback flip is needed here.
                         finalResult = combineWithCli(validator, target, cliValidation);
                     } catch (Exception ex) {
                         // CLI failed to run — fall back to the full built-in validator, never a
-                        // blind pass.
-                        finalResult = builtInValidate(project, validator, target);
+                        // blind pass. Apply the per-run strict verdict flip to the fallback.
+                        finalResult = applyStrictFallbackVerdict(
+                                builtInValidate(project, validator, target), target.strict());
                     }
                 } else {
                     // No CLI available — the built-in validator is the full fallback verdict.
-                    finalResult = builtInValidate(project, validator, target);
+                    finalResult = applyStrictFallbackVerdict(
+                            builtInValidate(project, validator, target), target.strict());
                 }
 
                 ValidationResult result = finalResult;
@@ -89,6 +93,25 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
                         .invokeLater(() -> showValidationResults(project, result, target));
             }
         }.queue();
+    }
+
+    /**
+     * Apply the per-run strict verdict flip to a built-in fallback result (used when the CLI is
+     * absent or its run failed). Under strict, non-config WARNINGs fail the verdict too — mirroring
+     * the CLI's {@code --strict} (which fails on warnings) while keeping {@code config.yaml} guidance
+     * non-failing in both modes (the CLI never fails on config; config rows are display-only). Issues
+     * are NOT re-severity-ed — a warning stays a WARNING; only the top-level verdict flips. Package-
+     * private for tests.
+     */
+    static ValidationResult applyStrictFallbackVerdict(ValidationResult result, boolean strict) {
+        if (!strict || !result.passed()) {
+            return result; // not strict, or already failing on an ERROR — nothing to flip
+        }
+        boolean strictPassed = result.issues().stream().noneMatch(i ->
+                i.severity() == ValidationIssue.Severity.WARNING
+                        && (i.rule() == null || !i.rule().startsWith("config-")));
+        return strictPassed ? result
+                : new ValidationResult(false, result.issues(), result.source());
     }
 
     /**
@@ -141,8 +164,8 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
         }
     }
 
-    /** CLI argument vector for the target's validate invocation. */
-    private static String[] cliArgs(ValidateTarget target) {
+    /** CLI argument vector for the target's validate invocation. Package-private for tests. */
+    static String[] cliArgs(ValidateTarget target) {
         List<String> args = new ArrayList<>();
         args.add("validate");
         if (target.isWholeProject()) {
@@ -153,15 +176,20 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
             args.add(target.cliType());
         }
         args.add("--json");
+        // Per-run strict maps to the CLI's own --strict (warnings count as failures). The verdict is
+        // then read from each item's `valid` field, which the CLI computes under --strict.
+        if (target.strict()) {
+            args.add("--strict");
+        }
         return args.toArray(new String[0]);
     }
 
-    /** The command string echoed to the console, mirroring {@link #cliArgs}. */
-    private static String commandLine(ValidateTarget target) {
-        if (target.isWholeProject()) {
-            return "openspec validate --all";
-        }
-        return "openspec validate " + target.id() + " --type " + target.cliType();
+    /** The command string echoed to the console, mirroring {@link #cliArgs}. Package-private for tests. */
+    static String commandLine(ValidateTarget target) {
+        String base = target.isWholeProject()
+                ? "openspec validate --all"
+                : "openspec validate " + target.id() + " --type " + target.cliType();
+        return target.strict() ? base + " --strict" : base;
     }
 
     /** Human label for the scoped target, used in the task title and console/notification text. */
@@ -173,19 +201,35 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
         };
     }
 
+    /**
+     * The at-a-glance balloon summary body. Pure and package-private so the strict disclosure is
+     * headlessly unit-testable. Preserves the `passed (` / `failed (` tokens the uiSmoke journeys and
+     * screenshot tour assert on; a strict, warnings-only failure appends the explanation AFTER the
+     * paren group (never inside it), so those tokens stay intact.
+     */
+    static String summaryText(String scope, ValidationResult result, boolean strict) {
+        if (result.passed()) {
+            return scope + " passed (" + result.warningCount() + " warnings)";
+        }
+        String body = scope + " failed (" + result.errorCount() + " errors, " + result.warningCount() + " warnings)";
+        if (strict && result.errorCount() == 0) {
+            body += " — strict: warnings count as failures";
+        }
+        return body;
+    }
+
     private void showValidationResults(Project project, ValidationResult result, ValidateTarget target) {
         String scope = describeTarget(target);
 
-        // The at-a-glance balloon stays the summary surface — it never enumerates issues.
-        if (result.passed()) {
-            OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_VALIDATION, "Validate",
-                    scope + " passed (" + result.warningCount() + " warnings)",
-                    com.intellij.notification.NotificationType.INFORMATION);
-        } else {
-            OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_VALIDATION, "Validate",
-                    scope + " failed (" + result.errorCount() + " errors, " + result.warningCount() + " warnings)",
-                    com.intellij.notification.NotificationType.ERROR);
-        }
+        // The at-a-glance balloon stays the summary surface — it never enumerates issues. A strict run
+        // discloses itself: the title carries "(strict)", so the mode is never silent. The summary body
+        // (built by the pure summaryText helper) preserves the `passed (`/`failed (` tokens the uiSmoke
+        // journeys + screenshot tour assert on.
+        String title = target.strict() ? "Validate (strict)" : "Validate";
+        OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_VALIDATION, title,
+                summaryText(scope, result, target.strict()),
+                result.passed() ? com.intellij.notification.NotificationType.INFORMATION
+                        : com.intellij.notification.NotificationType.ERROR);
 
         // The console is the detailed, navigable surface: grouped by file, per-severity
         // colored, with clickable file:line links for resolvable paths.

@@ -73,7 +73,6 @@ public class OpenSpecSettingsPanel {
     private TerminalLauncher terminalLauncher = OpenSpecTerminalLauncher::launchCommand;
     private final JSpinner cliTimeoutSpinner;
     private final JBCheckBox autoRefreshCheckbox;
-    private final JBCheckBox strictValidationCheckbox;
 
     /**
      * Workflow profile presets the combo offers as switch targets. Empty string means
@@ -207,7 +206,6 @@ public class OpenSpecSettingsPanel {
         cliTimeoutSpinner = new JSpinner(new SpinnerNumberModel(30, 1, 3600, 1));
 
         autoRefreshCheckbox = new JBCheckBox("Auto-refresh tool window on file changes");
-        strictValidationCheckbox = new JBCheckBox("Strict validation (warnings become errors)");
 
         JPanel generalSection = FormBuilder.createFormBuilder()
                 .addLabeledComponent(profileLabelPanel, profileComboRow)
@@ -216,7 +214,6 @@ public class OpenSpecSettingsPanel {
                 .addComponentToRightColumn(customizeBanner)
                 .addLabeledComponent(new JBLabel("CLI Timeout (seconds):"), cliTimeoutSpinner)
                 .addComponent(autoRefreshCheckbox)
-                .addComponent(strictValidationCheckbox)
                 .getPanel();
         generalSection.setBorder(IdeBorderFactory.createTitledBorder("General"));
 
@@ -927,14 +924,6 @@ public class OpenSpecSettingsPanel {
 
     public void setAutoRefresh(boolean autoRefresh) {
         autoRefreshCheckbox.setSelected(autoRefresh);
-    }
-
-    public boolean isStrictValidation() {
-        return strictValidationCheckbox.isSelected();
-    }
-
-    public void setStrictValidation(boolean strict) {
-        strictValidationCheckbox.setSelected(strict);
     }
 
     /**
