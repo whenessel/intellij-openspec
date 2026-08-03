@@ -86,6 +86,37 @@ Archive pre-flight) show `VerifyDialog.showAndGet()`; OK archives (enabled for R
 IN&nbsp;PROGRESS, disabled for a hard BLOCK) — replacing the old misleading `.show()`-and-ignore where
 an "Archive" button did nothing.
 
+## Change-node visual hierarchy (folded in — agent opinion + decisions)
+
+With the Changes subtree becoming the tree's load-bearing surface, its node rendering is worth
+getting right. The node reads `name [status] X/Y` but was painted as ONE string in ONE color
+(`DefaultTreeCellRenderer`), so a proposed change was entirely green — the task count competed with
+the name.
+
+**plugin-ui-specialist opinion.** The root cause isn't the count, it's that the *name* is tinted.
+Correct hierarchy: **name** = default/primary color (the identifier the eye scans for); **`[status]`**
+= keep its meaning color (green=proposed/blue=applied — the only inline proposed↔applied cue, since
+both share the plain change icon; only `CHANGE_DONE` is badged); **`X/Y`** = dimmed `GRAYED_ATTRIBUTES`.
+Keep the raw fraction (not a %, it carries "how far/how big"); long form stays in the tooltip. **Do
+not green `N/N`** — the green "done" badge is `dag.isComplete()` (artifact DAG) while `X/Y` is
+tasks.md checkboxes; these are distinct upstream signals that can diverge, so greening a complete
+count could contradict a non-done icon. Let the badge own "done".
+
+**jetbrains-platform-guru feasibility.** `ColoredTreeCellRenderer` (multi-fragment) is the right,
+non-deprecated base on 242→252, with an in-repo precedent (`CoordinationPanel.CoordinationCellRenderer`
+already uses `GRAYED_ATTRIBUTES`). Override `customizeCellRenderer`; the base forces the selection
+foreground on a focused-selected row, so the old manual `sel ? getTextSelectionColor()` branches are
+deleted (they were a `DefaultTreeCellRenderer` necessity). Bold/italic states become `STYLE_BOLD`/
+`STYLE_ITALIC` `SimpleTextAttributes` (not `Font.deriveFont`, which `SimpleColoredComponent` ignores),
+cached as constants (zero per-paint allocation). The existing `SpecTreeCellRendererTest` only exercises
+the static `iconForType` map, so the base-class swap leaves it untouched.
+
+**Decision.** Carry structured `ChangeLabelParts(name, status, taskCounts)` on `TreeNodeData` so the
+renderer fragments cleanly (killing the brittle `label.contains("[proposed]")` sniffing); keep
+`buildChangeLabel`'s flat string for search/tooltip/tests. The fragmentation decision is extracted as
+a pure `changeFragments(parts)` seam so the visual-hierarchy contract (name un-tinted, status colored,
+count grayed, `8/8` not greened) is unit-tested without a running IDE.
+
 ## Trade-offs
 
 - **Reclaims vertical space** for the status/pipeline/deltas surfaces (today cramped under a large redundant tree).

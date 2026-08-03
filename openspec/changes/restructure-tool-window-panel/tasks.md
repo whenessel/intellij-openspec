@@ -36,3 +36,12 @@
 - [x] 3.9 `./gradlew build` green (unit + ratcheted coverage floors 0.394/0.371/0.365) AND `verifyPlugin` **Compatible** on IC-242/243/251/252.
 - [ ] 3.10 Headful `caffeinate -dimsu ./gradlew uiSmoke` — Journey 5 green against the renamed dialog (runs with 2.5).
 - [x] 3.11 **intellij-code-reviewer + test-engineer AUDIT** — review clean (threading correct; one layering nit applied: `stateColor` moved model→`VerifyDialog`, model kept UI-free); audit pass-with-nits, the Medium finding (untested service→category seam) closed by `ArchiveReadinessServiceMappingTest`.
+
+## Change-node visual hierarchy (folded in — the Changes subtree is the elevated surface)
+
+- [x] 4.0 **plugin-ui-specialist + jetbrains-platform-guru** — opinion: the real fix is un-tinting the change NAME (not just the count); keep the `[status]` tag colored (only inline proposed↔applied cue), dim `X/Y` gray, and do NOT green `N/N` (done is the icon badge's story, on the distinct artifact-DAG signal). Migration to `ColoredTreeCellRenderer` is low-risk with an in-repo precedent (`CoordinationCellRenderer`); selection is platform-handled. Recorded in design.md.
+- [x] 4.1 `SpecTreeModel.TreeNodeData` carries structured `ChangeLabelParts(name, status, taskCounts)` on change nodes; `buildChangeLabel` (flat string) kept intact for search/tooltip/tests.
+- [x] 4.2 `SpecTreeCellRenderer` migrated `DefaultTreeCellRenderer → ColoredTreeCellRenderer`: name `REGULAR`, `[status]` in meaning color, `X/Y` `GRAYED_ATTRIBUTES`; bold/italic states re-expressed as cached `SimpleTextAttributes`; manual selection-color branches dropped (platform-handled).
+- [x] 4.3 Pure `changeFragments(parts)` seam + tests (name un-tinted, status colored, count grayed incl. `8/8` not greened, UNKNOWN/no-tasks omissions); existing `iconForType`/label/config/selection-sync tests unaffected.
+- [x] 4.4 `build` + `verifyPlugin` (Compatible IC-242/243/251/252) green; coverage floors held at safe margin (0.394/0.371/0.365).
+- [ ] 4.5 Headful `caffeinate -dimsu ./gradlew uiSmoke` — eyeball the fragmented change row (name default-colored, gray count) + selected-row legibility on light/Darcula (runs with 2.5; tree `hasText` gates unaffected — the concatenated fragment text is byte-identical to the old label).

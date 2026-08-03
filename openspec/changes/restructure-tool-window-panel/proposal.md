@@ -20,7 +20,7 @@ The right-anchored "OpenSpec" tool window's Browse tab currently stacks a file-n
 
 Restructure the Browse tab toward the model/process surfaces, letting the Project View own file navigation:
 
-- **Keep:** the **Changes** subtree (the status-bearing selector that drives the workflow panel + deltas preview), the workflow/pipeline panel, the badged change-deltas preview, the Coordination tab, and the Console/CLI/AI status.
+- **Keep:** the **Changes** subtree (the status-bearing selector that drives the workflow panel + deltas preview), the workflow/pipeline panel, the badged change-deltas preview, the Coordination tab, and the Console/CLI/AI status. Since this subtree becomes the tree's load-bearing surface, its change-node rendering is polished to a **name-first hierarchy** — the change name in the primary color, the `[status]` tag in its meaning color, and the `X/Y` task count dimmed as a trailing secondary counter (via `ColoredTreeCellRenderer`), so the count no longer competes with the name.
 - **Drop/demote:** the **Archive** and **Config** top-level subtrees (pure file-navigation duplicates — send users to the Project View).
 - **Specs:** drop the always-on Specs *navigation* tree, but **preserve its unique content search** (requirement-body + scenario text) — re-homed as a search entry point (a Search-Everywhere contributor or dedicated search action), pending the platform feasibility check in design.
 - **Reframe the preview pane** to render for **change** nodes (the badged deltas) and let plain spec files open in the editor, rather than duplicating the editor's Markdown preview.

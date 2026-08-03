@@ -192,7 +192,8 @@ public class SpecTreeModel {
             String changeTooltip = buildChangeTooltip(change, dag, taskCounts);
 
             DefaultMutableTreeNode changeNode = new DefaultMutableTreeNode(
-                    new TreeNodeData(label, changeType, change.getPath(), change.getName(), null, changeTooltip));
+                    new TreeNodeData(label, changeType, change.getPath(), change.getName(), null, changeTooltip, null,
+                            new TreeNodeData.ChangeLabelParts(change.getName(), status, taskCounts)));
 
             // Try CLI-based artifact DAG first; fall back to on-disk artifact listing otherwise.
             boolean dagLoaded = addDagArtifactNodes(changeNode, change, dag);
@@ -456,22 +457,35 @@ public class SpecTreeModel {
     }
 
     public record TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId,
-                               String tooltip, String searchText) {
+                               String tooltip, String searchText, ChangeLabelParts changeParts) {
+        public TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId, String tooltip, String searchText) {
+            this(label, type, filePath, changeName, artifactId, tooltip, searchText, null);
+        }
+
         public TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId, String tooltip) {
-            this(label, type, filePath, changeName, artifactId, tooltip, null);
+            this(label, type, filePath, changeName, artifactId, tooltip, null, null);
         }
 
         public TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId) {
-            this(label, type, filePath, changeName, artifactId, null, null);
+            this(label, type, filePath, changeName, artifactId, null, null, null);
         }
 
         public TreeNodeData(String label, TreeNodeType type, String filePath) {
-            this(label, type, filePath, null, null, null, null);
+            this(label, type, filePath, null, null, null, null, null);
         }
 
         @Override
         public String toString() {
             return label;
         }
+
+        /**
+         * Structured pieces of a change node's label, so the cell renderer can fragment it — name in
+         * the default (primary) color, the {@code [status]} tag in its meaning color, and the
+         * {@code X/Y} task count dimmed — instead of painting one concatenated string in one color.
+         * Null for every non-change node. The flat {@link #label} still carries the concatenated form
+         * for search/tooltip/tests.
+         */
+        public record ChangeLabelParts(String name, ChangeStatus status, int[] taskCounts) {}
     }
 }

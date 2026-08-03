@@ -14,6 +14,11 @@ The plugin SHALL display a tool-window tree showing the **Changes** section — 
 - **WHEN** no changes exist
 - **THEN** a hint node SHALL appear under Changes that triggers Propose on double-click
 
+#### Scenario: Change-node visual hierarchy
+- **WHEN** a change node renders in the Changes tree
+- **THEN** the change name SHALL be shown in the primary (default) color, the `[status]` tag in its meaning color, and the `X/Y` task-completion count as dimmed secondary text — so the count does not compete with the name
+- **AND** a complete count (`N/N`) SHALL NOT be colored as "done": the apply-ready state is conveyed by the node's status icon badge (driven by the artifact DAG), a signal distinct from the tasks.md task count
+
 ### Requirement: Search and filtering
 
 The plugin SHALL provide content search over spec requirement bodies and scenario text via a **Search Everywhere contributor** — so a term occurring only inside a requirement's prose surfaces that spec/requirement and, on selection, opens it in the editor at the requirement. The search SHALL run off the UI thread over the local OpenSpec files without persisting a search index, and SHALL be available during indexing (dumb-aware). The former always-on tool-window tree filter over spec content is retired in favor of this surface.
