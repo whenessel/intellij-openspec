@@ -267,8 +267,10 @@ class OpenSpecUiSmokeTest {
     }
 
     /**
-     * Journey 5 — archive guard: Archive on the 1/4-complete change surfaces the
-     * compliance pre-flight, cancel leaves the change directory unmoved.
+     * Journey 5 — archive guard: Archive on the incomplete change surfaces the Verify pre-flight
+     * (upstream's word — the plugin no longer says "Compliance"), cancel leaves the change directory
+     * unmoved. The seeded demo is proposal-only (no deltas) so it renders the hard BLOCKED tier; the
+     * neutral IN_PROGRESS-tier logic is proven by the pure ArchiveReadinessResultTest/VerifyDialogTest.
      */
     @Test
     fun archiveGuardsIncompleteChange() {
@@ -280,15 +282,15 @@ class OpenSpecUiSmokeTest {
 
             // Dialogs are separate windows, NOT descendants of the IDE frame — search
             // from the driver-level UI root (learned from the hierarchy dump).
-            waitUntil("compliance pre-flight dialog for the incomplete change", timeout = 3.minutes) {
-                ui.x { byTitle("Compliance Check — demo-add-farewell") }.present()
+            waitUntil("verify pre-flight dialog for the incomplete change", timeout = 3.minutes) {
+                ui.x { byTitle("Verify — demo-add-farewell") }.present()
             }
             // Robot Escape depends on focus — click the dialog's Cancel button instead.
-            ui.x { byTitle("Compliance Check — demo-add-farewell") }
+            ui.x { byTitle("Verify — demo-add-farewell") }
                 .x { byAccessibleName("Cancel") }
                 .click(null)
             waitUntil("pre-flight dialog closed on cancel") {
-                ui.x { byTitle("Compliance Check — demo-add-farewell") }.notPresent()
+                ui.x { byTitle("Verify — demo-add-farewell") }.notPresent()
             }
         }
         check(Files.isDirectory(projectPath.resolve("openspec/changes/demo-add-farewell"))) {
