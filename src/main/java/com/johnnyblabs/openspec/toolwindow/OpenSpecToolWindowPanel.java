@@ -14,7 +14,6 @@ import com.intellij.openapi.vfs.VirtualFileManager;
 import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.ui.OnePixelSplitter;
-import com.intellij.ui.SearchTextField;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.HTMLEditorKitBuilder;
 import com.intellij.util.ui.JBUI;
@@ -33,8 +32,6 @@ import com.johnnyblabs.openspec.settings.OpenSpecSettings;
 import com.johnnyblabs.openspec.util.OpenSpecFileUtil;
 
 import javax.swing.*;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.event.HyperlinkEvent;
 import javax.swing.event.TreeSelectionEvent;
 import javax.swing.event.TreeSelectionListener;
@@ -44,7 +41,6 @@ import javax.swing.tree.TreePath;
 import com.intellij.ui.JBColor;
 
 import java.awt.*;
-import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.*;
@@ -55,15 +51,12 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
 
     private final Project project;
     private final Tree tree;
-    private final SearchTextField searchField;
     private final JLabel statusLabel;
     private final JLabel aiStatusLabel;
     private final WorkflowActionPanel workflowPanel;
     private final JEditorPane previewPane;
     private final Alarm refreshAlarm;
-    private final Alarm filterAlarm;
     private final Alarm previewAlarm;
-    private Set<String> preFilterExpansionState;
 
     /** What the preview render path needs, snapshotted on the EDT at selection time. */
     private record PreviewSelection(String filePath, SpecPreviewRenderer.PreviewKind kind,
@@ -88,7 +81,6 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
         super(new BorderLayout());
         this.project = project;
         this.refreshAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
-        this.filterAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
         this.previewAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
 
         // Build tree with placeholder; real model loads async
@@ -108,24 +100,6 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
                     showContextMenu(e);
                 }
             }
-        });
-
-        // Search field
-        searchField = new SearchTextField(false);
-
-        // Ctrl+F / Cmd+F to focus search
-        int modifier = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
-        tree.registerKeyboardAction(
-                e -> searchField.requestFocusInWindow(),
-                KeyStroke.getKeyStroke(KeyEvent.VK_F, modifier),
-                JComponent.WHEN_FOCUSED);
-        searchField.getTextEditor().getDocument().addDocumentListener(new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) { debouncedFilter(); }
-            @Override
-            public void removeUpdate(DocumentEvent e) { debouncedFilter(); }
-            @Override
-            public void changedUpdate(DocumentEvent e) { debouncedFilter(); }
         });
 
         // Status bar — compact single row
@@ -160,10 +134,9 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
         bottomPanel.add(workflowPanel, BorderLayout.CENTER);
         bottomPanel.add(statusBar, BorderLayout.SOUTH);
 
-        // Top panel: toolbar + search
+        // Top panel: toolbar (no tree filter — spec content-search lives in Search Everywhere)
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.add(createActionToolbar(), BorderLayout.NORTH);
-        topPanel.add(searchField, BorderLayout.SOUTH);
 
         // Use a split pane so the tree gets priority and the user can resize
         JScrollPane treeScroll = new JScrollPane(tree);
@@ -260,10 +233,9 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
         if (!(node.getUserObject() instanceof SpecTreeModel.TreeNodeData data)) return null;
 
         SpecPreviewRenderer.PreviewKind kind = SpecPreviewRenderer.classify(data.type(), data.filePath());
-        // For a Requirement node, the node's tooltip carries the plain requirement name (its file
-        // path is the parent spec) — anchor the scroll to that requirement's section.
-        String requirementName =
-                data.type() == SpecTreeModel.TreeNodeType.REQUIREMENT ? data.tooltip() : null;
+        // The tree no longer holds requirement nodes (plain specs open in the editor), so there is no
+        // requirement anchor to resolve here.
+        String requirementName = null;
         // For a Change node the CLI is keyed by change name; the node's filePath is the change dir,
         // whose basename is the name (robust across both CHANGE-node constructions in SpecTreeModel).
         String changeName = null;
@@ -396,18 +368,14 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
     private void refreshAsync() {
         // Ensure expansion state is captured on EDT before background work
         Runnable doRefresh = () -> {
-            String query = searchField.getText();
-            boolean hasFilter = query != null && !query.isBlank();
-            Set<String> expandedLabels = hasFilter ? null : saveExpansionState();
+            Set<String> expandedLabels = saveExpansionState();
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
                 try {
                     SpecTreeModel treeModel = new SpecTreeModel(project);
-                    DefaultTreeModel model = treeModel.buildModel(hasFilter ? query : null);
+                    DefaultTreeModel model = treeModel.buildModel();
                     ApplicationManager.getApplication().invokeLater(() -> {
                         tree.setModel(model);
-                        if (hasFilter) {
-                            expandAllNodes();
-                        } else if (expandedLabels != null) {
+                        if (expandedLabels != null) {
                             restoreExpansionState(expandedLabels);
                         }
                         updateCliStatus();
@@ -432,38 +400,6 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
         } else {
             ApplicationManager.getApplication().invokeLater(doRefresh);
         }
-    }
-
-    private void debouncedFilter() {
-        filterAlarm.cancelAllRequests();
-        filterAlarm.addRequest(() -> ApplicationManager.getApplication().invokeLater(this::applyFilter), 150);
-    }
-
-    private void applyFilter() {
-        String query = searchField.getText();
-        boolean hasFilter = query != null && !query.isBlank();
-
-        // Save expansion state before first filter keystroke
-        if (hasFilter && preFilterExpansionState == null) {
-            preFilterExpansionState = saveExpansionState();
-        }
-
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            SpecTreeModel treeModel = new SpecTreeModel(project);
-            DefaultTreeModel model = treeModel.buildModel(hasFilter ? query : null);
-            ApplicationManager.getApplication().invokeLater(() -> {
-                tree.setModel(model);
-                if (hasFilter) {
-                    expandAllNodes();
-                } else {
-                    // Filter cleared — restore pre-filter expansion state
-                    if (preFilterExpansionState != null) {
-                        restoreExpansionState(preFilterExpansionState);
-                        preFilterExpansionState = null;
-                    }
-                }
-            });
-        });
     }
 
     private void expandAllNodes() {
@@ -601,19 +537,6 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
             }
             case CHANGES -> {
                 contextMenu.add(ActionManager.getInstance().getAction("OpenSpec.Propose"));
-            }
-            case SPEC_DOMAIN -> {
-                if (data.filePath() != null) {
-                    contextMenu.add(new AnAction("Open File") {
-                        @Override
-                        public void actionPerformed(@org.jetbrains.annotations.NotNull AnActionEvent ae) {
-                            VirtualFile file = LocalFileSystem.getInstance().findFileByPath(data.filePath());
-                            if (file != null) {
-                                FileEditorManager.getInstance(project).openFile(file, true);
-                            }
-                        }
-                    });
-                }
             }
             case DELTA_SPEC -> {
                 if (data.filePath() != null) {

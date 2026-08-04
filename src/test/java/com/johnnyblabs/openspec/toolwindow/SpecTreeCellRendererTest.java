@@ -47,14 +47,10 @@ class SpecTreeCellRendererTest {
     void nonStatusNodesAreNeverBadged() {
         // The on-model guard: a badge on a spec/requirement node would repeat the removed
         // @spec coverage scorecard. A future edit that badges one of these must fail here.
-        assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.REQUIREMENT) instanceof LayeredIcon,
-                "requirement node must never be badged");
-        assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.SPEC_DOMAIN) instanceof LayeredIcon,
-                "spec node must never be badged");
         assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.DELTA_SPEC) instanceof LayeredIcon,
                 "delta-spec node must never be badged");
-        assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.CONFIG) instanceof LayeredIcon,
-                "config node must never be badged");
+        assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.CHANGES) instanceof LayeredIcon,
+                "the Changes group node must not be badged");
         assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.CHANGE) instanceof LayeredIcon,
                 "a non-apply-ready change node must not be badged");
         assertFalse(SpecTreeCellRenderer.iconForType(TreeNodeType.ARTIFACT) instanceof LayeredIcon,

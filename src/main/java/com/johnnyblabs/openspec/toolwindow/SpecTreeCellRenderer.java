@@ -23,11 +23,8 @@ import java.awt.*;
 public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
 
     private static final Icon OPENSPEC_ICON = IconLoader.getIcon("/icons/openspec.svg", SpecTreeCellRenderer.class);
-    private static final Icon SPEC_ICON = IconLoader.getIcon("/icons/spec.svg", SpecTreeCellRenderer.class);
     // Package-private base icons: the renderer test asserts the layered icons compose these bases.
     static final Icon CHANGE_ICON = IconLoader.getIcon("/icons/change.svg", SpecTreeCellRenderer.class);
-    private static final Icon REQUIREMENT_ICON = IconLoader.getIcon("/icons/requirement.svg", SpecTreeCellRenderer.class);
-    private static final Icon ARCHIVE_ICON = IconLoader.getIcon("/icons/archive.svg", SpecTreeCellRenderer.class);
     static final Icon ARTIFACT_ICON = IconLoader.getIcon("/icons/artifact.svg", SpecTreeCellRenderer.class);
     private static final Icon DELTA_SPEC_ICON = IconLoader.getIcon("/icons/delta-spec.svg", SpecTreeCellRenderer.class);
     static final Icon MISSING_ARTIFACT_ICON = IconLoader.getIcon("/icons/missing-artifact.svg", SpecTreeCellRenderer.class);
@@ -168,8 +165,6 @@ public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
      */
     static Icon iconForType(SpecTreeModel.TreeNodeType type) {
         return switch (type) {
-            case SPECS, SPEC_DOMAIN -> SPEC_ICON;
-            case REQUIREMENT -> REQUIREMENT_ICON;
             case CHANGES, CHANGE -> CHANGE_ICON;
             case CHANGE_DONE -> CHANGE_DONE_ICON;
             case ARTIFACT -> ARTIFACT_ICON;
@@ -178,9 +173,6 @@ public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
             case ARTIFACT_BLOCKED -> ARTIFACT_BLOCKED_ICON;
             case MISSING_ARTIFACT -> MISSING_ARTIFACT_BADGED_ICON;
             case DELTA_SPEC -> DELTA_SPEC_ICON;
-            case ARCHIVE -> ARCHIVE_ICON;
-            case CONFIG -> AllIcons.General.Settings;
-            case CONFIG_ENTRY -> null;
             case HINT -> null;
         };
     }

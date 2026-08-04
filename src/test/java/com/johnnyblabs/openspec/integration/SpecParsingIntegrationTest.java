@@ -4,10 +4,7 @@ import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.johnnyblabs.openspec.model.SpecFile;
 import com.johnnyblabs.openspec.services.SpecParsingService;
-import com.johnnyblabs.openspec.toolwindow.SpecTreeModel;
 
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -86,10 +83,6 @@ public class SpecParsingIntegrationTest extends OpenSpecIntegrationTestBase {
         assertNotNull(specFile);
         SpecFile viaVfs = service.parseSpec(specFile, "fenced-scenario");
         assertEquals(viaAll, viaVfs);
-
-        // SpecTreeModel renders the CLI-correct requirement count for the domain node.
-        DefaultTreeModel tree = new SpecTreeModel(getProject()).buildModel();
-        assertEquals(1, countRequirementsForDomain(tree, "fenced-scenario"));
     }
 
     private static String readResource(String path) throws Exception {
@@ -97,33 +90,6 @@ public class SpecParsingIntegrationTest extends OpenSpecIntegrationTestBase {
             assertNotNull("missing test resource: " + path, is);
             return new String(is.readAllBytes(), StandardCharsets.UTF_8);
         }
-    }
-
-    /** Number of REQUIREMENT child nodes under the Specs -> &lt;domain&gt; node in a built tree. */
-    private static int countRequirementsForDomain(DefaultTreeModel model, String domain) {
-        DefaultMutableTreeNode root = (DefaultMutableTreeNode) model.getRoot();
-        for (int i = 0; i < root.getChildCount(); i++) {
-            DefaultMutableTreeNode top = (DefaultMutableTreeNode) root.getChildAt(i);
-            if (!(top.getUserObject() instanceof SpecTreeModel.TreeNodeData d)
-                    || d.type() != SpecTreeModel.TreeNodeType.SPECS) continue;
-            for (int j = 0; j < top.getChildCount(); j++) {
-                DefaultMutableTreeNode domainNode = (DefaultMutableTreeNode) top.getChildAt(j);
-                if (domainNode.getUserObject() instanceof SpecTreeModel.TreeNodeData dd
-                        && dd.type() == SpecTreeModel.TreeNodeType.SPEC_DOMAIN
-                        && domain.equals(dd.label())) {
-                    int count = 0;
-                    for (int k = 0; k < domainNode.getChildCount(); k++) {
-                        DefaultMutableTreeNode child = (DefaultMutableTreeNode) domainNode.getChildAt(k);
-                        if (child.getUserObject() instanceof SpecTreeModel.TreeNodeData cd
-                                && cd.type() == SpecTreeModel.TreeNodeType.REQUIREMENT) {
-                            count++;
-                        }
-                    }
-                    return count;
-                }
-            }
-        }
-        return -1;
     }
 
     public void testParsesDeltaSpec() throws Exception {
