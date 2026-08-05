@@ -535,12 +535,22 @@ class OpenSpecUiSmokeTest {
             // The contributor's cell renders presentableText() = the requirement NAME, so a body-token
             // search surfaces the "Friendly greeting" row (only THIS contributor emits the requirement
             // NAME — the platform Text search emits the matched line, not the name — so matching the
-            // name is the discriminating signal). items (renderer-painted cell text) is read explicitly.
+            // name is the discriminating signal). Our contributor's sortWeight ranks it the top hit, so
+            // SE auto-selects it — read the SELECTED cell, not the whole list.
+            //
+            // Why selectedItems and NOT items: the body token also matches the platform Text-in-Files
+            // contributor, whose result co-resides in the "All" tab and paints via FileAndLineTextRenderer.
+            // That renderer peeks at the neighbouring row (list.getModel().getElementAt(index-1)) for
+            // file grouping, which throws IndexOutOfBoundsException("No Data Model") when the driver's
+            // collectItems() bulk-renders every cell during results streaming — starving EVERY poll so
+            // items never returns our row even though it is present and selected (screenshot-proven).
+            // collectSelectedItems() renders ONLY the selected cell — our own SimpleListCellRenderer —
+            // so it never touches FileAndLineTextRenderer and the race cannot occur.
+            //
             // Generous timeout: this contributor is DumbAware + index-free (a ReadAction VFS walk), so
-            // it populates the "All" tab a beat LATER than the indexed contributors — a headful run
-            // showed the row arriving just past a 30s poll (the feature worked; the window was tight).
+            // it populates the "All" tab a beat LATER than the indexed contributors.
             waitUntil("SE surfaces the body-matched requirement by name", timeout = 90.seconds) {
-                se.resultsList.items.any { it.contains("Friendly greeting") }
+                se.resultsList.selectedItems.any { it.contains("Friendly greeting") }
             }
         }
     }
