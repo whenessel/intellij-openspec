@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+### Changed
+
+- **The tool-window tree is now focused on Changes.** The Browse tree shows the Changes section — your changes with per-artifact status — and no longer duplicates a spec/archive/config file tree: specs, archived changes, and `openspec/config.yaml` are browsed in the standard Project View (which already lists `openspec/**`) and open in the editor. A main spec opens in the editor with the platform's Markdown preview rather than the tool-window preview pane, which is now dedicated to change surfaces. Change nodes lead with the change **name** in the primary color, with the `[status]` tag in its meaning color and the `X/Y` task count as dimmed secondary text — so the name no longer competes with its metadata, and a complete count is not colored as "done" (the status icon badge already tells that story).
+- **Spec content search moved to Search Everywhere.** The always-on tree content filter is replaced by a Search Everywhere contributor: type a term that appears only inside a requirement's body or scenario text and it surfaces the matching requirement by name, opening its spec in the editor at that requirement. The search runs off the UI thread over your local OpenSpec files without building or persisting an index, so it also works during indexing.
+- **One "Verify" surface for the pre-archive check.** The separate "Compliance / Pre-Flight" button and vocabulary are retired in favor of a single on-vocabulary **Verify** surface that renders three states: *ready to archive*, *in progress* (unfinished but valid — a neutral, bypassable state mirroring `openspec archive --yes`), and *blocked* (a validation failure — the only hard gate). "Verify" now means the same check from the tool-window button, the menu action, and the archive pre-flight; an unfinished-but-valid change is no longer over-stated as a red "archive blocked" error.
+
 ## v0.6.0
 
 ### Changed
