@@ -346,30 +346,30 @@ class WorkflowActionPanelTest {
     // --- 7.4: Status strip content in different states ---
 
     @Test
-    void statusStrip_steady_showsComplianceAndDeliveryMode() {
-        String compliance = "Not checked";
+    void statusStrip_steady_showsVerifyStatusAndDeliveryMode() {
+        String compliance = "Not verified";
         String deliveryMode = "Clipboard: Claude Code";
         int taskComplete = 0;
         int taskTotal = 0;
 
         String strip = buildStatusStripText(compliance, taskComplete, taskTotal, deliveryMode, false, 0, 0);
-        assertEquals("Not checked · Clipboard: Claude Code", strip);
+        assertEquals("Not verified · Clipboard: Claude Code", strip);
     }
 
     @Test
     void statusStrip_withTasks_showsTaskProgress() {
-        String compliance = "\u2713 Compliant";
+        String compliance = "\u2713 Ready to archive";
         String deliveryMode = "Direct API";
         int taskComplete = 3;
         int taskTotal = 5;
 
         String strip = buildStatusStripText(compliance, taskComplete, taskTotal, deliveryMode, false, 0, 0);
-        assertEquals("\u2713 Compliant · 3/5 tasks · Direct API", strip);
+        assertEquals("\u2713 Ready to archive · 3/5 tasks · Direct API", strip);
     }
 
     @Test
     void statusStrip_generating_showsProgress() {
-        String compliance = "Not checked";
+        String compliance = "Not verified";
         String deliveryMode = "Direct API";
 
         String strip = buildStatusStripText(compliance, 0, 0, deliveryMode, true, 2, 4);

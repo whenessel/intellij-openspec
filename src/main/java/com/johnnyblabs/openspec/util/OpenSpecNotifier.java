@@ -18,7 +18,7 @@ public final class OpenSpecNotifier {
     public static final String GROUP_GENERATION = "OpenSpec.Generation";
     public static final String GROUP_VALIDATION = "OpenSpec.Validation";
     public static final String GROUP_SYSTEM = "OpenSpec.System";
-    public static final String GROUP_COMPLIANCE = "OpenSpec.Compliance";
+    public static final String GROUP_VERIFY = "OpenSpec.Verify";
 
     private OpenSpecNotifier() {
     }
@@ -129,22 +129,22 @@ public final class OpenSpecNotifier {
         };
     }
 
-    // --- Compliance notifications (sticky) ---
+    // --- Verify notifications (sticky) ---
 
-    public static void compliance(@NotNull Project project, @NotNull String title, @NotNull String content,
+    public static void verify(@NotNull Project project, @NotNull String title, @NotNull String content,
                                    @NotNull NotificationType type) {
-        notify(project, GROUP_COMPLIANCE, title, content, type);
+        notify(project, GROUP_VERIFY, title, content, type);
     }
 
-    public static void complianceError(@NotNull Project project, @NotNull String title, @NotNull String content) {
-        compliance(project, title, content, NotificationType.ERROR);
+    public static void verifyError(@NotNull Project project, @NotNull String title, @NotNull String content) {
+        verify(project, title, content, NotificationType.ERROR);
     }
 
-    public static void complianceWarning(@NotNull Project project, @NotNull String title, @NotNull String content) {
-        compliance(project, title, content, NotificationType.WARNING);
+    public static void verifyWarning(@NotNull Project project, @NotNull String title, @NotNull String content) {
+        verify(project, title, content, NotificationType.WARNING);
     }
 
-    public static void complianceInfo(@NotNull Project project, @NotNull String title, @NotNull String content) {
-        compliance(project, title, content, NotificationType.INFORMATION);
+    public static void verifyInfo(@NotNull Project project, @NotNull String title, @NotNull String content) {
+        verify(project, title, content, NotificationType.INFORMATION);
     }
 }

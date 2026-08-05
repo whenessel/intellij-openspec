@@ -6,8 +6,6 @@ import com.johnnyblabs.openspec.model.*;
 import com.johnnyblabs.openspec.services.ArtifactOrchestrationService;
 import com.johnnyblabs.openspec.services.ChangeService;
 import com.johnnyblabs.openspec.services.CliDetectionService;
-import com.johnnyblabs.openspec.services.ConfigService;
-import com.johnnyblabs.openspec.services.SpecParsingService;
 import com.johnnyblabs.openspec.settings.OpenSpecSettings;
 import com.johnnyblabs.openspec.util.ApplyPromptBuilder;
 import com.johnnyblabs.openspec.util.OpenSpecFileUtil;
@@ -34,10 +32,6 @@ public class SpecTreeModel {
     }
 
     public DefaultTreeModel buildModel() {
-        return buildModel(null);
-    }
-
-    public DefaultTreeModel buildModel(String query) {
         DefaultMutableTreeNode root = new DefaultMutableTreeNode("OpenSpec");
 
         if (!OpenSpecFileUtil.isOpenSpecProject(project)) {
@@ -47,120 +41,12 @@ public class SpecTreeModel {
             return new DefaultTreeModel(root);
         }
 
-        String normalizedQuery = (query != null && !query.isBlank()) ? query.trim().toLowerCase() : null;
-
-        DefaultMutableTreeNode specsNode = buildSpecsNode();
-        DefaultMutableTreeNode changesNode = buildChangesNode();
-        DefaultMutableTreeNode archiveNode = buildArchiveNode();
-        DefaultMutableTreeNode configNode = buildConfigNode();
-
-        if (normalizedQuery == null) {
-            root.add(specsNode);
-            root.add(changesNode);
-            root.add(archiveNode);
-            root.add(configNode);
-        } else {
-            DefaultMutableTreeNode filteredSpecs = filterNode(specsNode, normalizedQuery);
-            DefaultMutableTreeNode filteredChanges = filterNode(changesNode, normalizedQuery);
-            DefaultMutableTreeNode filteredArchive = filterNode(archiveNode, normalizedQuery);
-            DefaultMutableTreeNode filteredConfig = filterNode(configNode, normalizedQuery);
-
-            if (filteredSpecs != null) root.add(filteredSpecs);
-            if (filteredChanges != null) root.add(filteredChanges);
-            if (filteredArchive != null) root.add(filteredArchive);
-            if (filteredConfig != null) root.add(filteredConfig);
-
-            if (root.getChildCount() == 0) {
-                String hint = "No results for '" + query.trim() + "'";
-                root.add(new DefaultMutableTreeNode(
-                        new TreeNodeData(hint, TreeNodeType.HINT, null, null, null, hint)));
-            }
-        }
-
+        // The tool-window tree shows only the model/process surface — the Changes subtree. File
+        // navigation (spec files, archived changes, config.yaml) is owned by the Project View, and
+        // spec content-search is re-homed to the Search Everywhere contributor — so there is no
+        // second file-navigation tree here and no always-on tree filter.
+        root.add(buildChangesNode());
         return new DefaultTreeModel(root);
-    }
-
-    static DefaultMutableTreeNode filterNode(DefaultMutableTreeNode node, String query) {
-        Object userObj = node.getUserObject();
-        String label = (userObj instanceof TreeNodeData data) ? data.label() : node.toString();
-        String searchText = (userObj instanceof TreeNodeData data) ? data.searchText() : null;
-        boolean selfMatches = label.toLowerCase().contains(query)
-                || (searchText != null && searchText.toLowerCase().contains(query));
-
-        // Collect filtered children
-        java.util.List<DefaultMutableTreeNode> matchingChildren = new java.util.ArrayList<>();
-        for (int i = 0; i < node.getChildCount(); i++) {
-            DefaultMutableTreeNode child = (DefaultMutableTreeNode) node.getChildAt(i);
-            DefaultMutableTreeNode filtered = filterNode(child, query);
-            if (filtered != null) {
-                matchingChildren.add(filtered);
-            }
-        }
-
-        if (!selfMatches && matchingChildren.isEmpty()) {
-            return null;
-        }
-
-        // Clone the node (without children) and add matching children
-        DefaultMutableTreeNode clone = new DefaultMutableTreeNode(node.getUserObject());
-        if (selfMatches && matchingChildren.isEmpty()) {
-            // Self matches — include all original children
-            for (int i = 0; i < node.getChildCount(); i++) {
-                clone.add(cloneSubtree((DefaultMutableTreeNode) node.getChildAt(i)));
-            }
-        } else {
-            for (DefaultMutableTreeNode child : matchingChildren) {
-                clone.add(child);
-            }
-        }
-        return clone;
-    }
-
-    private static DefaultMutableTreeNode cloneSubtree(DefaultMutableTreeNode node) {
-        DefaultMutableTreeNode clone = new DefaultMutableTreeNode(node.getUserObject());
-        for (int i = 0; i < node.getChildCount(); i++) {
-            clone.add(cloneSubtree((DefaultMutableTreeNode) node.getChildAt(i)));
-        }
-        return clone;
-    }
-
-    private DefaultMutableTreeNode buildSpecsNode() {
-        SpecParsingService parsingService = project.getService(SpecParsingService.class);
-        return buildSpecsNode(parsingService.parseAllSpecs());
-    }
-
-    /**
-     * Builds the Specs subtree from parsed spec files. Pure of the project/service so it is
-     * unit-testable headlessly. Each requirement node carries {@code searchText} (name + body +
-     * scenario text) so {@link #filterNode} can match content, not just labels.
-     */
-    static DefaultMutableTreeNode buildSpecsNode(List<SpecFile> specs) {
-        DefaultMutableTreeNode specsNode = new DefaultMutableTreeNode(
-                new TreeNodeData("Specs", TreeNodeType.SPECS, null, null, null, "Capability specifications"));
-
-        if (specs.isEmpty()) {
-            String hint = "No specs found yet.";
-            specsNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData(hint, TreeNodeType.HINT, null, null, null, hint)));
-            return specsNode;
-        }
-
-        for (SpecFile spec : specs) {
-            int reqCount = spec.getRequirements().size();
-            String domainTooltip = reqCount + " requirement" + (reqCount != 1 ? "s" : "") + " — " + spec.getFilePath();
-            DefaultMutableTreeNode domainNode = new DefaultMutableTreeNode(
-                    new TreeNodeData(spec.getDomain(), TreeNodeType.SPEC_DOMAIN, spec.getFilePath(), null, null, domainTooltip));
-
-            for (Requirement req : spec.getRequirements()) {
-                domainNode.add(new DefaultMutableTreeNode(
-                        new TreeNodeData("Requirement: " + req.getName(), TreeNodeType.REQUIREMENT, spec.getFilePath(),
-                                null, null, req.getName(), SpecContentMatcher.searchableText(req))));
-            }
-
-            specsNode.add(domainNode);
-        }
-
-        return specsNode;
     }
 
     private DefaultMutableTreeNode buildChangesNode() {
@@ -192,7 +78,8 @@ public class SpecTreeModel {
             String changeTooltip = buildChangeTooltip(change, dag, taskCounts);
 
             DefaultMutableTreeNode changeNode = new DefaultMutableTreeNode(
-                    new TreeNodeData(label, changeType, change.getPath(), change.getName(), null, changeTooltip));
+                    new TreeNodeData(label, changeType, change.getPath(), change.getName(), null, changeTooltip, null,
+                            new TreeNodeData.ChangeLabelParts(change.getName(), status, taskCounts)));
 
             // Try CLI-based artifact DAG first; fall back to on-disk artifact listing otherwise.
             boolean dagLoaded = addDagArtifactNodes(changeNode, change, dag);
@@ -361,77 +248,10 @@ public class SpecTreeModel {
         return detection != null && detection.isAvailable();
     }
 
-    private DefaultMutableTreeNode buildArchiveNode() {
-        DefaultMutableTreeNode archiveNode = new DefaultMutableTreeNode(
-                new TreeNodeData("Archive", TreeNodeType.ARCHIVE, null, null, null, "Completed changes"));
-
-        ChangeService changeService = project.getService(ChangeService.class);
-        List<Change> archived = changeService.getArchivedChanges();
-
-        for (Change change : archived) {
-            archiveNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData(change.getName(), TreeNodeType.CHANGE, change.getPath(), null, null, change.getPath())));
-        }
-
-        return archiveNode;
-    }
-
-    private DefaultMutableTreeNode buildConfigNode() {
-        String configPath = project.getBasePath() + "/openspec/config.yaml";
-        ConfigService configService = project.getService(ConfigService.class);
-        OpenSpecConfig config = configService != null ? configService.getConfig() : null;
-        return buildConfigNode(config, configPath);
-    }
-
-    static DefaultMutableTreeNode buildConfigNode(OpenSpecConfig config, String configPath) {
-        DefaultMutableTreeNode configNode = new DefaultMutableTreeNode(
-                new TreeNodeData("Config", TreeNodeType.CONFIG, configPath, null, null, "openspec/config.yaml"));
-
-        if (config == null) {
-            String hint = "No config.yaml found";
-            configNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData(hint, TreeNodeType.HINT, null, null, null, hint)));
-            return configNode;
-        }
-
-        if (config.getSchema() != null && !config.getSchema().isEmpty()) {
-            configNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData("schema: " + config.getSchema(), TreeNodeType.CONFIG_ENTRY, configPath)));
-        }
-        if (config.getVersion() != null && !config.getVersion().isEmpty()) {
-            configNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData("version: " + config.getVersion(), TreeNodeType.CONFIG_ENTRY, configPath)));
-        }
-        if (config.getProfile() != null && !config.getProfile().isEmpty()) {
-            String profileName = config.getProfile().getOrDefault("name", "unnamed");
-            configNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData("profile: " + profileName, TreeNodeType.CONFIG_ENTRY, configPath,
-                            null, null, "Profile: " + config.getProfile().entrySet().stream()
-                            .map(e -> e.getKey() + "=" + e.getValue())
-                            .collect(Collectors.joining(", ")))));
-        }
-        if (config.getContext() != null && !config.getContext().isEmpty()) {
-            String truncated = config.getContext().length() > 60
-                    ? config.getContext().substring(0, 60) + "..."
-                    : config.getContext();
-            configNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData("context: " + truncated, TreeNodeType.CONFIG_ENTRY, configPath,
-                            null, null, config.getContext())));
-        }
-        if (config.getRules() != null && !config.getRules().isEmpty()) {
-            int count = config.getRules().size();
-            configNode.add(new DefaultMutableTreeNode(
-                    new TreeNodeData("rules: " + count + " defined", TreeNodeType.CONFIG_ENTRY, configPath,
-                            null, null, "Rules: " + String.join(", ", config.getRules().keySet()))));
-        }
-
-        return configNode;
-    }
-
     /**
      * Resolves the active change name from a tree selection path.
      * Walks up from the selected node to find a CHANGE node, returning its changeName.
-     * Returns null if the selection is not under a change (e.g., main specs, config, archive).
+     * Returns null if the selection is not under a change.
      */
     public static String resolveChangeName(TreePath path) {
         if (path == null) return null;
@@ -450,28 +270,41 @@ public class SpecTreeModel {
     }
 
     public enum TreeNodeType {
-        SPECS, SPEC_DOMAIN, REQUIREMENT, CHANGES, CHANGE, CHANGE_DONE, ARTIFACT, MISSING_ARTIFACT,
+        CHANGES, CHANGE, CHANGE_DONE, ARTIFACT, MISSING_ARTIFACT,
         ARTIFACT_DONE, ARTIFACT_READY, ARTIFACT_BLOCKED,
-        DELTA_SPEC, ARCHIVE, CONFIG, CONFIG_ENTRY, HINT
+        DELTA_SPEC, HINT
     }
 
     public record TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId,
-                               String tooltip, String searchText) {
+                               String tooltip, String searchText, ChangeLabelParts changeParts) {
+        public TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId, String tooltip, String searchText) {
+            this(label, type, filePath, changeName, artifactId, tooltip, searchText, null);
+        }
+
         public TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId, String tooltip) {
-            this(label, type, filePath, changeName, artifactId, tooltip, null);
+            this(label, type, filePath, changeName, artifactId, tooltip, null, null);
         }
 
         public TreeNodeData(String label, TreeNodeType type, String filePath, String changeName, String artifactId) {
-            this(label, type, filePath, changeName, artifactId, null, null);
+            this(label, type, filePath, changeName, artifactId, null, null, null);
         }
 
         public TreeNodeData(String label, TreeNodeType type, String filePath) {
-            this(label, type, filePath, null, null, null, null);
+            this(label, type, filePath, null, null, null, null, null);
         }
 
         @Override
         public String toString() {
             return label;
         }
+
+        /**
+         * Structured pieces of a change node's label, so the cell renderer can fragment it — name in
+         * the default (primary) color, the {@code [status]} tag in its meaning color, and the
+         * {@code X/Y} task count dimmed — instead of painting one concatenated string in one color.
+         * Null for every non-change node. The flat {@link #label} still carries the concatenated form
+         * for search/tooltip/tests.
+         */
+        public record ChangeLabelParts(String name, ChangeStatus status, int[] taskCounts) {}
     }
 }

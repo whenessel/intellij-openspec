@@ -37,6 +37,86 @@ Trim the Browse tab's file-navigation half and keep only the editor-irreplaceabl
 - **restage `MarketplaceScreenshotTour`** (~lines 299-340), which repeats that expansion for a screenshot;
 - treat journey edits as part of this change; they run in `src/integrationTest` (headful uiSmoke, `caffeinate -dimsu`), which `build`/`test` do not catch.
 
+## Verify/Compliance collapse (folded in — agent rationale + decisions)
+
+**openspec-guru (terminology ruling, grounded in CLI 1.6.0).** "Compliance / Pre-Flight" appears
+nowhere in upstream OpenSpec; the native word for the pre-archive check is **verify**. Upstream
+`openspec archive` splits the gate into two conditions that BOTH carry `severity:"error"` in JSON —
+the split is the `code`, not the severity: `archive_tasks_incomplete` is a **soft, bypassable** gate
+(archivable with `--yes`; interactively a *Warning… Continue?*), and `archive_validation_failed` is a
+**hard** gate (bypass only `--no-validate`). Native state label for a valid-but-unfinished change is
+**"(In Progress)"**; native progress form is "N/M tasks". So rendering unfinished work in red
+"error — blocked" language over-states it and makes the plugin stricter than the client it wraps —
+the same anti-pattern the validator-parity change corrected.
+
+**plugin-ui-specialist (surface).** Collapse the two redundant buttons into ONE Verify surface; the
+survivor is the superset check (`ComplianceService` already folds the verify report in) retitled to
+Verify. Icon `AllIcons.Actions.ProjectWideAnalysisOn`; add a stable accessible name. Three-tier
+dialog header: READY (green, Archive), **IN&nbsp;PROGRESS (neutral Information icon, foreground color —
+NOT orange/red — "Archive anyway", enabled/bypassable)**, BLOCKED (red, Archive disabled). Keep the
+clickable status chip, rebranded to verify vocabulary with a neutral middle state. Repoint
+`OpenSpecVerifyAction` to the same path so "Verify" means one thing everywhere. Retire
+`VerifyReportDialog`.
+
+**test-engineer (test strategy).** The load-bearing pure unit is a three-state classifier keyed on an
+intrinsic per-finding `BlockKind` (HARD/SOFT/NONE), not on error count — because both gate conditions
+are `severity:"error"`. Crux test: `incompleteTasksOnly_isInProgress_notBlocked`. `[~]` is invisible
+to upstream's counter (only `[ ]`/`[x]` counted) — a real divergence, but the plugin's `[~]`-aware
+progress display is richer, not stricter, and both `[ ]`/`[~]` map to the same SOFT/IN&nbsp;PROGRESS
+gate, so the divergence is display-only and deliberate.
+
+**Decision — internal-fold, NOT CLI-authoritative archive gate.** The test-engineer's path (a) —
+parse `openspec archive --json` for the native codes — is **declined here**. `openspec archive`
+without `--yes` on a *clean* change actually **moves** the change (it archives), so invoking it as a
+read-only "readiness check" is an archive-side-effect hazard. Instead the classifier folds the
+plugin's existing internal findings: a `VALIDATION` error is HARD (`archive_validation_failed`
+analogue), a completeness finding is SOFT (`archive_tasks_incomplete` analogue), warnings are NONE.
+This is an internal model, correctly builder-seeded in tests (not an external-output parser, so no
+captured-CLI contract fixture is mandated). A genuinely CLI-authoritative archive gate is a
+legitimate *separate* change (sibling to validator-parity), out of scope here.
+
+**Naming.** `ComplianceResult → ArchiveReadinessResult` (named for what it computes), the user-facing
+verb stays **Verify** (button/action/dialog); `ComplianceService → ArchiveReadinessService` (distinct
+from the internal `VerificationService` completeness+correctness engine it wraps);
+`CompliancePreFlightDialog → VerifyDialog`; `OpenSpec.Compliance → OpenSpec.Verify`. Category
+`displayName`s tightened to Completeness / Validation / Spec Sync (enum constants unchanged).
+
+**Verify → archive flow.** All three entry points (tool-window Verify button, `OpenSpec.Verify` menu,
+Archive pre-flight) show `VerifyDialog.showAndGet()`; OK archives (enabled for READY and bypassable
+IN&nbsp;PROGRESS, disabled for a hard BLOCK) — replacing the old misleading `.show()`-and-ignore where
+an "Archive" button did nothing.
+
+## Change-node visual hierarchy (folded in — agent opinion + decisions)
+
+With the Changes subtree becoming the tree's load-bearing surface, its node rendering is worth
+getting right. The node reads `name [status] X/Y` but was painted as ONE string in ONE color
+(`DefaultTreeCellRenderer`), so a proposed change was entirely green — the task count competed with
+the name.
+
+**plugin-ui-specialist opinion.** The root cause isn't the count, it's that the *name* is tinted.
+Correct hierarchy: **name** = default/primary color (the identifier the eye scans for); **`[status]`**
+= keep its meaning color (green=proposed/blue=applied — the only inline proposed↔applied cue, since
+both share the plain change icon; only `CHANGE_DONE` is badged); **`X/Y`** = dimmed `GRAYED_ATTRIBUTES`.
+Keep the raw fraction (not a %, it carries "how far/how big"); long form stays in the tooltip. **Do
+not green `N/N`** — the green "done" badge is `dag.isComplete()` (artifact DAG) while `X/Y` is
+tasks.md checkboxes; these are distinct upstream signals that can diverge, so greening a complete
+count could contradict a non-done icon. Let the badge own "done".
+
+**jetbrains-platform-guru feasibility.** `ColoredTreeCellRenderer` (multi-fragment) is the right,
+non-deprecated base on 242→252, with an in-repo precedent (`CoordinationPanel.CoordinationCellRenderer`
+already uses `GRAYED_ATTRIBUTES`). Override `customizeCellRenderer`; the base forces the selection
+foreground on a focused-selected row, so the old manual `sel ? getTextSelectionColor()` branches are
+deleted (they were a `DefaultTreeCellRenderer` necessity). Bold/italic states become `STYLE_BOLD`/
+`STYLE_ITALIC` `SimpleTextAttributes` (not `Font.deriveFont`, which `SimpleColoredComponent` ignores),
+cached as constants (zero per-paint allocation). The existing `SpecTreeCellRendererTest` only exercises
+the static `iconForType` map, so the base-class swap leaves it untouched.
+
+**Decision.** Carry structured `ChangeLabelParts(name, status, taskCounts)` on `TreeNodeData` so the
+renderer fragments cleanly (killing the brittle `label.contains("[proposed]")` sniffing); keep
+`buildChangeLabel`'s flat string for search/tooltip/tests. The fragmentation decision is extracted as
+a pure `changeFragments(parts)` seam so the visual-hierarchy contract (name un-tinted, status colored,
+count grayed, `8/8` not greened) is unit-tested without a running IDE.
+
 ## Trade-offs
 
 - **Reclaims vertical space** for the status/pipeline/deltas surfaces (today cramped under a large redundant tree).

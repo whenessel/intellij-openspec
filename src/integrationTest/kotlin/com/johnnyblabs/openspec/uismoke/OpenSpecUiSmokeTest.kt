@@ -10,6 +10,7 @@ import com.intellij.driver.sdk.openFile
 import com.intellij.driver.sdk.invokeAction
 import com.intellij.driver.sdk.singleProject
 import com.intellij.driver.sdk.ui.components.ideFrame
+import com.intellij.driver.sdk.ui.components.searchEverywherePopup
 import com.intellij.driver.sdk.ui.components.tree
 import com.intellij.driver.sdk.ui.ui
 import com.intellij.driver.sdk.waitForIndicators
@@ -149,7 +150,7 @@ class OpenSpecUiSmokeTest {
                 // byVisibleText can't see them. Tree groups render collapsed by default;
                 // the group labels and the workflow panel's active-change label are the
                 // reliably visible seeded content.
-                waitUntil("Browse tree renders its Specs group") { hasText("Specs") }
+                waitUntil("Browse tree renders its Changes group") { hasText("Changes") }
                 waitUntil("Browse tree renders its Changes group") { hasText("Changes") }
                 waitUntil("workflow panel shows the seeded change 'demo-add-farewell'") {
                     hasText("demo-add-farewell")
@@ -267,8 +268,10 @@ class OpenSpecUiSmokeTest {
     }
 
     /**
-     * Journey 5 — archive guard: Archive on the 1/4-complete change surfaces the
-     * compliance pre-flight, cancel leaves the change directory unmoved.
+     * Journey 5 — archive guard: Archive on the incomplete change surfaces the Verify pre-flight
+     * (upstream's word — the plugin no longer says "Compliance"), cancel leaves the change directory
+     * unmoved. The seeded demo is proposal-only (no deltas) so it renders the hard BLOCKED tier; the
+     * neutral IN_PROGRESS-tier logic is proven by the pure ArchiveReadinessResultTest/VerifyDialogTest.
      */
     @Test
     fun archiveGuardsIncompleteChange() {
@@ -280,15 +283,15 @@ class OpenSpecUiSmokeTest {
 
             // Dialogs are separate windows, NOT descendants of the IDE frame — search
             // from the driver-level UI root (learned from the hierarchy dump).
-            waitUntil("compliance pre-flight dialog for the incomplete change", timeout = 3.minutes) {
-                ui.x { byTitle("Compliance Check — demo-add-farewell") }.present()
+            waitUntil("verify pre-flight dialog for the incomplete change", timeout = 3.minutes) {
+                ui.x { byTitle("Verify — demo-add-farewell") }.present()
             }
             // Robot Escape depends on focus — click the dialog's Cancel button instead.
-            ui.x { byTitle("Compliance Check — demo-add-farewell") }
+            ui.x { byTitle("Verify — demo-add-farewell") }
                 .x { byAccessibleName("Cancel") }
                 .click(null)
             waitUntil("pre-flight dialog closed on cancel") {
-                ui.x { byTitle("Compliance Check — demo-add-farewell") }.notPresent()
+                ui.x { byTitle("Verify — demo-add-farewell") }.notPresent()
             }
         }
         check(Files.isDirectory(projectPath.resolve("openspec/changes/demo-add-farewell"))) {
@@ -475,7 +478,7 @@ class OpenSpecUiSmokeTest {
             // report has its real surface (otherwise the action falls into a summary-only
             // notification fallback).
             withContext(OnDispatcher.EDT) { getToolWindow("OpenSpec").show() }
-            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Specs") } }
+            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Changes") } }
 
             invokeAction("OpenSpec.Validate", now = true)
 
@@ -500,43 +503,54 @@ class OpenSpecUiSmokeTest {
         }
     }
 
-    // ---- Journey 8 — Browse preview renders the selected spec ----------------------
+    // ---- Journey 8 — Search Everywhere surfaces spec CONTENT (re-homed from the retired tree) ----
 
     /**
-     * Journey 8 — searchable spec-and-change viewer: selecting a spec node in the Browse tree
-     * renders its markdown in the preview pane. The node is selected through the platform tree
-     * MODEL API (JTreeUiComponent.clickPath resolves TreePathToRow), NOT a byVisibleText row click —
-     * tree rows are cell-renderer paint and invisible to text queries. The assertion targets the
-     * requirement BODY prose ("greet the user by name"), which appears ONLY in the rendered preview
-     * (never in a tree label), so it can only be satisfied by the selection→pooled-read→render→
-     * setText wiring this journey exists to catch.
+     * Journey 8 — the re-homed spec content-search. The in-panel Specs tree + its always-on content
+     * filter were retired (specs are browsed in the Project View and opened in the editor); content
+     * search now lives in a Search Everywhere contributor. This journey opens Search Everywhere and
+     * types a token that appears ONLY in a requirement's BODY prose ("greet the user by name" — in no
+     * tree label, filename, or requirement NAME), then asserts the contributor surfaces the matching
+     * requirement by NAME ("Friendly greeting", which its list cell renders). SE is driven by KEYBOARD
+     * only (clicks don't land in this env) and its results list renders cell text (unlike the opaque
+     * JEditorPane the old journey needed an accessible-name marker for), so this is a robust gate.
+     * Editor-open on selection is covered by the RequirementLineFinder unit tests and deliberately NOT
+     * gated here (selecting a specific row would need a click).
      */
     @Test
-    fun previewPaneRendersSelectedSpec() {
+    fun searchEverywhereFindsSpecContent() {
         newContext(freshDemoProject()).runIdeWithDriver().useDriverAndCloseIde {
+            // Wait for indicators BEFORE opening SE so no late balloon/indicator steals focus and
+            // auto-closes the popup. The contributor is DumbAware + index-free, so no indexing is
+            // needed for correctness — the wait only quiets focus theft.
             waitForIndicators(5.minutes)
 
-            withContext(OnDispatcher.EDT) { getToolWindow("OpenSpec").show() }
+            invokeAction("SearchEverywhere", now = false)
 
-            ideFrame {
-                waitUntil("Browse tree renders its Specs group") { hasText("Specs") }
+            // The popup is a HeavyWeightWindow off the driver root (like a dialog), not under ideFrame.
+            val se = ui.searchEverywherePopup()
+            waitUntil("Search Everywhere popup open") { se.present() }
+            se.keyboard { enterText("greet the user by name") }
 
-                // Drive the tree via its model: expand Specs → greeting, then select the seeded
-                // requirement node. Path segments are the node labels (TreeNodeData.label()).
-                val browseTree = tree("//div[@class='Tree']")
-                browseTree.expandPath("OpenSpec", "Specs", fullMatch = false)
-                browseTree.expandPath("OpenSpec", "Specs", "greeting", fullMatch = false)
-                browseTree.clickPath(
-                    "OpenSpec", "Specs", "greeting", "Requirement: Friendly greeting", fullMatch = false
-                )
-
-                // The preview renders HTML into a JEditorPane, whose content the driver cannot read
-                // via hasText. The pane's accessible name flips to "rendered" only after a successful
-                // selection→pooled-read→render→setText, so waiting on it proves that exact wiring
-                // fired (and distinguishes it from the "empty" state the pane shows before selection).
-                waitUntil("preview pane renders on selection", timeout = 2.minutes) {
-                    x { byAccessibleName("OpenSpec preview rendered") }.present()
-                }
+            // The contributor's cell renders presentableText() = the requirement NAME, so a body-token
+            // search surfaces the "Friendly greeting" row (only THIS contributor emits the requirement
+            // NAME — the platform Text search emits the matched line, not the name — so matching the
+            // name is the discriminating signal). Our contributor's sortWeight ranks it the top hit, so
+            // SE auto-selects it — read the SELECTED cell, not the whole list.
+            //
+            // Why selectedItems and NOT items: the body token also matches the platform Text-in-Files
+            // contributor, whose result co-resides in the "All" tab and paints via FileAndLineTextRenderer.
+            // That renderer peeks at the neighbouring row (list.getModel().getElementAt(index-1)) for
+            // file grouping, which throws IndexOutOfBoundsException("No Data Model") when the driver's
+            // collectItems() bulk-renders every cell during results streaming — starving EVERY poll so
+            // items never returns our row even though it is present and selected (screenshot-proven).
+            // collectSelectedItems() renders ONLY the selected cell — our own SimpleListCellRenderer —
+            // so it never touches FileAndLineTextRenderer and the race cannot occur.
+            //
+            // Generous timeout: this contributor is DumbAware + index-free (a ReadAction VFS walk), so
+            // it populates the "All" tab a beat LATER than the indexed contributors.
+            waitUntil("SE surfaces the body-matched requirement by name", timeout = 90.seconds) {
+                se.resultsList.selectedItems.any { it.contains("Friendly greeting") }
             }
         }
     }
@@ -642,7 +656,7 @@ class OpenSpecUiSmokeTest {
             // Show the tool window so the Console panel is registered — otherwise Validate falls
             // back to a summary-only notification with no console surface for the report.
             withContext(OnDispatcher.EDT) { getToolWindow("OpenSpec").show() }
-            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Specs") } }
+            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Changes") } }
 
             invokeAction("OpenSpec.Validate", now = true)
 
@@ -703,7 +717,7 @@ class OpenSpecUiSmokeTest {
             // Show the tool window so the Console panel is registered — otherwise Validate falls
             // back to a summary-only notification and the `--strict` command echo has no surface.
             withContext(OnDispatcher.EDT) { getToolWindow("OpenSpec").show() }
-            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Specs") } }
+            ideFrame { waitUntil("OpenSpec tool window renders") { hasText("Changes") } }
 
             invokeAction("OpenSpec.ValidateStrict", now = true)
 

@@ -41,38 +41,25 @@ class TreeSelectionSyncTest {
     }
 
     @Test
-    void resolveChangeName_fromNonChangeNode_returnsNull() {
+    void resolveChangeName_fromChangesGroupNode_returnsNull() {
+        // Selecting the "Changes" group header (not a specific change) resolves to null.
         DefaultMutableTreeNode root = new DefaultMutableTreeNode("OpenSpec");
-        DefaultMutableTreeNode specsNode = new DefaultMutableTreeNode(
-                new SpecTreeModel.TreeNodeData("Specs", SpecTreeModel.TreeNodeType.SPECS, null, null, null, null));
-        DefaultMutableTreeNode domainNode = new DefaultMutableTreeNode(
-                new SpecTreeModel.TreeNodeData("plugin-core", SpecTreeModel.TreeNodeType.SPEC_DOMAIN, "/path/spec.md", null, null, null));
-        root.add(specsNode);
-        specsNode.add(domainNode);
+        DefaultMutableTreeNode changesNode = new DefaultMutableTreeNode(
+                new SpecTreeModel.TreeNodeData("Changes", SpecTreeModel.TreeNodeType.CHANGES, null, null, null, null));
+        root.add(changesNode);
 
-        TreePath path = new TreePath(new Object[]{root, specsNode, domainNode});
+        TreePath path = new TreePath(new Object[]{root, changesNode});
         assertNull(SpecTreeModel.resolveChangeName(path));
     }
 
     @Test
-    void resolveChangeName_fromConfigNode_returnsNull() {
+    void resolveChangeName_fromHintNode_returnsNull() {
         DefaultMutableTreeNode root = new DefaultMutableTreeNode("OpenSpec");
-        DefaultMutableTreeNode configNode = new DefaultMutableTreeNode(
-                new SpecTreeModel.TreeNodeData("Config", SpecTreeModel.TreeNodeType.CONFIG, "/path/config.yaml", null, null, null));
-        root.add(configNode);
+        DefaultMutableTreeNode hintNode = new DefaultMutableTreeNode(
+                new SpecTreeModel.TreeNodeData("No changes", SpecTreeModel.TreeNodeType.HINT, null, null, null, null));
+        root.add(hintNode);
 
-        TreePath path = new TreePath(new Object[]{root, configNode});
-        assertNull(SpecTreeModel.resolveChangeName(path));
-    }
-
-    @Test
-    void resolveChangeName_fromArchiveNode_returnsNull() {
-        DefaultMutableTreeNode root = new DefaultMutableTreeNode("OpenSpec");
-        DefaultMutableTreeNode archiveNode = new DefaultMutableTreeNode(
-                new SpecTreeModel.TreeNodeData("Archive", SpecTreeModel.TreeNodeType.ARCHIVE, null, null, null, null));
-        root.add(archiveNode);
-
-        TreePath path = new TreePath(new Object[]{root, archiveNode});
+        TreePath path = new TreePath(new Object[]{root, hintNode});
         assertNull(SpecTreeModel.resolveChangeName(path));
     }
 

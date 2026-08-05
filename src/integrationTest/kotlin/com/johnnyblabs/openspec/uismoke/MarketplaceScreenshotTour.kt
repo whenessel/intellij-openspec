@@ -296,37 +296,17 @@ class MarketplaceScreenshotTour {
                         .getToolWindow("Project")?.hide()
                 }
             }
-            ideFrame { waitUntil("Browse tree renders") { hasText("Specs") } }
+            ideFrame { waitUntil("Browse tree renders") { hasText("Changes") } }
 
             // Maximize the OpenSpec tool window for the headline shot so the master/detail (tree +
             // rendered preview) fills the frame instead of being crammed into the side dock.
             // Best-effort: if the platform API differs, fall back to the default docked layout.
             setOpenSpecMaximized(true)
 
-            // 07 — master/detail: select a spec node through the tree MODEL API so the Browse
-            // preview pane renders the spec's markdown beside the tree (the headline viewer visual).
-            ideFrame {
-                val browseTree = tree("//div[@class='Tree']")
-                browseTree.expandPath("OpenSpec", "Specs", fullMatch = false)
-                // Expanding "Specs" is async; the child expand can race the node's arrival and throw
-                // WaitForException on a fast boot. Retry the model-level expand itself (waitUntil
-                // swallows the probe's exception and retries) rather than probing rendered text —
-                // the custom badge cell renderer means hasText can't see the node label.
-                waitUntil("greeting spec node expands") {
-                    browseTree.expandPath("OpenSpec", "Specs", "greeting", fullMatch = false); true
-                }
-                browseTree.clickPath(
-                    "OpenSpec", "Specs", "greeting", "Requirement: Friendly greeting", fullMatch = false
-                )
-                // The preview pane renders HTML in a JEditorPane, whose text the UI driver cannot
-                // read via hasText. Instead the pane's accessible name flips to "rendered" only after
-                // a successful selection→read→render, so waiting on it is a reliable render-complete
-                // signal (and the on-screen pane shows the spec — see the shot).
-                waitUntil("preview pane renders the selected spec") {
-                    x { byAccessibleName("OpenSpec preview rendered") }.present()
-                }
-            }
-            snap("07-spec-preview")
+            // (Shot 07 retired: the in-panel Specs tree + plain-spec preview pane were removed in the
+            // tool-window restructure — specs are now browsed in the Project View and opened in the
+            // editor, shown by the hero shot 01 (spec in the editor). Content search re-homed to the
+            // Search Everywhere contributor is exercised headfully by the uiSmoke gate, not the tour.)
 
             // 08 — consolidated change deltas: select the change NODE (its path is the change dir,
             // not a .md file), which renders the CLI-sourced deltas grouped by capability with the

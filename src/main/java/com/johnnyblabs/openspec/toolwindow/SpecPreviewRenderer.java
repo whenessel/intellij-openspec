@@ -82,8 +82,8 @@ public final class SpecPreviewRenderer {
             return PreviewKind.NONE;
         }
         return switch (type) {
-            // A requirement's file path IS its parent spec file — render the spec (and scroll to it).
-            case SPEC_DOMAIN, REQUIREMENT -> PreviewKind.MAIN_SPEC;
+            // Plain specs now open in the editor (Project View owns file navigation), so the tree no
+            // longer routes to MAIN_SPEC; the MAIN_SPEC render branch is retained but inert.
             case DELTA_SPEC -> PreviewKind.DELTA_SPEC;
             case ARTIFACT, ARTIFACT_DONE -> PreviewKind.CHANGE_ARTIFACT;
             default -> PreviewKind.NONE;

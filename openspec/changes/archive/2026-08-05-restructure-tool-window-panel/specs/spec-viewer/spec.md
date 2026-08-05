@@ -14,6 +14,6 @@ The tool-window preview pane SHALL render the source markdown of the selected **
 - **WHEN** a change's delta-spec node is selected
 - **THEN** the preview SHALL render the delta-spec markdown, treated as a change's proposed deltas and never as a main spec
 
-#### Scenario: Main spec opens in the editor
-- **WHEN** the user opens a main spec
+#### Scenario: Main spec rendered
+- **WHEN** a main spec node is selected
 - **THEN** it SHALL render in the editor (with the platform Markdown preview), not in the tool-window preview pane

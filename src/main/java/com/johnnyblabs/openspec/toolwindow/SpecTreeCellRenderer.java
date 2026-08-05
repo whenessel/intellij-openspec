@@ -2,22 +2,29 @@ package com.johnnyblabs.openspec.toolwindow;
 
 import com.intellij.icons.AllIcons;
 import com.intellij.openapi.util.IconLoader;
+import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.LayeredIcon;
+import com.intellij.ui.SimpleTextAttributes;
+import com.johnnyblabs.openspec.model.ChangeStatus;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeCellRenderer;
 import java.awt.*;
 
-public class SpecTreeCellRenderer extends DefaultTreeCellRenderer {
+/**
+ * Multi-fragment tree renderer. Built on {@link ColoredTreeCellRenderer} (not the single-color
+ * {@code DefaultTreeCellRenderer}) so a change node reads name-first: the change <b>name</b> in the
+ * default/primary color, the {@code [status]} tag in its meaning color, and the {@code X/Y} task
+ * count dimmed as a trailing secondary counter. Selection legibility is handled by the base
+ * (it forces the selection foreground on a focused-selected row), so — unlike the old renderer — no
+ * manual selection-color branching is needed (mirrors {@code CoordinationPanel.CoordinationCellRenderer}).
+ */
+public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
 
     private static final Icon OPENSPEC_ICON = IconLoader.getIcon("/icons/openspec.svg", SpecTreeCellRenderer.class);
-    private static final Icon SPEC_ICON = IconLoader.getIcon("/icons/spec.svg", SpecTreeCellRenderer.class);
     // Package-private base icons: the renderer test asserts the layered icons compose these bases.
     static final Icon CHANGE_ICON = IconLoader.getIcon("/icons/change.svg", SpecTreeCellRenderer.class);
-    private static final Icon REQUIREMENT_ICON = IconLoader.getIcon("/icons/requirement.svg", SpecTreeCellRenderer.class);
-    private static final Icon ARCHIVE_ICON = IconLoader.getIcon("/icons/archive.svg", SpecTreeCellRenderer.class);
     static final Icon ARTIFACT_ICON = IconLoader.getIcon("/icons/artifact.svg", SpecTreeCellRenderer.class);
     private static final Icon DELTA_SPEC_ICON = IconLoader.getIcon("/icons/delta-spec.svg", SpecTreeCellRenderer.class);
     static final Icon MISSING_ARTIFACT_ICON = IconLoader.getIcon("/icons/missing-artifact.svg", SpecTreeCellRenderer.class);
@@ -46,74 +53,104 @@ public class SpecTreeCellRenderer extends DefaultTreeCellRenderer {
     private static final JBColor DONE_COLOR = new JBColor(new Color(0, 128, 0), new Color(120, 220, 120));
     private static final JBColor READY_COLOR = new JBColor(new Color(0, 0, 200), new Color(120, 160, 255));
     private static final JBColor BLOCKED_COLOR = new JBColor(Color.GRAY, new Color(150, 150, 150));
-    private static final JBColor HINT_COLOR = new JBColor(Color.GRAY, new Color(150, 150, 150));
+
+    // Per-fragment attributes, cached once (never allocate inside customizeCellRenderer). Bold/italic
+    // come from the STYLE_* bits, not Font.deriveFont — SimpleColoredComponent ignores per-fragment font.
+    private static final SimpleTextAttributes PROPOSED_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, PROPOSED_COLOR);
+    private static final SimpleTextAttributes APPLIED_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, APPLIED_COLOR);
+    private static final SimpleTextAttributes DONE_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, DONE_COLOR);
+    private static final SimpleTextAttributes READY_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, READY_COLOR);
+    private static final SimpleTextAttributes BLOCKED_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, BLOCKED_COLOR);
+    private static final SimpleTextAttributes MISSING_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, MISSING_COLOR);
 
     @Override
-    public Component getTreeCellRendererComponent(JTree tree, Object value, boolean sel,
-                                                   boolean expanded, boolean leaf, int row, boolean hasFocus) {
-        super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+    public void customizeCellRenderer(JTree tree, Object value, boolean selected, boolean expanded,
+                                      boolean leaf, int row, boolean hasFocus) {
+        if (!(value instanceof DefaultMutableTreeNode node)) return;
+        Object userObject = node.getUserObject();
 
-        if (value instanceof DefaultMutableTreeNode node) {
-            Object userObject = node.getUserObject();
+        if (userObject instanceof SpecTreeModel.TreeNodeData data) {
+            setIcon(iconForType(data.type()));
+            setToolTipText(data.tooltip());
 
-            if (userObject instanceof SpecTreeModel.TreeNodeData data) {
-                setIcon(iconForType(data.type()));
-                setToolTipText(data.tooltip());
-
-                // Apply status styling
-                switch (data.type()) {
-                    case CHANGE, CHANGE_DONE -> {
-                        String label = data.label();
-                        if (label.contains("[proposed]")) {
-                            setForeground(sel ? getTextSelectionColor() : PROPOSED_COLOR);
-                        } else if (label.contains("[applied]")) {
-                            setForeground(sel ? getTextSelectionColor() : APPLIED_COLOR);
-                        }
-                    }
-                    case MISSING_ARTIFACT -> {
-                        setForeground(MISSING_COLOR);
-                        Font font = getFont();
-                        if (font != null) {
-                            setFont(font.deriveFont(Font.ITALIC));
-                        }
-                    }
-                    case ARTIFACT_DONE -> {
-                        setForeground(sel ? getTextSelectionColor() : DONE_COLOR);
-                    }
-                    case ARTIFACT_READY -> {
-                        setForeground(sel ? getTextSelectionColor() : READY_COLOR);
-                        Font font = getFont();
-                        if (font != null) {
-                            setFont(font.deriveFont(Font.BOLD));
-                        }
-                    }
-                    case ARTIFACT_BLOCKED -> {
-                        setForeground(BLOCKED_COLOR);
-                        Font font = getFont();
-                        if (font != null) {
-                            setFont(font.deriveFont(Font.ITALIC));
-                        }
-                    }
-                    case HINT -> {
-                        setForeground(HINT_COLOR);
-                        Font font = getFont();
-                        if (font != null) {
-                            setFont(font.deriveFont(Font.ITALIC));
-                        }
-                        setIcon(null);
-                    }
-                    case DELTA_SPEC -> {
-                        // delta specs use spec icon with a distinctive look
-                    }
-                    default -> {
-                    }
+            switch (data.type()) {
+                case CHANGE, CHANGE_DONE -> appendChangeFragments(data);
+                case MISSING_ARTIFACT -> append(data.label(), MISSING_ATTR);
+                case ARTIFACT_DONE -> append(data.label(), DONE_ATTR);
+                case ARTIFACT_READY -> append(data.label(), READY_ATTR);
+                case ARTIFACT_BLOCKED -> append(data.label(), BLOCKED_ATTR);
+                case HINT -> {
+                    setIcon(null);
+                    append(data.label(), SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES);
                 }
-            } else if (node.isRoot()) {
-                setIcon(OPENSPEC_ICON);
+                default -> append(data.label(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
             }
+        } else if (node.isRoot()) {
+            setIcon(OPENSPEC_ICON);
+            append(String.valueOf(node.getUserObject()), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        } else if (userObject != null) {
+            append(String.valueOf(userObject), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+        }
+    }
+
+    /**
+     * Fragments a change node so the row reads name-first. The <b>name</b> is the default color
+     * (primary — the identifier the eye scans for); the {@code [status]} tag keeps its meaning color
+     * (green=proposed / blue=applied — the only inline proposed↔applied cue, since both share the
+     * plain change icon); the {@code X/Y} count is dimmed gray. The count is deliberately NOT greened
+     * at N/N — "done" is owned by the {@code CHANGE_DONE} icon badge, which is driven by the artifact
+     * DAG (a distinct upstream signal from tasks.md checkboxes and free to diverge). Falls back to the
+     * flat label if structured parts are absent.
+     */
+    private void appendChangeFragments(SpecTreeModel.TreeNodeData data) {
+        SpecTreeModel.TreeNodeData.ChangeLabelParts parts = data.changeParts();
+        if (parts == null) {
+            append(data.label(), SimpleTextAttributes.REGULAR_ATTRIBUTES);
+            return;
+        }
+        for (LabelFragment fragment : changeFragments(parts)) {
+            append(fragment.text(), fragment.attributes());
+        }
+    }
+
+    /** One appended run of text with its attributes — the unit the pure {@link #changeFragments} emits. */
+    record LabelFragment(String text, SimpleTextAttributes attributes) {}
+
+    /**
+     * The pure fragmentation decision for a change node, extracted so the visual-hierarchy contract is
+     * unit-testable without a running IDE: the name is always {@code REGULAR_ATTRIBUTES} (never a
+     * status color), the status tag (when shown) carries its meaning color, and the {@code X/Y} count
+     * is always {@code GRAYED_ATTRIBUTES} — including at {@code N/N}, so a complete task count is never
+     * greened (that "done" story belongs to the icon badge, on the distinct artifact-DAG signal).
+     */
+    static java.util.List<LabelFragment> changeFragments(SpecTreeModel.TreeNodeData.ChangeLabelParts parts) {
+        java.util.List<LabelFragment> fragments = new java.util.ArrayList<>();
+        fragments.add(new LabelFragment(parts.name(), SimpleTextAttributes.REGULAR_ATTRIBUTES));
+
+        SimpleTextAttributes statusAttr = statusAttributes(parts.status());
+        if (statusAttr != null) {
+            fragments.add(new LabelFragment(" " + parts.status().toLabel(), statusAttr));
         }
 
-        return this;
+        int[] counts = parts.taskCounts();
+        if (counts != null && counts.length == 2 && counts[1] > 0) {
+            fragments.add(new LabelFragment(" " + counts[0] + "/" + counts[1], SimpleTextAttributes.GRAYED_ATTRIBUTES));
+        }
+        return fragments;
+    }
+
+    /**
+     * Meaning color for the {@code [status]} tag, or null when no tag is shown ({@code UNKNOWN} —
+     * matching {@code buildChangeLabel}, which omits the suffix for UNKNOWN). A non-proposed/applied
+     * status (e.g. ARCHIVED) shows the tag in the default color.
+     */
+    private static SimpleTextAttributes statusAttributes(ChangeStatus status) {
+        if (status == null || status == ChangeStatus.UNKNOWN) return null;
+        return switch (status) {
+            case PROPOSED -> PROPOSED_ATTR;
+            case APPLIED -> APPLIED_ATTR;
+            default -> SimpleTextAttributes.REGULAR_ATTRIBUTES;
+        };
     }
 
     /**
@@ -128,8 +165,6 @@ public class SpecTreeCellRenderer extends DefaultTreeCellRenderer {
      */
     static Icon iconForType(SpecTreeModel.TreeNodeType type) {
         return switch (type) {
-            case SPECS, SPEC_DOMAIN -> SPEC_ICON;
-            case REQUIREMENT -> REQUIREMENT_ICON;
             case CHANGES, CHANGE -> CHANGE_ICON;
             case CHANGE_DONE -> CHANGE_DONE_ICON;
             case ARTIFACT -> ARTIFACT_ICON;
@@ -138,9 +173,6 @@ public class SpecTreeCellRenderer extends DefaultTreeCellRenderer {
             case ARTIFACT_BLOCKED -> ARTIFACT_BLOCKED_ICON;
             case MISSING_ARTIFACT -> MISSING_ARTIFACT_BADGED_ICON;
             case DELTA_SPEC -> DELTA_SPEC_ICON;
-            case ARCHIVE -> ARCHIVE_ICON;
-            case CONFIG -> AllIcons.General.Settings;
-            case CONFIG_ENTRY -> null;
             case HINT -> null;
         };
     }

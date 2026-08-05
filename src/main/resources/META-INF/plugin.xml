@@ -11,6 +11,11 @@
     <depends>org.jetbrains.plugins.yaml</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <!-- Search Everywhere: content search over spec requirement bodies + scenario text
+             (re-homes the reach the retired Browse-tree content-search field provided). -->
+        <searchEverywhereContributor
+                implementation="com.johnnyblabs.openspec.search.SpecSearchEverywhereContributorFactory"/>
+
         <!-- Services -->
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.OpenSpecProjectService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.ConfigService"/>
@@ -32,7 +37,7 @@
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.SchemaService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.ExploreContextService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.ExplorePromptService"/>
-        <projectService serviceImplementation="com.johnnyblabs.openspec.services.ComplianceService"/>
+        <projectService serviceImplementation="com.johnnyblabs.openspec.services.ArchiveReadinessService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.WorkflowProfileService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.WorkflowProfileSwitchService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.coordination.CoordinationService"/>
@@ -56,7 +61,7 @@
         <notificationGroup id="OpenSpec.Generation" displayType="BALLOON"/>
         <notificationGroup id="OpenSpec.Validation" displayType="BALLOON"/>
         <notificationGroup id="OpenSpec.System" displayType="STICKY_BALLOON"/>
-        <notificationGroup id="OpenSpec.Compliance" displayType="STICKY_BALLOON"/>
+        <notificationGroup id="OpenSpec.Verify" displayType="STICKY_BALLOON"/>
 
         <!-- File Types -->
         <fileType name="OpenSpec YAML"

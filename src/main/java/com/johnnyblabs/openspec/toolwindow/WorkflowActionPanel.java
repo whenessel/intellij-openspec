@@ -34,7 +34,6 @@ import com.johnnyblabs.openspec.model.ArtifactStatus;
 import com.johnnyblabs.openspec.model.Change;
 import com.johnnyblabs.openspec.model.ChangeArtifactDag;
 import com.johnnyblabs.openspec.services.AiToolDetectionService;
-import com.johnnyblabs.openspec.services.ComplianceService;
 import com.johnnyblabs.openspec.services.ArtifactOrchestrationService;
 import com.johnnyblabs.openspec.services.WorkflowSchemaContextService;
 import com.johnnyblabs.openspec.model.WorkflowSchemaContext;
@@ -109,7 +108,6 @@ public class WorkflowActionPanel extends JPanel {
 
     // Icon action bar
     private final JButton applyIconButton;
-    private final JButton complianceIconButton;
     private final JButton verifyIconButton;
     private final JButton syncSpecsIconButton;
     private final JButton archiveIconButton;
@@ -119,7 +117,7 @@ public class WorkflowActionPanel extends JPanel {
 
     // Status strip
     private final JPanel statusStrip;
-    private final JBLabel complianceStatusLabel;
+    private final JBLabel verifyStatusLabel;
     private final JBLabel taskProgressStatusLabel;
     private final JBLabel deliveryModeStatusLabel;
     private final JBLabel schemaModeStatusLabel;
@@ -188,7 +186,7 @@ public class WorkflowActionPanel extends JPanel {
             String selected = (String) changeCombo.getSelectedItem();
             if (selected != null && !selected.equals(activeChangeName)) {
                 activeChangeName = selected;
-                resetComplianceStatus();
+                resetVerifyStatus();
                 disposeWatcher();
                 refreshForChange(selected);
             }
@@ -211,15 +209,13 @@ public class WorkflowActionPanel extends JPanel {
         iconBarChangeLabel.setForeground(JBColor.GRAY);
 
         applyIconButton = createIconButton(AllIcons.Actions.Execute, "Apply", this::onApplyTasks);
-        complianceIconButton = createIconButton(AllIcons.Actions.ProjectWideAnalysisOn, "Compliance", this::onComplianceCheck);
-        verifyIconButton = createIconButton(AllIcons.Actions.PreviewDetailsVertically, "Verify", this::onVerify);
+        verifyIconButton = createIconButton(AllIcons.Actions.ProjectWideAnalysisOn, "Verify", this::onVerify);
         syncSpecsIconButton = createIconButton(AllIcons.Actions.Download, "Sync Specs", this::onSyncSpecs);
         archiveIconButton = createIconButton(AllIcons.Actions.Checked, "Archive", this::onArchive);
         cancelGenerationButton = createIconButton(AllIcons.Actions.Suspend, "Cancel Generation", this::onCancelGenerateAll);
         cancelGenerationButton.setVisible(false);
 
         applyIconButton.setEnabled(false);
-        complianceIconButton.setEnabled(false);
         verifyIconButton.setEnabled(false);
         syncSpecsIconButton.setEnabled(false);
         archiveIconButton.setEnabled(false);
@@ -227,7 +223,6 @@ public class WorkflowActionPanel extends JPanel {
         JPanel iconButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, JBUI.scale(2), 0));
         iconButtons.setOpaque(false);
         iconButtons.add(applyIconButton);
-        iconButtons.add(complianceIconButton);
         iconButtons.add(verifyIconButton);
         iconButtons.add(syncSpecsIconButton);
         iconButtons.add(archiveIconButton);
@@ -241,15 +236,15 @@ public class WorkflowActionPanel extends JPanel {
         statusStrip.setOpaque(false);
         statusStrip.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        complianceStatusLabel = new JBLabel("Not checked");
-        complianceStatusLabel.setFont(complianceStatusLabel.getFont().deriveFont(Font.PLAIN, 11f));
-        complianceStatusLabel.setForeground(COLOR_BLOCKED);
-        complianceStatusLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        complianceStatusLabel.setToolTipText("Click to run compliance check");
-        complianceStatusLabel.addMouseListener(new MouseAdapter() {
+        verifyStatusLabel = new JBLabel("Not verified");
+        verifyStatusLabel.setFont(verifyStatusLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        verifyStatusLabel.setForeground(COLOR_BLOCKED);
+        verifyStatusLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        verifyStatusLabel.setToolTipText("Click to verify readiness");
+        verifyStatusLabel.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
-                onComplianceCheck();
+                onVerify();
             }
         });
 
@@ -267,7 +262,7 @@ public class WorkflowActionPanel extends JPanel {
         schemaModeStatusLabel.setForeground(JBColor.GRAY);
         schemaModeStatusLabel.setVisible(false);
 
-        statusStrip.add(complianceStatusLabel);
+        statusStrip.add(verifyStatusLabel);
         statusStrip.add(taskProgressStatusLabel);
         statusStrip.add(deliveryModeStatusLabel);
         statusStrip.add(schemaModeStatusLabel);
@@ -393,6 +388,9 @@ public class WorkflowActionPanel extends JPanel {
     private JButton createIconButton(Icon icon, String tooltip, Runnable action) {
         JButton btn = new JButton(icon);
         btn.setToolTipText(tooltip);
+        // Icon-only buttons are invisible to screen readers and fragile to locate in headful tests;
+        // give each a stable accessible name (the tooltip is a good default label).
+        btn.getAccessibleContext().setAccessibleName(tooltip);
         btn.putClientProperty("JButton.buttonType", "borderless");
         btn.setPreferredSize(new Dimension(JBUI.scale(24), JBUI.scale(24)));
         btn.setMaximumSize(new Dimension(JBUI.scale(24), JBUI.scale(24)));
@@ -725,7 +723,6 @@ public class WorkflowActionPanel extends JPanel {
 
     private void updateIconBarState() {
         applyIconButton.setEnabled(allArtifactsComplete);
-        complianceIconButton.setEnabled(allArtifactsComplete);
         verifyIconButton.setEnabled(allArtifactsComplete);
         syncSpecsIconButton.setEnabled(hasDeltaSpecs);
         archiveIconButton.setEnabled(allArtifactsComplete && !hasTasksRemaining);
@@ -738,9 +735,6 @@ public class WorkflowActionPanel extends JPanel {
             applyIconButton.setToolTipText(allArtifactsComplete
                     ? "Apply: " + activeChangeName
                     : "Apply (complete all artifacts first)");
-            complianceIconButton.setToolTipText(allArtifactsComplete
-                    ? "Compliance: " + activeChangeName
-                    : "Compliance (complete all artifacts first)");
             verifyIconButton.setToolTipText(allArtifactsComplete
                     ? "Verify: " + activeChangeName
                     : "Verify (complete all artifacts first)");
@@ -1348,40 +1342,29 @@ public class WorkflowActionPanel extends JPanel {
         }
     }
 
-    private void resetComplianceStatus() {
-        complianceStatusLabel.setText("Not checked");
-        complianceStatusLabel.setForeground(COLOR_BLOCKED);
+    private void resetVerifyStatus() {
+        verifyStatusLabel.setText("Not verified");
+        verifyStatusLabel.setForeground(COLOR_BLOCKED);
     }
 
-    private void onComplianceCheck() {
-        if (activeChangeName == null) return;
-        final String changeName = activeChangeName;
-        complianceStatusLabel.setText("Checking\u2026");
-        complianceStatusLabel.setForeground(JBColor.GRAY);
-
-        // checkCompliance runs Verify, which now spawns the CLI + a blocking AI call \u2014 keep it off the EDT.
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            ComplianceService complianceService = project.getService(ComplianceService.class);
-            com.johnnyblabs.openspec.model.ComplianceResult result = complianceService.checkCompliance(changeName);
-
-            ApplicationManager.getApplication().invokeLater(() -> {
-                // Update status strip
-                if (result.isCompliant() && result.warningCount() == 0) {
-                    complianceStatusLabel.setText("\u2713 Compliant");
-                    complianceStatusLabel.setForeground(COLOR_DONE);
-                } else if (result.isCompliant()) {
-                    complianceStatusLabel.setText(result.warningCount() + " warning" + (result.warningCount() > 1 ? "s" : ""));
-                    complianceStatusLabel.setForeground(new JBColor(new Color(200, 150, 0), new Color(230, 180, 50)));
-                } else {
-                    int total = result.errorCount() + result.warningCount();
-                    complianceStatusLabel.setText(total + " issue" + (total > 1 ? "s" : ""));
-                    complianceStatusLabel.setForeground(COLOR_ERROR);
-                }
-
-                // Show compliance dialog
-                new com.johnnyblabs.openspec.dialogs.CompliancePreFlightDialog(project, result).show();
-            });
-        });
+    /** Reflect a readiness result in the status strip, in the three native verify states. */
+    private void applyVerifyStatus(com.johnnyblabs.openspec.model.ArchiveReadinessResult result) {
+        switch (result.classify()) {
+            case READY -> {
+                verifyStatusLabel.setText("\u2713 Ready to archive");
+                verifyStatusLabel.setForeground(COLOR_DONE);
+            }
+            case IN_PROGRESS -> {
+                // Neutral, NOT red/orange \u2014 a valid-but-unfinished change is not a defect.
+                verifyStatusLabel.setText("In progress \u00b7 archive anyway");
+                verifyStatusLabel.setForeground(JBColor.foreground());
+            }
+            case BLOCKED -> {
+                int errors = result.errorCount();
+                verifyStatusLabel.setText("\u2717 " + errors + " issue" + (errors > 1 ? "s" : "") + " \u2014 blocked");
+                verifyStatusLabel.setForeground(COLOR_ERROR);
+            }
+        }
     }
 
     private void updateFfGoEnabled() {
@@ -1488,17 +1471,26 @@ public class WorkflowActionPanel extends JPanel {
     private void onVerify() {
         if (activeChangeName == null) return;
         String changeName = activeChangeName;
+        verifyStatusLabel.setText("Verifying…");
+        verifyStatusLabel.setForeground(JBColor.GRAY);
 
+        // Verify (completeness + validation + spec-sync) spawns the CLI + a blocking AI call — off the EDT.
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "Verifying " + changeName, true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
-                com.johnnyblabs.openspec.services.VerificationService verificationService =
-                        project.getService(com.johnnyblabs.openspec.services.VerificationService.class);
-                com.johnnyblabs.openspec.model.VerificationReport report =
-                        verificationService.verify(changeName);
+                com.johnnyblabs.openspec.services.ArchiveReadinessService readinessService =
+                        project.getService(com.johnnyblabs.openspec.services.ArchiveReadinessService.class);
+                com.johnnyblabs.openspec.model.ArchiveReadinessResult result =
+                        readinessService.verify(changeName);
 
-                ApplicationManager.getApplication().invokeLater(() ->
-                        new com.johnnyblabs.openspec.dialogs.VerifyReportDialog(project, report).show());
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    applyVerifyStatus(result);
+                    // The dialog's OK archives (enabled for READY and bypassable IN_PROGRESS,
+                    // disabled for a hard validation BLOCK), so Verify flows to archive from one surface.
+                    if (new com.johnnyblabs.openspec.dialogs.VerifyDialog(project, result).showAndGet()) {
+                        onArchive();
+                    }
+                });
             }
         });
     }
@@ -1579,14 +1571,14 @@ public class WorkflowActionPanel extends JPanel {
                             .filter(i -> i.severity() == ValidationIssue.Severity.WARNING).count();
 
                     if (errorCount > 0) {
-                        complianceStatusLabel.setText("\u2717 " + errorCount + " error" + (errorCount > 1 ? "s" : ""));
-                        complianceStatusLabel.setForeground(COLOR_ERROR);
+                        verifyStatusLabel.setText("\u2717 " + errorCount + " error" + (errorCount > 1 ? "s" : ""));
+                        verifyStatusLabel.setForeground(COLOR_ERROR);
                     } else if (warnCount > 0) {
-                        complianceStatusLabel.setText("\u26A0 " + warnCount + " warning" + (warnCount > 1 ? "s" : ""));
-                        complianceStatusLabel.setForeground(JBColor.ORANGE);
+                        verifyStatusLabel.setText("\u26A0 " + warnCount + " warning" + (warnCount > 1 ? "s" : ""));
+                        verifyStatusLabel.setForeground(JBColor.ORANGE);
                     } else {
-                        complianceStatusLabel.setText("\u2713 Valid");
-                        complianceStatusLabel.setForeground(COLOR_SUCCESS);
+                        verifyStatusLabel.setText("\u2713 Valid");
+                        verifyStatusLabel.setForeground(COLOR_SUCCESS);
                     }
                 });
             }
@@ -1904,8 +1896,8 @@ public class WorkflowActionPanel extends JPanel {
                     flashPipelineChipsGreen(changeName);
 
                     // Show completion in status strip briefly
-                    complianceStatusLabel.setText("\u2713 All generated");
-                    complianceStatusLabel.setForeground(COLOR_SUCCESS);
+                    verifyStatusLabel.setText("\u2713 All generated");
+                    verifyStatusLabel.setForeground(COLOR_SUCCESS);
                     taskProgressStatusLabel.setText(" \u00B7 " + formatElapsed(elapsedSeconds));
                     taskProgressStatusLabel.setVisible(true);
 
@@ -1914,7 +1906,7 @@ public class WorkflowActionPanel extends JPanel {
 
                     // Restore normal state after 3 seconds
                     javax.swing.Timer restoreTimer = new javax.swing.Timer(3000, ev -> {
-                        resetComplianceStatus();
+                        resetVerifyStatus();
                         refresh();
                         if (onRefreshRequested != null) onRefreshRequested.run();
                     });
@@ -1934,8 +1926,8 @@ public class WorkflowActionPanel extends JPanel {
 
                     // Show error in status strip
                     String msg = artifactId != null ? artifactId + " failed" : "Generation failed";
-                    complianceStatusLabel.setText("\u2717 " + msg);
-                    complianceStatusLabel.setForeground(COLOR_ERROR);
+                    verifyStatusLabel.setText("\u2717 " + msg);
+                    verifyStatusLabel.setForeground(COLOR_ERROR);
 
                     // Show error chip
                     errorArtifactId = artifactId;
@@ -1988,8 +1980,8 @@ public class WorkflowActionPanel extends JPanel {
 
     private void updateGenerateAllStatusText(int completed, int total) {
         long elapsed = (System.nanoTime() - generateAllStartNanos) / 1_000_000_000L;
-        complianceStatusLabel.setText("Generating " + (completed + 1) + "/" + total + "...");
-        complianceStatusLabel.setForeground(COLOR_GENERATING);
+        verifyStatusLabel.setText("Generating " + (completed + 1) + "/" + total + "...");
+        verifyStatusLabel.setForeground(COLOR_GENERATING);
         taskProgressStatusLabel.setVisible(false);
         deliveryModeStatusLabel.setText(" \u00B7 " + formatElapsed(elapsed) + " \u00B7 Direct API");
     }

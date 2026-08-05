@@ -66,8 +66,9 @@ class SpecPreviewRenderTest {
 
     @Test
     void classifyRoutesNodeTypesToTheRightKind() {
-        assertEquals(PreviewKind.MAIN_SPEC, SpecPreviewRenderer.classify(TreeNodeType.SPEC_DOMAIN, "/s/spec.md"));
-        assertEquals(PreviewKind.MAIN_SPEC, SpecPreviewRenderer.classify(TreeNodeType.REQUIREMENT, "/s/spec.md"));
+        // Plain-spec (SPEC_DOMAIN/REQUIREMENT) node types are retired — the tree no longer holds them
+        // and classify no longer routes to MAIN_SPEC (specs open in the editor). The surviving
+        // change-scoped kinds still route correctly.
         assertEquals(PreviewKind.DELTA_SPEC, SpecPreviewRenderer.classify(TreeNodeType.DELTA_SPEC, "/c/specs/s/spec.md"));
         assertEquals(PreviewKind.CHANGE_ARTIFACT, SpecPreviewRenderer.classify(TreeNodeType.ARTIFACT, "/c/proposal.md"));
         assertEquals(PreviewKind.CHANGE_ARTIFACT, SpecPreviewRenderer.classify(TreeNodeType.ARTIFACT_DONE, "/c/design.md"));
@@ -76,9 +77,8 @@ class SpecPreviewRenderTest {
         assertEquals(PreviewKind.CHANGE_DELTAS,
                 SpecPreviewRenderer.classify(TreeNodeType.CHANGE, "/proj/openspec/changes/my-change"));
         assertEquals(PreviewKind.NONE, SpecPreviewRenderer.classify(TreeNodeType.CHANGE, null));
-        // Non-markdown, absent path, and non-previewable types collapse to NONE.
-        assertEquals(PreviewKind.NONE, SpecPreviewRenderer.classify(TreeNodeType.CONFIG, "/openspec/config.yaml"));
-        assertEquals(PreviewKind.NONE, SpecPreviewRenderer.classify(TreeNodeType.SPEC_DOMAIN, null));
+        // Absent path and non-previewable types collapse to NONE.
+        assertEquals(PreviewKind.NONE, SpecPreviewRenderer.classify(TreeNodeType.DELTA_SPEC, null));
         assertEquals(PreviewKind.NONE, SpecPreviewRenderer.classify(TreeNodeType.HINT, "/s/spec.md"));
     }
 }

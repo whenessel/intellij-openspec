@@ -6,16 +6,22 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.johnnyblabs.openspec.dialogs.VerifyReportDialog;
-import com.johnnyblabs.openspec.model.VerificationReport;
+import com.johnnyblabs.openspec.dialogs.VerifyDialog;
+import com.johnnyblabs.openspec.model.ArchiveReadinessResult;
 import com.johnnyblabs.openspec.model.Change;
+import com.johnnyblabs.openspec.services.ArchiveReadinessService;
 import com.johnnyblabs.openspec.services.ChangeService;
-import com.johnnyblabs.openspec.services.VerificationService;
 import com.johnnyblabs.openspec.util.OpenSpecNotifier;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 
+/**
+ * The Verify menu action — the same pre-archive readiness check as the tool-window Verify button and
+ * the Archive pre-flight, so "Verify" means one thing everywhere. Shows the three-state
+ * {@link VerifyDialog}; its OK archives the change (enabled for READY and bypassable IN_PROGRESS,
+ * disabled for a hard validation BLOCK).
+ */
 public class OpenSpecVerifyAction extends OpenSpecBaseAction {
 
     @Override
@@ -34,20 +40,35 @@ public class OpenSpecVerifyAction extends OpenSpecBaseAction {
             return;
         }
 
-        String changeName = activeChanges.getFirst().getName();
+        Change target = activeChanges.getFirst();
+        String changeName = target.getName();
 
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "Verifying: " + changeName, true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
-                indicator.setText("Checking completeness...");
+                indicator.setText("Checking readiness...");
                 indicator.setFraction(0.0);
 
-                VerificationService verificationService = project.getService(VerificationService.class);
-                VerificationReport report = verificationService.verify(changeName);
+                ArchiveReadinessService readinessService = project.getService(ArchiveReadinessService.class);
+                ArchiveReadinessResult result = readinessService.verify(changeName);
 
-                ApplicationManager.getApplication().invokeLater(() ->
-                        new VerifyReportDialog(project, report).show());
+                ApplicationManager.getApplication().invokeLater(() -> {
+                    if (new VerifyDialog(project, result).showAndGet()) {
+                        archiveChange(project, changeService, target);
+                    }
+                });
             }
         });
+    }
+
+    private void archiveChange(Project project, ChangeService changeService, Change target) {
+        try {
+            changeService.archiveChange(target);
+            OpenSpecNotifier.info(project, "Archive", "Change archived: " + target.getName());
+        } catch (Exception ex) {
+            OpenSpecNotifier.error(project, "Archive", "Failed to archive change: " + ex.getMessage());
+            return;
+        }
+        refreshToolWindow(project);
     }
 }
