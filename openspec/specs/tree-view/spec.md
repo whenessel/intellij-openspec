@@ -3,34 +3,6 @@
 ## Purpose
 Tree-based browsing of specs, changes, and archives with icons, tooltips, search, and theme support.
 ## Requirements
-### Requirement: Tree view display
-
-The plugin SHALL display a tree with Specs, Changes, Archive, and Config sections. Double-clicking navigates to files. The tree auto-refreshes on filesystem changes.
-
-#### Scenario: Tree structure
-- **WHEN** the tool window opens on an initialized project
-- **THEN** it SHALL show Specs (domains → requirements), Changes (artifacts with status), and Archive sections
-
-#### Scenario: Actionable hints
-- **WHEN** no changes exist
-- **THEN** a hint node SHALL appear under Changes that triggers Propose on double-click
-
-#### Scenario: Config section in tree
-- **WHEN** the tool window opens on an initialized project with `openspec/config.yaml`
-- **THEN** the tree SHALL include a Config section after Archive showing flat, read-only key-value entries for top-level config fields (schema, version, profile name, context truncated to ~60 chars, rules count)
-
-#### Scenario: Config section without config file
-- **WHEN** no `openspec/config.yaml` exists or the config is not loaded
-- **THEN** a hint node SHALL appear under Config indicating no config.yaml was found
-
-#### Scenario: Config node double-click
-- **WHEN** the user double-clicks any Config or Config entry node
-- **THEN** the plugin SHALL open `openspec/config.yaml` in the editor
-
-#### Scenario: Config entries filtered by search
-- **WHEN** the user types a search term matching a config entry label
-- **THEN** the Config section SHALL filter to show only matching entries, consistent with existing tree filtering behavior
-
 ### Requirement: Icons and theme support
 
 The plugin SHALL provide distinct icons per node type with `_dark.svg` variants. Status colors SHALL use `JBColor` with explicit light/dark pairs for proper contrast.
@@ -47,18 +19,6 @@ Each tree node SHALL display a contextual tooltip on hover providing non-visible
 - **WHEN** the user hovers over a tree node
 - **THEN** a tooltip SHALL appear with contextual metadata
 
-### Requirement: Search and filtering
-
-The plugin SHALL provide real-time tree filtering by case-insensitive substring with auto-expand and keyboard shortcut access. Filtering SHALL match a node's label and, for spec content, SHALL also match requirement body text and scenario text so that a term occurring only inside a requirement's prose surfaces its spec and requirement nodes. Content matching SHALL be performed during the off-UI-thread model build over the local OpenSpec files, without persisting a search index.
-
-#### Scenario: Filter behavior
-- **WHEN** the user types in the search field
-- **THEN** the tree SHALL filter in real-time, auto-expand matches, and restore on clear
-
-#### Scenario: Filter matches requirement body text
-- **WHEN** the user types a term that appears in a requirement's body or scenario text but not in any node label
-- **THEN** the tree SHALL surface that requirement (and its spec) as a match
-
 ### Requirement: HiDPI support
 
 All UI spacing and HTML text widths SHALL use `JBUI.scale()` for proper rendering on HiDPI/Retina displays.
@@ -66,18 +26,6 @@ All UI spacing and HTML text widths SHALL use `JBUI.scale()` for proper renderin
 #### Scenario: Scaled rendering
 - **WHEN** the plugin runs on a HiDPI display
 - **THEN** all text widths and spacing SHALL scale proportionally
-
-### Requirement: Config node types
-
-The tree model SHALL define `CONFIG` and `CONFIG_ENTRY` node types for the config section header and its key-value leaf nodes respectively.
-
-#### Scenario: Config node rendering
-- **WHEN** the Config section renders in the tree
-- **THEN** the CONFIG node SHALL display with a settings gear icon (`AllIcons.General.Settings`) and CONFIG_ENTRY nodes SHALL display as plain text without icons
-
-#### Scenario: Null or empty config fields
-- **WHEN** a top-level config field is null or empty
-- **THEN** the corresponding CONFIG_ENTRY node SHALL be omitted from the tree
 
 ### Requirement: Tree selection drives workflow panel
 
@@ -130,4 +78,33 @@ A change node SHALL carry a done badge when all of its artifacts are complete (t
 #### Scenario: Task progress shown on the change node
 - **WHEN** a change has a tasks artifact with counted checkboxes
 - **THEN** the change node's label SHALL include the completed/total task count
+
+### Requirement: Changes tree display
+
+The plugin SHALL display a tool-window tree showing the **Changes** section — changes with per-artifact status. Navigation to spec files, archived changes, and `config.yaml` is owned by the **Project View** (which already lists `openspec/**` and opens files into the editor), not a second file-navigation tree in the tool window. The Changes tree auto-refreshes on filesystem changes.
+
+#### Scenario: Tree structure
+- **WHEN** the tool window opens on an initialized project
+- **THEN** it SHALL show the Changes section (changes with per-artifact status); spec, archived-change, and config files are browsed in the Project View, not a tool-window file tree
+
+#### Scenario: Actionable hints
+- **WHEN** no changes exist
+- **THEN** a hint node SHALL appear under Changes that triggers Propose on double-click
+
+#### Scenario: Change-node visual hierarchy
+- **WHEN** a change node renders in the Changes tree
+- **THEN** the change name SHALL be shown in the primary (default) color, the `[status]` tag in its meaning color, and the `X/Y` task-completion count as dimmed secondary text — so the count does not compete with the name
+- **AND** a complete count (`N/N`) SHALL NOT be colored as "done": the apply-ready state is conveyed by the node's status icon badge (driven by the artifact DAG), a signal distinct from the tasks.md task count
+
+### Requirement: Spec content search
+
+The plugin SHALL provide content search over spec requirement bodies and scenario text via a **Search Everywhere contributor** — so a term occurring only inside a requirement's prose surfaces that spec/requirement and, on selection, opens it in the editor at the requirement. The search SHALL run off the UI thread over the local OpenSpec files without persisting a search index, and SHALL be available during indexing (dumb-aware).
+
+#### Scenario: Content search via Search Everywhere
+- **WHEN** the user enters, in Search Everywhere, a term that appears in a requirement's body or scenario text but not in any label
+- **THEN** the contributor SHALL surface that requirement, and selecting it SHALL open its spec in the editor at that requirement
+
+#### Scenario: Off-thread, index-free content matching
+- **WHEN** content search runs
+- **THEN** it SHALL scan the local spec files off the UI thread without persisting an index, and SHALL function during indexing
 

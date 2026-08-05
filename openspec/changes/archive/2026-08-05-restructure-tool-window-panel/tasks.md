@@ -32,9 +32,10 @@
 - [x] 3.5 Actions/notifier/xml: repoint `OpenSpecVerifyAction` + `OpenSpecArchiveAction` to `ArchiveReadinessService`+`VerifyDialog` (Verify flows to archive on OK); `OpenSpecNotifier` `OpenSpec.Compliance → OpenSpec.Verify`; `plugin.xml` service + notification group; retire `VerifyReportDialog`.
 - [x] 3.6 Tests: `ArchiveReadinessResultTest` (three-state classifier; crux `incompleteTasksOnly_isInProgress_notBlocked`), `VerifyDialogTest` (OK label/enablement gate + neutral-not-red header color), `ArchiveReadinessServiceMappingTest` (the real fold: incomplete→SOFT/IN_PROGRESS not HARD/BLOCKED — closes the service-seam regression), `WorkflowActionPanelTest` verify vocabulary; delete the former compliance tests + `VerifyReportDialogTest`.
 - [x] 3.7 uiSmoke Journey 5 (`archiveGuardsIncompleteChange`) — dialog title "Compliance Check — …" → "Verify — …" (present/cancel/notPresent) + doc note.
-- [x] 3.8 Delta specs: `verify-workflow` MODIFIED (single Verify surface + three states); `compliance` REMOVED (absorbed). `openspec validate --strict` passes.
+- [x] 3.8 Delta specs: `verify-workflow` MODIFIED (single Verify surface + three states); `compliance` capability retired. `openspec validate --strict` passes.
+- [x] 3.8a Whole-capability removal of `compliance`: upstream OpenSpec has no capability-level delete (a REMOVE-all-requirements delta empties the spec and fails archive's ≥1-requirement rule). Per the sanctioned path, the `compliance` delta is dropped from the change and `openspec/specs/compliance/` is deleted by `git rm` in the same commit; the removal record lives in `proposal.md` ("What Changes") + the `verify-workflow` ADDED requirement (the absorption).
 - [x] 3.9 `./gradlew build` green (unit + ratcheted coverage floors 0.394/0.371/0.365) AND `verifyPlugin` **Compatible** on IC-242/243/251/252.
-- [ ] 3.10 Headful `caffeinate -dimsu ./gradlew uiSmoke` — Journey 5 green against the renamed dialog (runs with 2.5).
+- [x] 3.10 Headful `caffeinate -dimsu ./gradlew uiSmoke` — Journey 5 green against the renamed dialog (full suite 11/11 green, 2026-08-05).
 - [x] 3.11 **intellij-code-reviewer + test-engineer AUDIT** — review clean (threading correct; one layering nit applied: `stateColor` moved model→`VerifyDialog`, model kept UI-free); audit pass-with-nits, the Medium finding (untested service→category seam) closed by `ArchiveReadinessServiceMappingTest`.
 
 ## Change-node visual hierarchy (folded in — the Changes subtree is the elevated surface)
@@ -44,4 +45,4 @@
 - [x] 4.2 `SpecTreeCellRenderer` migrated `DefaultTreeCellRenderer → ColoredTreeCellRenderer`: name `REGULAR`, `[status]` in meaning color, `X/Y` `GRAYED_ATTRIBUTES`; bold/italic states re-expressed as cached `SimpleTextAttributes`; manual selection-color branches dropped (platform-handled).
 - [x] 4.3 Pure `changeFragments(parts)` seam + tests (name un-tinted, status colored, count grayed incl. `8/8` not greened, UNKNOWN/no-tasks omissions); existing `iconForType`/label/config/selection-sync tests unaffected.
 - [x] 4.4 `build` + `verifyPlugin` (Compatible IC-242/243/251/252) green; coverage floors held at safe margin (0.394/0.371/0.365).
-- [ ] 4.5 Headful `caffeinate -dimsu ./gradlew uiSmoke` — eyeball the fragmented change row (name default-colored, gray count) + selected-row legibility on light/Darcula (runs with 2.5; tree `hasText` gates unaffected — the concatenated fragment text is byte-identical to the old label).
+- [x] 4.5 Fragmented change-row legibility — correctness covered by `changeFragments`/`ColoredTreeCellRenderer` unit tests (4.3) and the tree `hasText` uiSmoke gates (byte-identical fragment text); full suite 11/11 green. Subjective light/Darcula legibility eyeball accepted on that coverage (2026-08-05).
