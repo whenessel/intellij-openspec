@@ -201,3 +201,28 @@ faithfully:
   `SpecParserCliStructureContractTest` runs the same structure-parity check against both generations'
   `spec-structure/` captures, and `ValidatorVerdictVersionStabilityTest` asserts the two generations'
   `validate-parity-corpus` id→valid maps are equal.
+
+## `1.7.0/` — CLI-parser fixture-gap closures (schemas / config list / --version / config profile)
+
+Real 1.7.0 output for four parsers that previously shipped with **no captured fixture** — tested only
+against inline hand-authored JSON, which encodes the author's assumed shape so the test passes while
+the parser can be wrong. Captured under an isolated `HOME`/`XDG_*` env; no machine paths to sanitize.
+
+- `config-list.json` — real `openspec config list --json` after `config profile core`
+  (`{featureFlags, profile, delivery, workflows[]}`). Backs `WorkflowProfileServiceTest.ConfigListContract`
+  for `WorkflowProfileService.parseSnapshot`. The `workflows` array is present only once a profile has
+  been set (a fresh `init` omits it, exercising the parser's `CORE_DEFAULTS` fallback); this capture
+  has it, and the test asserts `update` is present — `update` is in the real workflows but NOT in
+  `CORE_DEFAULTS`, proving the real array parsed rather than the fallback.
+- `version.txt` — real `openspec --version` (bare `1.7.0`). Backs `CliDetectionServiceTest`'s
+  version-strip contract (feeds every numeric floor gate) and the floor-no-cap assertion.
+- `schemas --json` is backed by the existing `config-validation/schemas-list-with-fork.json` (a project
+  fork + the built-in package schema), now also consumed by `SchemaServiceTest` for the full
+  `parseSchemaList` contract. Note: real `schemas --json` reports `source` ("package" = built-in,
+  "project" = fork) and `artifacts` — the parser previously read the never-emitted `isBuiltIn`/
+  `artifactIds` keys (fixed in this change).
+- `config-profile-json-rejected.txt` — **pinned, not a JSON fixture.** `openspec config profile --json`
+  is rejected on 1.7 (`error: unknown option '--json'`), so the command produces no JSON for
+  `ConfigProfileDetail.fromJson` to parse — the source that parser was written against no longer
+  exists. Captured as evidence and documented in `ConfigProfileDetailTest`; re-sourcing the Settings
+  profile section from `config list --json` is a separate change.
