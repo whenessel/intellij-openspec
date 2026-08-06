@@ -2,9 +2,7 @@
 
 ## Purpose
 Core infrastructure: project detection, configuration, file operations, API compatibility, notifications, and service lifecycle.
-
 ## Requirements
-
 ### Requirement: Project detection and initialization
 
 The plugin SHALL detect OpenSpec projects by checking for `openspec/` and provide initialization via CLI delegation with built-in fallback. The built-in fallback SHALL honor the user's configured Default schema preference when writing `openspec/config.yaml`, falling back to `spec-driven` only when no preference is set. The built-in fallback SHALL write **only the fields upstream `openspec init` writes** — a `schema:` line and nothing else — and SHALL NOT write plugin-invented fields (`version:`, `profile:`) or empty upstream fields (`context: ""`, `rules: {}`) that upstream's Zod schema ignores. The plugin MAY still read `version:`/`profile:` from an existing (legacy) `config.yaml` for display, but SHALL NOT emit them into a config it generates.
@@ -39,15 +37,17 @@ The plugin SHALL detect OpenSpec projects by checking for `openspec/` and provid
 
 ### Requirement: Configuration parsing
 
-The plugin SHALL parse `openspec/config.yaml` and surface clear errors for malformed YAML in both `config.yaml` and `.openspec.yaml`. The plugin SHALL support reading the active profile's workflow configuration when the CLI is available. The plugin SHALL persist a default schema preference in `OpenSpecSettings.State` and expose it via getter/setter methods.
+The plugin SHALL parse `openspec/config.yaml` and each change's `.openspec.yaml`, **ignoring unrecognized or newer keys rather than treating them as errors** (matching upstream OpenSpec's strip contract). For a change's `.openspec.yaml`, genuinely malformed YAML SHALL surface a clear warning notification with the change name and parse error. The plugin SHALL support reading the active profile's workflow configuration when the CLI is available. The plugin SHALL persist a default schema preference in `OpenSpecSettings.State` and expose it via getter/setter methods.
 
 #### Scenario: Valid config
 - **WHEN** a valid `config.yaml` exists
 - **THEN** all config values SHALL be accessible via ConfigService
 
 #### Scenario: Malformed YAML
-- **WHEN** `config.yaml` or `.openspec.yaml` contains invalid YAML
-- **THEN** the plugin SHALL show a warning notification with file path and parse error
+- **WHEN** a change's `.openspec.yaml` contains genuinely invalid YAML
+- **THEN** the plugin SHALL show a warning notification with the change name and parse error
+- **AND WHEN** `config.yaml` contains invalid YAML
+- **THEN** the plugin SHALL degrade to empty configuration without blocking (the parse failure is logged, not surfaced as a notification)
 
 #### Scenario: Profile config retrieval via CLI
 - **WHEN** the CLI is detected and `openspec config profile --json` succeeds
@@ -60,6 +60,11 @@ The plugin SHALL parse `openspec/config.yaml` and surface clear errors for malfo
 #### Scenario: Default schema persistence
 - **WHEN** the user selects a default schema in Settings
 - **THEN** the value SHALL be persisted in `OpenSpecSettings.State.defaultSchema` and available via `OpenSpecSettings.getDefaultSchema()`
+
+#### Scenario: Unknown or newer change-metadata keys parse without warning
+- **WHEN** a change's `.openspec.yaml` carries upstream-valid keys the plugin does not model (`goal`, `affected_areas`, `initiative`, `skip_specs`) or any other unknown or newer key
+- **THEN** the plugin SHALL parse it to non-null metadata (retaining `schema`, `status`, and `created`) with no warning notification
+- **AND** the unmodeled keys SHALL be ignored, so no validation gate treats them as errors
 
 ### Requirement: AI tool detection
 
@@ -290,3 +295,4 @@ Because the client's own surface differs across versions, the plugin's delivered
 #### Scenario: The 1.6.x line is a supported generation
 - **WHEN** the detected CLI is in the `1.6.x` line
 - **THEN** the plugin SHALL deliver the full capability set it delivers for `1.5.x` (no re-gating), applying the 1.6-generation semantics specified by the affected capabilities (store health, registration outcomes, validator behavior), and per-generation contract coverage SHALL exist for the behaviors that differ
+
