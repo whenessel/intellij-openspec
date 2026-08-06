@@ -44,6 +44,16 @@ class CliContractTest {
         return loadFixture("1.6.0/" + name);
     }
 
+    private static String fixture17(String name) {
+        return loadFixture("1.7.0/" + name);
+    }
+
+    /** Look an artifact up by id — 1.7 reorders {@code artifacts[]} to schema order, so index-based
+     * status assertions would be fragile; keying by id makes the reorder inert. */
+    private static ArtifactInfo byId(ChangeArtifactDag dag, String id) {
+        return dag.getArtifacts().stream().filter(a -> id.equals(a.id())).findFirst().orElseThrow();
+    }
+
     @Nested
     class StatusContract {
 
@@ -598,6 +608,277 @@ class CliContractTest {
             assertFalse(result.passed(), "the 1.3.0 capture has an invalid item, so the result fails");
             assertEquals(1, result.errorCount(),
                     "only the invalid item's ERROR surfaces; the valid item's warning rides valid:true and is skipped");
+        }
+    }
+
+    /**
+     * 1.7-generation status contract. 1.7 adds a per-artifact {@code requires: string[]} and reorders
+     * {@code artifacts[]}/{@code missingDeps[]} to schema order [proposal, specs, design, tasks].
+     * Assertions are keyed by artifact <b>id</b> (never array index) so the reorder is inert;
+     * {@code ArtifactInfo} has no {@code requires} field so Gson drops it (additive-tolerant). One
+     * JSON-level assertion proves the {@code requires} edges are present in the captured output — the
+     * data a future {@code requires}-driven DAG derivation would consume.
+     */
+    @Nested
+    class StatusContractV17 {
+
+        @Test
+        void parsesRealStatusOutputWithAdditive17Keys() {
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status.json"));
+            assertNotNull(dag);
+            assertEquals("demo-change", dag.getChangeName());
+            assertEquals("spec-driven", dag.getSchemaName());
+            assertFalse(dag.isComplete());
+            assertEquals(List.of("tasks"), dag.getApplyRequires());
+        }
+
+        @Test
+        void artifactStatusesDeserializeById() {
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status.json"));
+            assertEquals(4, dag.getArtifacts().size());
+            assertEquals(ArtifactStatus.DONE, byId(dag, "proposal").status());
+            assertEquals(ArtifactStatus.DONE, byId(dag, "design").status());
+            assertEquals(ArtifactStatus.READY, byId(dag, "specs").status());
+            assertEquals(ArtifactStatus.DONE, byId(dag, "tasks").status());
+        }
+
+        @Test
+        void getReadyArtifactsWorksOnRealData() {
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status.json"));
+            assertEquals(1, dag.getReadyArtifacts().size());
+            assertEquals("specs", dag.getReadyArtifacts().get(0).id());
+        }
+
+        @Test
+        void parsesMixedStatusesAndMissingDepsById() {
+            ChangeArtifactDag dag =
+                    CliOutputParser.parseChangeStatus(fixture17("status-with-context.json"));
+            assertEquals(ArtifactStatus.DONE, byId(dag, "proposal").status());
+            assertEquals(ArtifactStatus.READY, byId(dag, "design").status());
+            assertEquals(ArtifactStatus.READY, byId(dag, "specs").status());
+            assertEquals(ArtifactStatus.BLOCKED, byId(dag, "tasks").status());
+            // 1.7 reorders missingDeps to schema order — compare as a Set so ordering is irrelevant.
+            assertEquals(java.util.Set.of("design", "specs"),
+                    java.util.Set.copyOf(byId(dag, "tasks").missingDeps()));
+        }
+
+        @Test
+        void parsesActionContext() {
+            ChangeArtifactDag dag =
+                    CliOutputParser.parseChangeStatus(fixture17("status-with-context.json"));
+            ChangeArtifactDag.ActionContext ac = dag.getActionContext();
+            assertNotNull(ac, "captured 1.7 status must surface actionContext");
+            assertEquals("repo-local", ac.getMode());
+            assertEquals("repo", ac.getSourceOfTruth());
+            assertEquals(List.of("/fixture/demo-project"), ac.getAllowedEditRoots());
+            assertFalse(ac.isRequiresAffectedAreaSelection());
+        }
+
+        @Test
+        void parsesCompleteStatusWithIsCompleteTrue() {
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status-complete.json"));
+            assertNotNull(dag);
+            assertEquals("demo-change", dag.getChangeName());
+            assertTrue(dag.isComplete());
+            assertEquals(4, dag.getArtifacts().size());
+            dag.getArtifacts().forEach(a ->
+                    assertEquals(ArtifactStatus.DONE, a.status(), "every artifact is done: " + a.id()));
+            assertTrue(dag.getReadyArtifacts().isEmpty());
+        }
+
+        /**
+         * The additive 1.7 edge data. {@code ArtifactInfo} intentionally drops {@code requires}, so
+         * this asserts at the JSON level that the captured output carries the dependency edges (the
+         * source a future {@code requires}-driven DAG derivation would consume). Proves the capture is
+         * 1.7-generation, not a 1.6 twin.
+         */
+        @Test
+        void statusJsonCarriesAdditiveRequiresEdges() {
+            com.google.gson.JsonObject root = com.google.gson.JsonParser
+                    .parseString(fixture17("status.json")).getAsJsonObject();
+            java.util.Map<String, java.util.List<String>> requires = new java.util.LinkedHashMap<>();
+            for (com.google.gson.JsonElement el : root.getAsJsonArray("artifacts")) {
+                com.google.gson.JsonObject a = el.getAsJsonObject();
+                java.util.List<String> reqs = new java.util.ArrayList<>();
+                if (a.has("requires")) {
+                    a.getAsJsonArray("requires").forEach(r -> reqs.add(r.getAsString()));
+                }
+                requires.put(a.get("id").getAsString(), reqs);
+            }
+            assertTrue(requires.get("proposal").isEmpty(),
+                    "the root proposal artifact has no requires edges");
+            assertTrue(requires.get("tasks").containsAll(List.of("specs", "design")),
+                    "1.7 tasks artifact must carry requires edges on specs+design; got " + requires.get("tasks"));
+        }
+
+        /**
+         * A 1.7 {@code skip_specs: true} change reports its specs artifact as {@code skipped} and the
+         * change {@code isComplete: true}. The plugin's {@link ArtifactStatus} enum has no SKIPPED
+         * value, so {@code skipped} degrades to {@link ArtifactStatus#UNKNOWN} — this is graceful, not
+         * a breach of the never-stricter-than-the-CLI invariant, because completeness is read from the
+         * CLI's own {@code isComplete} flag, never re-derived from artifact statuses. This locks that
+         * contract: a future change that makes {@code skipped} throw, or that re-derives completeness
+         * and thereby blocks a genuinely-complete skip-specs change, fails here.
+         */
+        @Test
+        void skipSpecsChangeStatusDegradesGracefully() {
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status-skipped.json"));
+            assertNotNull(dag);
+            assertEquals(ArtifactStatus.UNKNOWN, byId(dag, "specs").status(),
+                    "1.7 'skipped' has no plugin enum value and degrades to UNKNOWN (graceful)");
+            assertTrue(dag.isComplete(),
+                    "a complete skip_specs change is complete regardless of the skipped specs artifact");
+        }
+    }
+
+    /** 1.7-generation instructions contract. 1.7 reorders unlocks[] to schema order. */
+    @Nested
+    class InstructionContractV17 {
+
+        @Test
+        void parsesProposalWithReorderedUnlocks() {
+            ArtifactInstruction inst =
+                    CliOutputParser.parseArtifactInstruction(fixture17("instructions-proposal.json"));
+            assertNotNull(inst);
+            assertEquals("proposal", inst.artifactId());
+            assertEquals("proposal.md", inst.outputPath());
+            assertTrue(inst.dependencies().isEmpty());
+            // 1.7 schema-order reorder: was [design, specs] on 1.6.
+            assertEquals(List.of("specs", "design"), inst.unlocks());
+        }
+
+        @Test
+        void parsesSpecsWithOneDependency() {
+            ArtifactInstruction inst =
+                    CliOutputParser.parseArtifactInstruction(fixture17("instructions-specs.json"));
+            assertEquals("specs", inst.artifactId());
+            assertEquals("demo-change", inst.changeName());
+            assertEquals(1, inst.dependencies().size());
+            ArtifactInstruction.Dependency dep = inst.dependencies().get(0);
+            assertEquals("proposal", dep.id());
+            assertTrue(dep.done());
+            assertEquals("proposal.md", dep.path());
+            assertNotNull(dep.description());
+        }
+
+        @Test
+        void parsesTasksWithMultipleDependencies() {
+            ArtifactInstruction inst =
+                    CliOutputParser.parseArtifactInstruction(fixture17("instructions-tasks.json"));
+            assertEquals("tasks", inst.artifactId());
+            assertEquals(2, inst.dependencies().size());
+            ArtifactInstruction.Dependency specsDep = inst.dependencies().stream()
+                    .filter(d -> "specs".equals(d.id())).findFirst().orElseThrow();
+            assertFalse(specsDep.done());
+            assertEquals("specs/**/*.md", specsDep.path());
+            ArtifactInstruction.Dependency designDep = inst.dependencies().stream()
+                    .filter(d -> "design".equals(d.id())).findFirst().orElseThrow();
+            assertTrue(designDep.done());
+            assertEquals("design.md", designDep.path());
+        }
+
+        @Test
+        void parsesEmptyUnlocksAsEmptyList() {
+            ArtifactInstruction inst =
+                    CliOutputParser.parseArtifactInstruction(fixture17("instructions-tasks.json"));
+            assertNotNull(inst.unlocks());
+            assertTrue(inst.unlocks().isEmpty());
+        }
+
+        @Test
+        void buildPromptIncludesDependencies() {
+            ArtifactInstruction inst =
+                    CliOutputParser.parseArtifactInstruction(fixture17("instructions-specs.json"));
+            String prompt = inst.buildPrompt();
+            assertTrue(prompt.contains("Dependencies:"));
+            assertTrue(prompt.contains("### proposal"));
+        }
+    }
+
+    /** 1.7-generation validate contract — verbatim twin of {@link ValidateContractV16}. */
+    @Nested
+    class ValidateContractV17 {
+
+        @Test
+        void parsesRealValidateOutput() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture17("validate.json"));
+            assertNotNull(result);
+            assertFalse(result.passed(), "capture contains two invalid items");
+            assertEquals(2, result.errorCount());
+        }
+
+        @Test
+        void extractsRepathedMissingShallError() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture17("validate.json"));
+            assertTrue(result.issues().stream().anyMatch(i ->
+                    i.severity() == ValidationIssue.Severity.ERROR
+                            && i.message().contains("must contain SHALL or MUST")));
+        }
+
+        @Test
+        void extractsDeltaLessChangeError() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture17("validate.json"));
+            assertTrue(result.issues().stream().anyMatch(i ->
+                    i.severity() == ValidationIssue.Severity.ERROR
+                            && i.message().contains("Change must have at least one delta")));
+        }
+
+        @Test
+        void skipsWarningAndInfoIssuesOnValidItems() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture17("validate.json"));
+            assertEquals(0, result.warningCount());
+            assertTrue(result.issues().stream()
+                    .noneMatch(i -> i.severity() == ValidationIssue.Severity.INFO));
+        }
+
+        @Test
+        void warningOnlyInvalidItemReadsAsFailingFromValidField() {
+            ValidationResult result =
+                    CliOutputParser.parseJsonOutput(fixture17("validate-strict-warning-only.json"));
+            assertNotNull(result);
+            assertFalse(result.passed());
+        }
+    }
+
+    /** 1.7-generation single-item validate contract — verbatim twin of {@link SingleItemValidateContractV16}. */
+    @Nested
+    class SingleItemValidateContractV17 {
+
+        @Test
+        void parsesValidSpecEnvelope() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture17("validate-single-spec.json"));
+            assertNotNull(result);
+            assertTrue(result.passed());
+            assertEquals(0, result.warningCount());
+            assertTrue(result.issues().isEmpty());
+        }
+
+        @Test
+        void parsesValidChangeEnvelope() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(fixture17("validate-single-change.json"));
+            assertNotNull(result);
+            assertTrue(result.passed());
+            assertTrue(result.issues().isEmpty());
+        }
+
+        @Test
+        void extractsErrorFromInvalidChangeEnvelope() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture17("validate-single-change-invalid.json"));
+            assertNotNull(result);
+            assertFalse(result.passed());
+            assertEquals(1, result.errorCount());
+            assertTrue(result.issues().stream().anyMatch(i ->
+                    i.severity() == ValidationIssue.Severity.ERROR
+                            && i.message().contains("at least one delta")));
+        }
+
+        @Test
+        void tagsIssueWithTypeAndId() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture17("validate-single-change-invalid.json"));
+            assertTrue(result.issues().stream()
+                    .anyMatch(i -> "change/broken-change".equals(i.filePath())));
         }
     }
 }

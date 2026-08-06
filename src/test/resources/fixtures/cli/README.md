@@ -125,9 +125,10 @@ of what this generation changed:
 ## `1.7.0/change-metadata/` — change `.openspec.yaml` shapes (for the tolerant-parse contract)
 
 Real 1.7.0-CLI change-metadata files, consumed by `ChangeMetadataContractTest` /
-`ChangeMetadataParserToleranceTest` / `ChangeServiceMetadataToleranceTest`. This dir is
-**intentionally partial** (change-metadata scoped); a broader 1.7 status/validate/instructions
-recapture + a `…V17` `CliContractTest` nest is a separate follow-up. `.openspec.yaml` files carry
+`ChangeMetadataParserToleranceTest` / `ChangeServiceMetadataToleranceTest`. This dir was the first
+(change-metadata-scoped) slice of the 1.7 corpus; the broader 1.7 status/validate/instructions/
+schema/store/change-deltas/spec-structure/update capture and the `…V17` contract nests now exist
+(see the `1.7.0/` current-generation section below). `.openspec.yaml` files carry
 no absolute paths or hostnames, so nothing is sanitized — only the capture-day `created:` value
 is fixed (`2026-08-05`) and asserted verbatim.
 
@@ -150,3 +151,53 @@ is fixed (`2026-08-05`) and asserted verbatim.
   `schema: openspec-change` / `status: proposed` / quoted `created`). The backward-compat anchor.
 - `malformed.openspec.yaml` — a **deliberately corrupt** file (a user typo, not a CLI shape),
   labeled as such; exercises only the warn branch (a `MarkedYAMLException` at load).
+
+## `1.7.0/` — current-generation set (status/instructions/validate/schema/store/deltas/spec/update)
+
+Real CLI **1.7.0** captures, the twin of the `1.6.0/` set, asserted by the `…V17` contract nests
+alongside their `…V16` twins (`CliContractTest`, `SchemaToolingContractTest`,
+`StoreWorksetContractTest`, `StoreWorksetWriteContractTest`, `ChangeDeltasContractTest`,
+`SpecParserCliStructureContractTest`, `UpdateOutputParserContractTest`) plus the platform-free
+`ValidatorVerdictVersionStabilityTest`. Every file was captured under a fresh isolated
+`HOME`/`XDG_*` env with `OPENSPEC_TELEMETRY=0`; the only edits are path sanitizations matched to the
+`1.6.0/` twins' tokens (`/fixture`, `/fixture/demo-project`, `/fixture/parity-corpus`,
+`/fixture/node_modules`, `/fixture/<store-leaf>`). No `archive` was run. **1.6 → 1.7 is a strictly
+additive superset** — verdict-parity was explicitly confirmed (the 13-item `validate-parity-corpus`
+id→valid map + summary are byte-identical to 1.6.0). The observable differences, all captured
+faithfully:
+
+- **status** (`status{,-with-context,-complete}.json`) — 1.7 adds a per-artifact `requires: string[]`
+  and reorders `artifacts[]`/`missingDeps[]` to schema order `proposal, specs, design, tasks`. The
+  `…V17` status nest keys assertions by artifact **id** (never index) so the reorder is inert, and
+  adds one JSON-level check that the `requires` edges are present (`ArtifactInfo` has no `requires`
+  field, so Gson drops them — the parser is unaffected). Statuses/`isComplete` are unchanged.
+- `status-skipped.json` — a 1.7-only capture of a `skip_specs: true` change's status: the specs
+  artifact reports `skipped` and the change is `isComplete: true`. The plugin's `ArtifactStatus`
+  enum has no `SKIPPED`, so it degrades to `UNKNOWN` (graceful — completeness is read from the CLI's
+  `isComplete`, never re-derived); the nest locks that contract. Recipe: isolated env, `init`, a
+  `new change` whose `.openspec.yaml` sets `skip_specs: true` with proposal/design/tasks present and
+  no `specs/` delta, then `status --json`, root → `/fixture/demo-project`.
+- **instructions** (`instructions-{proposal,specs,tasks}.json`) — 1.7 reorders `unlocks[]` to schema
+  order (proposal now unlocks `["specs","design"]`, was `["design","specs"]`) and rewrites the
+  advisory `instruction`/`template` prose (adds `skip_specs` guidance); all structural fields
+  (`dependencies`, dep paths/done flags) are unchanged. The `…V17` nest asserts the reordered
+  `unlocks` and the unchanged structure.
+- **update** (`update-clean.txt`, `update-legacy-pending{,-regenerated}.txt`) — 1.7 dropped the
+  `Migrated: custom profile` preamble from a clean `--tools claude` update, and `init --tools junie`
+  now scaffolds **six** legacy `opsx-*` command files (adds `opsx-sync.md` + `opsx-update.md`), so
+  both the pending and the post-force *regenerated* "Files to remove" lists carry six entries (1.6's
+  regenerated list stayed at four). ANSI spinner escapes were stripped post-capture to match the
+  ESC-free 1.6 presentation; the version-pin for the legacy-pending capture was reproduced by editing
+  the scaffolded skills' `generatedBy` to an older value (no real 1.3.1 CLI on hand).
+- **validate** (`validate.json`, `validate-single-{spec,change,change-invalid}.json`,
+  `validate-strict-warning-only.json`) — verdicts/counts/paths identical to 1.6.0; the delta-less
+  change ERROR gained a trailing `skip_specs` sentence (the asserted `Change must have at least one
+  delta` prefix is intact), and `durationMs` is per-run timing noise (asserted by nothing).
+- **byte-identical families** — `schema-validate-*`, `schema-which-*`, `templates-builtin.json`, the
+  `store-{doctor-healthy-empty,register-*}` set, `change-deltas/{mixed,rename-only,empty}.show.json`,
+  and `spec-structure/*.show.json` (11) are unchanged from 1.6.0; their `…V17` nests are verbatim
+  twins (forward tripwires). `spec-structure` + `validate-parity-corpus.json` were re-captured by
+  **reusing the `1.6.0/parity-corpus` markdown as capture input** (the corpus is authored once);
+  `SpecParserCliStructureContractTest` runs the same structure-parity check against both generations'
+  `spec-structure/` captures, and `ValidatorVerdictVersionStabilityTest` asserts the two generations'
+  `validate-parity-corpus` id→valid maps are equal.

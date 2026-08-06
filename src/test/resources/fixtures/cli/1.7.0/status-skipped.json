@@ -1,0 +1,101 @@
+{
+  "changeName": "demo-change",
+  "schemaName": "spec-driven",
+  "planningHome": {
+    "kind": "repo",
+    "root": "/private/fixture/demo-project",
+    "changesDir": "/private/fixture/demo-project/openspec/changes",
+    "defaultSchema": "spec-driven"
+  },
+  "changeRoot": "/private/fixture/demo-project/openspec/changes/demo-change",
+  "artifactPaths": {
+    "proposal": {
+      "outputPath": "proposal.md",
+      "resolvedOutputPath": "/private/fixture/demo-project/openspec/changes/demo-change/proposal.md",
+      "existingOutputPaths": [
+        "/private/fixture/demo-project/openspec/changes/demo-change/proposal.md"
+      ]
+    },
+    "specs": {
+      "outputPath": "specs/**/*.md",
+      "resolvedOutputPath": "/private/fixture/demo-project/openspec/changes/demo-change/specs/**/*.md",
+      "existingOutputPaths": []
+    },
+    "design": {
+      "outputPath": "design.md",
+      "resolvedOutputPath": "/private/fixture/demo-project/openspec/changes/demo-change/design.md",
+      "existingOutputPaths": [
+        "/private/fixture/demo-project/openspec/changes/demo-change/design.md"
+      ]
+    },
+    "tasks": {
+      "outputPath": "tasks.md",
+      "resolvedOutputPath": "/private/fixture/demo-project/openspec/changes/demo-change/tasks.md",
+      "existingOutputPaths": [
+        "/private/fixture/demo-project/openspec/changes/demo-change/tasks.md"
+      ]
+    }
+  },
+  "isComplete": true,
+  "applyRequires": [
+    "tasks"
+  ],
+  "nextSteps": [
+    "All planning artifacts are complete; review tasks before implementation."
+  ],
+  "actionContext": {
+    "mode": "repo-local",
+    "sourceOfTruth": "repo",
+    "planningArtifacts": [
+      "proposal",
+      "specs",
+      "design",
+      "tasks"
+    ],
+    "linkedContext": [],
+    "allowedEditRoots": [
+      "/private/fixture/demo-project"
+    ],
+    "requiresAffectedAreaSelection": false,
+    "constraints": [
+      "Repo-local change artifacts and implementation edits are scoped to this project."
+    ]
+  },
+  "artifacts": [
+    {
+      "id": "proposal",
+      "outputPath": "proposal.md",
+      "status": "done",
+      "requires": []
+    },
+    {
+      "id": "specs",
+      "outputPath": "specs/**/*.md",
+      "status": "skipped",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "design",
+      "outputPath": "design.md",
+      "status": "done",
+      "requires": [
+        "proposal"
+      ]
+    },
+    {
+      "id": "tasks",
+      "outputPath": "tasks.md",
+      "status": "done",
+      "requires": [
+        "specs",
+        "design"
+      ]
+    }
+  ],
+  "root": {
+    "path": "/private/fixture/demo-project",
+    "source": "nearest"
+  }
+}

@@ -3,6 +3,7 @@ package com.johnnyblabs.openspec.model;
 import com.johnnyblabs.openspec.model.ChangeDeltaModel.CapabilityGroup;
 import com.johnnyblabs.openspec.model.ChangeDeltaModel.Delta;
 import com.johnnyblabs.openspec.model.DeltaSpecOperation.OperationType;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -25,7 +26,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class ChangeDeltasContractTest {
 
     private static String fixture(String name) {
-        String path = "/fixtures/cli/1.6.0/change-deltas/" + name;
+        return fixtureAt("1.6.0", name);
+    }
+
+    private static String fixture17(String name) {
+        return fixtureAt("1.7.0", name);
+    }
+
+    private static String fixtureAt(String cliVersion, String name) {
+        String path = "/fixtures/cli/" + cliVersion + "/change-deltas/" + name;
         try (InputStream is = ChangeDeltasContractTest.class.getResourceAsStream(path)) {
             if (is == null) {
                 throw new IllegalStateException("Fixture not found: " + path);
@@ -126,5 +135,76 @@ class ChangeDeltasContractTest {
                 new String[] {"show", "my-change", "--type", "change", "--json"},
                 ChangeDeltaModel.changeShowArgs("my-change"),
                 "argv must be the verb form with --type change --json (no deltas-only/requirements-only)");
+    }
+
+    /**
+     * 1.7-generation twin: the same delta shapes over captured 1.7.0
+     * {@code show <change> --type change --json} (the family is byte-identical to 1.6.0, so this is a
+     * forward tripwire that a future CLI reshape of the change-deltas envelope fails here).
+     */
+    @Nested
+    class ChangeDeltasV17 {
+
+        @Test
+        void parsesMixedDeltasWithGroupingAndOperations() {
+            ChangeDeltaModel model = ChangeDeltaModel.parse(fixture17("mixed.show.json"));
+            assertEquals("mixed-change", model.id());
+            assertEquals(4, model.deltaCount());
+            assertEquals(4, model.deltas().size());
+
+            List<CapabilityGroup> groups = model.groupedByCapability();
+            assertEquals(List.of("auth", "billing"),
+                    groups.stream().map(CapabilityGroup::capability).toList());
+            assertEquals(2, model.capabilityCount());
+
+            List<Delta> auth = groups.get(0).deltas();
+            assertEquals(List.of(OperationType.ADDED, OperationType.MODIFIED),
+                    auth.stream().map(Delta::operation).toList());
+            List<Delta> billing = groups.get(1).deltas();
+            assertEquals(List.of(OperationType.REMOVED, OperationType.RENAMED),
+                    billing.stream().map(Delta::operation).toList());
+
+            Delta added = auth.get(0);
+            assertNotNull(added.requirement());
+            assertTrue(added.requirement().text().contains("second authentication factor"));
+            assertEquals(1, added.requirement().scenarios().size());
+            assertTrue(added.requirement().scenarios().get(0).rawText().contains("**WHEN**"));
+
+            Delta removed = billing.get(0);
+            assertNotNull(removed.requirement());
+            assertTrue(removed.requirement().scenarios().isEmpty(), "REMOVED has empty scenarios");
+
+            Delta renamed = billing.get(1);
+            assertNull(renamed.requirement(), "RENAMED is requirement-less");
+            assertNotNull(renamed.rename());
+
+            for (Delta d : model.deltas()) {
+                if (d.operation() == OperationType.RENAMED) {
+                    assertTrue(d.requirementsMirror().isEmpty());
+                    continue;
+                }
+                assertFalse(d.requirementsMirror().isEmpty());
+                assertEquals(d.requirement().text(), d.requirementsMirror().get(0).text());
+            }
+        }
+
+        @Test
+        void parsesEmptyChange() {
+            ChangeDeltaModel model = ChangeDeltaModel.parse(fixture17("empty.show.json"));
+            assertEquals("empty-change", model.id());
+            assertEquals(0, model.deltaCount());
+            assertTrue(model.deltas().isEmpty());
+            assertEquals(0, model.capabilityCount());
+        }
+
+        @Test
+        void parsesRenameOnlyWithoutError() {
+            ChangeDeltaModel model = ChangeDeltaModel.parse(fixture17("rename-only.show.json"));
+            assertEquals(1, model.deltaCount());
+            Delta only = model.deltas().get(0);
+            assertEquals(OperationType.RENAMED, only.operation());
+            assertNull(only.requirement());
+            assertEquals("billing", only.spec());
+        }
     }
 }
