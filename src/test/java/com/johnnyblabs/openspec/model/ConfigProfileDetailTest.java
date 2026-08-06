@@ -162,4 +162,37 @@ class ConfigProfileDetailTest {
             assertTrue(detail.getWorkflows().isEmpty());
         }
     }
+
+    /**
+     * {@code openspec config profile --json} is rejected on the current CLI ("unknown option
+     * '--json'"), so the command produces no JSON for {@code fromJson} to parse — the source this
+     * parser was written against no longer exists. Documented here and pinned in the fixture manifest.
+     *
+     * <p>On rejection the Settings panel takes its non-success branch ({@code ConfigProfileDetail
+     * .fallback(profileName)}) and never passes the error text to {@code fromJson}, so this does not
+     * cover the panel's degraded rendering — re-sourcing that section from {@code config list --json}
+     * is a separate change. What it does pin (non-vacuously — Gson would throw without the catch) is
+     * that {@code fromJson} itself degrades to an empty detail on non-JSON input rather than
+     * propagating an exception.
+     */
+    @Test
+    void configProfileJsonRejectedOnCurrentCli_fromJsonDegradesGracefully() {
+        String rejection = fixture("1.7.0/config-profile-json-rejected.txt");
+        assertTrue(rejection.contains("unknown option"),
+                "the captured output must be the CLI's rejection of --json, not JSON");
+
+        ConfigProfileDetail detail = ConfigProfileDetail.fromJson(rejection);
+        assertEquals("", detail.getName());
+        assertTrue(detail.getWorkflows().isEmpty());
+    }
+
+    private static String fixture(String name) {
+        String path = "/fixtures/cli/" + name;
+        try (java.io.InputStream is = ConfigProfileDetailTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }

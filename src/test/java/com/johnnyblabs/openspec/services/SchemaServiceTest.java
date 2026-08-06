@@ -29,28 +29,39 @@ class SchemaServiceTest {
         service = new SchemaService(project);
     }
 
+    private static String fixture(String name) {
+        String path = "/fixtures/cli/" + name;
+        try (java.io.InputStream is = SchemaServiceTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     @Nested
     class ListSchemas {
 
         @Test
-        void parsesJsonArray() {
-            String json = """
-                    [
-                      {"name": "spec-driven", "description": "Default spec-driven workflow", "isBuiltIn": true, "artifactIds": ["proposal", "design", "specs", "tasks"]},
-                      {"name": "rapid", "description": "Rapid prototyping", "isBuiltIn": false, "artifactIds": ["proposal", "tasks"]}
-                    ]
-                    """;
-
-            List<SchemaInfo> schemas = SchemaService.parseSchemaList(json);
-
+        void parsesRealSchemasListWithSourceAndArtifacts() {
+            // Contract test against captured real `openspec schemas --json` (a project fork + the
+            // built-in package schema). The real shape reports `source` ("package"=built-in,
+            // "project"=fork) and `artifacts` — NOT the `isBuiltIn`/`artifactIds` keys the parser
+            // once assumed. An inline fixture with the assumed keys passed vacuously while the
+            // parser silently produced isBuiltIn=false / empty artifactIds on every real response.
+            List<SchemaInfo> schemas = SchemaService.parseSchemaList(
+                    fixture("1.7.0/config-validation/schemas-list-with-fork.json"));
             assertEquals(2, schemas.size());
-            assertEquals("spec-driven", schemas.get(0).name());
-            assertEquals("Default spec-driven workflow", schemas.get(0).description());
-            assertTrue(schemas.get(0).isBuiltIn());
-            assertEquals(4, schemas.get(0).artifactIds().size());
-            assertEquals("rapid", schemas.get(1).name());
-            assertFalse(schemas.get(1).isBuiltIn());
-            assertEquals(2, schemas.get(1).artifactIds().size());
+
+            SchemaInfo builtin = schemas.stream().filter(s -> "spec-driven".equals(s.name()))
+                    .findFirst().orElseThrow();
+            assertTrue(builtin.isBuiltIn(), "source 'package' → built-in");
+            assertEquals(List.of("proposal", "specs", "design", "tasks"), builtin.artifactIds());
+
+            SchemaInfo fork = schemas.stream().filter(s -> "my-custom-fork".equals(s.name()))
+                    .findFirst().orElseThrow();
+            assertFalse(fork.isBuiltIn(), "source 'project' → not built-in");
+            assertEquals(List.of("proposal", "specs", "design", "tasks"), fork.artifactIds());
         }
 
         @Test
@@ -86,7 +97,7 @@ class SchemaServiceTest {
             when(cliDetection.getDetectedVersion()).thenReturn("1.3.0");
 
             CliRunner.CliResult cliResult = new CliRunner.CliResult(0,
-                    "[{\"name\":\"spec-driven\",\"description\":\"Default\",\"isBuiltIn\":true,\"artifactIds\":[\"proposal\"]}]",
+                    "[{\"name\":\"spec-driven\",\"description\":\"Default\",\"source\":\"package\",\"artifacts\":[\"proposal\"]}]",
                     "");
 
             try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
@@ -228,7 +239,7 @@ class SchemaServiceTest {
             when(cliDetection.getDetectedVersion()).thenReturn("1.3.0");
 
             CliRunner.CliResult cliResult = new CliRunner.CliResult(0,
-                    "[{\"name\":\"spec-driven\",\"description\":\"Default\",\"isBuiltIn\":true,\"artifactIds\":[]}]",
+                    "[{\"name\":\"spec-driven\",\"description\":\"Default\",\"source\":\"package\",\"artifacts\":[]}]",
                     "");
 
             try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
@@ -252,7 +263,7 @@ class SchemaServiceTest {
             when(cliDetection.getDetectedVersion()).thenReturn("1.3.0");
 
             CliRunner.CliResult listResult = new CliRunner.CliResult(0,
-                    "[{\"name\":\"spec-driven\",\"description\":\"\",\"isBuiltIn\":true,\"artifactIds\":[]}]",
+                    "[{\"name\":\"spec-driven\",\"description\":\"\",\"source\":\"package\",\"artifacts\":[]}]",
                     "");
 
             try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
@@ -279,7 +290,7 @@ class SchemaServiceTest {
             when(cliDetection.getDetectedVersion()).thenReturn("1.3.0");
 
             CliRunner.CliResult listResult = new CliRunner.CliResult(0,
-                    "[{\"name\":\"spec-driven\",\"description\":\"\",\"isBuiltIn\":true,\"artifactIds\":[]}]",
+                    "[{\"name\":\"spec-driven\",\"description\":\"\",\"source\":\"package\",\"artifacts\":[]}]",
                     "");
 
             try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
@@ -433,8 +444,8 @@ class SchemaServiceTest {
             when(cliDetection.getDetectedVersion()).thenReturn("1.4.0");
 
             String json = "[" +
-                    "{\"name\":\"spec-driven\",\"description\":\"\",\"isBuiltIn\":true,\"artifactIds\":[]}," +
-                    "{\"name\":\"workspace-planning\",\"description\":\"\",\"isBuiltIn\":true,\"artifactIds\":[]}" +
+                    "{\"name\":\"spec-driven\",\"description\":\"\",\"source\":\"package\",\"artifacts\":[]}," +
+                    "{\"name\":\"workspace-planning\",\"description\":\"\",\"source\":\"package\",\"artifacts\":[]}" +
                     "]";
             try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
                 cli.when(() -> CliRunner.run(eq(project), eq("schemas"), eq("--json")))
@@ -455,9 +466,9 @@ class SchemaServiceTest {
             when(cliDetection.getDetectedVersion()).thenReturn("1.4.0");
 
             String json = "[" +
-                    "{\"name\":\"spec-driven\",\"description\":\"\",\"isBuiltIn\":true,\"artifactIds\":[]}," +
-                    "{\"name\":\"workspace-planning\",\"description\":\"\",\"isBuiltIn\":true,\"artifactIds\":[]}," +
-                    "{\"name\":\"my-team-flow\",\"description\":\"Forked\",\"isBuiltIn\":false,\"artifactIds\":[]}" +
+                    "{\"name\":\"spec-driven\",\"description\":\"\",\"source\":\"package\",\"artifacts\":[]}," +
+                    "{\"name\":\"workspace-planning\",\"description\":\"\",\"source\":\"package\",\"artifacts\":[]}," +
+                    "{\"name\":\"my-team-flow\",\"description\":\"Forked\",\"source\":\"project\",\"artifacts\":[]}" +
                     "]";
             try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
                 cli.when(() -> CliRunner.run(eq(project), eq("schemas"), eq("--json")))

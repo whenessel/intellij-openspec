@@ -2,6 +2,7 @@ package com.johnnyblabs.openspec.services;
 
 import com.intellij.execution.configurations.GeneralCommandLine;
 import com.intellij.openapi.project.Project;
+import com.johnnyblabs.openspec.util.CliVersion;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -256,5 +257,46 @@ class CliDetectionServiceTest {
         assertFalse(exes.isEmpty(), "Should still attempt the Unix shell lookup");
         assertFalse(exes.get(0).endsWith("where.exe"),
                 "On Unix the executable must not be where.exe; got: " + exes.get(0));
+    }
+
+    // ---------- Version detection (contract against captured `openspec --version`) ----------
+
+    @Test
+    void parsesRealVersionOutput_stripsToNumericAndClearsFloor() {
+        // The captured `openspec --version` on 1.7 is bare "1.7.0". Feed the raw fixture through the
+        // real detection: the recovered numeric version feeds every floor gate and must clear the
+        // 1.3.0 floor. The gate is a floor (>= 1.3.0), never an allowlist/equality, so any future
+        // version flows through — the broad no-upper-cap coverage lives in CliVersionAtLeastTest;
+        // here it is tied to the actually-detected version.
+        CliDetectionService svc = new CliDetectionService((Project) null);
+        svc.setProcessRunnerForTest(cmd -> fixture("1.7.0/version.txt"));
+
+        assertTrue(svc.tryPath("openspec"));
+        assertTrue(svc.isAvailable());
+        assertEquals("1.7.0", svc.getDetectedVersion());
+        assertTrue(CliVersion.atLeast(svc.getDetectedVersion(), "1.3.0"),
+                "the detected version must clear the 1.3.0 floor");
+    }
+
+    @Test
+    void stripsOpenspecVPrefixFromOlderVersionFormat() {
+        // Only 1.7's bare "1.7.0" is capturable on the installed CLI, but older builds print
+        // "openspec vX.Y.Z"; the strip (`(?i)openspec\s*v?`) must reduce that to the numeric version.
+        // This exercises the prefix-removal branch the bare-fixture case leaves untouched.
+        CliDetectionService svc = new CliDetectionService((Project) null);
+        svc.setProcessRunnerForTest(cmd -> "openspec v1.7.0");
+
+        assertTrue(svc.tryPath("openspec"));
+        assertEquals("1.7.0", svc.getDetectedVersion());
+    }
+
+    private static String fixture(String name) {
+        String path = "/fixtures/cli/" + name;
+        try (java.io.InputStream is = CliDetectionServiceTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 }

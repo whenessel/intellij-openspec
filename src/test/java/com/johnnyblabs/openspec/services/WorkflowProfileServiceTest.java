@@ -319,4 +319,36 @@ class WorkflowProfileServiceTest {
             }
         }
     }
+
+    /** Contract against captured real {@code openspec config list --json} (1.7). */
+    @Nested
+    class ConfigListContract {
+
+        @Test
+        void parsesRealConfigListWorkflows_notTheCoreFallback() {
+            String json = fixture("1.7.0/config-list.json");
+            try (MockedStatic<CliRunner> cliStatic = mockStatic(CliRunner.class)) {
+                cliStatic.when(() -> CliRunner.run(project, "config", "list", "--json"))
+                        .thenReturn(new CliRunner.CliResult(0, json, ""));
+
+                assertEquals("core", service.getActiveProfileName());
+                Set<String> wf = service.getActiveWorkflows();
+                assertEquals(Set.of("propose", "explore", "apply", "update", "sync", "archive"), wf);
+                // 'update' is in the real config-list workflows but NOT in CORE_DEFAULTS
+                // ({propose, explore, apply, sync, archive}) — so this proves the real workflows
+                // array was parsed, not the fallback set.
+                assertTrue(wf.contains("update"), "the real workflows array was parsed, not CORE_DEFAULTS");
+            }
+        }
+    }
+
+    private static String fixture(String name) {
+        String path = "/fixtures/cli/" + name;
+        try (java.io.InputStream is = WorkflowProfileServiceTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
 }

@@ -341,10 +341,14 @@ public final class SchemaService {
                 JsonObject obj = element.getAsJsonObject();
                 String name = obj.has("name") ? obj.get("name").getAsString() : "";
                 String description = obj.has("description") ? obj.get("description").getAsString() : "";
-                boolean isBuiltIn = obj.has("isBuiltIn") && obj.get("isBuiltIn").getAsBoolean();
+                // Real `openspec schemas --json` reports `source` ("package" = built-in shipped with the
+                // CLI, "project" = a local fork) and `artifacts` — NOT the `isBuiltIn`/`artifactIds` keys
+                // this parser previously assumed (which no CLI version emits, so isBuiltIn was always
+                // false and artifactIds always empty). Read the real keys.
+                boolean isBuiltIn = obj.has("source") && "package".equals(obj.get("source").getAsString());
                 List<String> artifactIds = new ArrayList<>();
-                if (obj.has("artifactIds") && obj.get("artifactIds").isJsonArray()) {
-                    for (JsonElement aid : obj.getAsJsonArray("artifactIds")) {
+                if (obj.has("artifacts") && obj.get("artifacts").isJsonArray()) {
+                    for (JsonElement aid : obj.getAsJsonArray("artifacts")) {
                         artifactIds.add(aid.getAsString());
                     }
                 }
