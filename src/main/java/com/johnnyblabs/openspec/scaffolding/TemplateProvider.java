@@ -97,12 +97,14 @@ public final class TemplateProvider {
                 """.formatted(domain);
     }
 
-    public static String openspecYamlTemplate(String status) {
+    public static String openspecYamlTemplate(String schema) {
+        // Matches real `openspec new change`: the effective schema, an UNQUOTED created date, no status.
+        // (The plugin no longer writes the invented `openspec-change` schema value or `status:` field —
+        // OpenSpec has no change-status concept; active vs archived is directory location.)
         return """
-                schema: openspec-change
-                status: %s
-                created: "%s"
-                """.formatted(status, LocalDate.now());
+                schema: %s
+                created: %s
+                """.formatted(schema, LocalDate.now());
     }
 
     /**

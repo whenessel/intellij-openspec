@@ -59,19 +59,16 @@ class ModelTest {
         void defaultConstructorHasNullFields() {
             ChangeMetadata meta = new ChangeMetadata();
             assertNull(meta.getSchema());
-            assertNull(meta.getStatus());
             assertNull(meta.getCreated());
         }
 
         @Test
         void settersAndGettersWork() {
             ChangeMetadata meta = new ChangeMetadata();
-            meta.setSchema("openspec-change");
-            meta.setStatus("proposed");
+            meta.setSchema("spec-driven");
             meta.setCreated("2026-03-06");
 
-            assertEquals("openspec-change", meta.getSchema());
-            assertEquals("proposed", meta.getStatus());
+            assertEquals("spec-driven", meta.getSchema());
             assertEquals("2026-03-06", meta.getCreated());
         }
 

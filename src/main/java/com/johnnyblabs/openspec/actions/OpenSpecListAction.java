@@ -4,7 +4,6 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.model.Change;
-import com.johnnyblabs.openspec.model.ChangeStatus;
 import com.johnnyblabs.openspec.model.SpecFile;
 import com.johnnyblabs.openspec.services.ChangeService;
 import com.johnnyblabs.openspec.services.SpecParsingService;
@@ -68,12 +67,7 @@ public class OpenSpecListAction extends OpenSpecCliAction {
                 sb.append("  (none)\n");
             } else {
                 for (Change change : active) {
-                    ChangeStatus status = changeService.getStatus(change);
-                    sb.append("  ").append(change.getName());
-                    if (status != ChangeStatus.UNKNOWN) {
-                        sb.append(" ").append(status.toLabel());
-                    }
-                    sb.append("\n");
+                    sb.append("  ").append(change.getName()).append("\n");
                 }
             }
 

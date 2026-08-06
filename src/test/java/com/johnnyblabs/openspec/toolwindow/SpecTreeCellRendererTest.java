@@ -4,7 +4,6 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ui.LayeredIcon;
 import com.intellij.ui.SimpleTextAttributes;
 import com.intellij.ui.scale.JBUIScale;
-import com.johnnyblabs.openspec.model.ChangeStatus;
 import com.johnnyblabs.openspec.toolwindow.SpecTreeCellRenderer.LabelFragment;
 import com.johnnyblabs.openspec.toolwindow.SpecTreeModel.TreeNodeData.ChangeLabelParts;
 import com.johnnyblabs.openspec.toolwindow.SpecTreeModel.TreeNodeType;
@@ -79,30 +78,28 @@ class SpecTreeCellRendererTest {
         assertSame(AllIcons.RunConfigurations.TestState.Green2, changeDone.getIcon(1));
     }
 
-    // --- Change-node fragmentation: name un-tinted, status colored, count dimmed ---
+    // --- Change-node fragmentation: name un-tinted (primary), count dimmed ---
 
     @Test
-    void changeName_isPrimaryColor_notStatusTinted() {
+    void changeName_isPrimaryColor() {
         List<LabelFragment> f = SpecTreeCellRenderer.changeFragments(
-                new ChangeLabelParts("add-user-auth", ChangeStatus.PROPOSED, new int[]{3, 11}));
+                new ChangeLabelParts("add-user-auth", new int[]{3, 11}));
         // The NAME is the first fragment and must use REGULAR (default) — the whole point of the
-        // refactor is that the name is no longer tinted green/blue and stops competing with the count.
+        // refactor is that the name reads primary and stops competing with the count.
         assertEquals("add-user-auth", f.get(0).text());
         assertSame(SimpleTextAttributes.REGULAR_ATTRIBUTES, f.get(0).attributes(),
-                "the change name must be the default color, never a status tint");
+                "the change name must be the default color");
     }
 
     @Test
-    void statusTag_keepsMeaningColor_countIsGrayed() {
+    void nameAndCount_areTheOnlyFragments_countGrayed() {
+        // The invented [status] tag is retired — a change node is just name + (optional) dimmed count.
         List<LabelFragment> f = SpecTreeCellRenderer.changeFragments(
-                new ChangeLabelParts("add-user-auth", ChangeStatus.PROPOSED, new int[]{3, 11}));
-        assertEquals(3, f.size(), "name + status tag + count");
-        assertEquals(" [proposed]", f.get(1).text());
-        assertNotSame(SimpleTextAttributes.REGULAR_ATTRIBUTES, f.get(1).attributes(),
-                "the status tag carries its meaning color");
-        assertNotSame(SimpleTextAttributes.GRAYED_ATTRIBUTES, f.get(1).attributes());
-        assertEquals(" 3/11", f.get(2).text());
-        assertSame(SimpleTextAttributes.GRAYED_ATTRIBUTES, f.get(2).attributes(),
+                new ChangeLabelParts("add-user-auth", new int[]{3, 11}));
+        assertEquals(2, f.size(), "name + count, no status tag");
+        assertEquals("add-user-auth", f.get(0).text());
+        assertEquals(" 3/11", f.get(1).text());
+        assertSame(SimpleTextAttributes.GRAYED_ATTRIBUTES, f.get(1).attributes(),
                 "the trailing task count must be dimmed");
     }
 
@@ -112,7 +109,7 @@ class SpecTreeCellRendererTest {
         // that, from the artifact DAG). The count must stay uniformly gray so it never contradicts a
         // non-done icon.
         List<LabelFragment> f = SpecTreeCellRenderer.changeFragments(
-                new ChangeLabelParts("fix-login", ChangeStatus.APPLIED, new int[]{8, 8}));
+                new ChangeLabelParts("fix-login", new int[]{8, 8}));
         LabelFragment count = f.get(f.size() - 1);
         assertEquals(" 8/8", count.text());
         assertSame(SimpleTextAttributes.GRAYED_ATTRIBUTES, count.attributes(),
@@ -120,27 +117,19 @@ class SpecTreeCellRendererTest {
     }
 
     @Test
-    void unknownStatus_omitsTag() {
-        List<LabelFragment> f = SpecTreeCellRenderer.changeFragments(
-                new ChangeLabelParts("wip", ChangeStatus.UNKNOWN, new int[]{1, 4}));
-        assertEquals(2, f.size(), "no [status] tag for UNKNOWN — matches buildChangeLabel");
-        assertEquals("wip", f.get(0).text());
-        assertEquals(" 1/4", f.get(1).text());
-    }
-
-    @Test
     void noTasksArtifact_omitsCount() {
         List<LabelFragment> f = SpecTreeCellRenderer.changeFragments(
-                new ChangeLabelParts("plan-only", ChangeStatus.PROPOSED, null));
-        assertEquals(2, f.size(), "name + status tag, no count fragment when there are no tasks");
-        assertEquals(" [proposed]", f.get(1).text());
+                new ChangeLabelParts("plan-only", null));
+        assertEquals(1, f.size(), "just the name when there are no tasks");
+        assertEquals("plan-only", f.get(0).text());
     }
 
     @Test
     void zeroTotalTasks_omitsCount() {
         List<LabelFragment> f = SpecTreeCellRenderer.changeFragments(
-                new ChangeLabelParts("empty-tasks", ChangeStatus.APPLIED, new int[]{0, 0}));
-        assertEquals(2, f.size(), "an empty tasks file yields no count fragment");
+                new ChangeLabelParts("empty-tasks", new int[]{0, 0}));
+        assertEquals(1, f.size(), "an empty tasks file yields no count fragment");
+        assertEquals("empty-tasks", f.get(0).text());
     }
 
     @Test

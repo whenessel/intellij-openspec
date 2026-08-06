@@ -120,38 +120,39 @@ class TemplateProviderTest {
 
     @Test
     void openspecYamlTemplate_isValidYaml() {
-        String result = TemplateProvider.openspecYamlTemplate("proposed");
+        String result = TemplateProvider.openspecYamlTemplate("spec-driven");
         Yaml yaml = new Yaml();
         Map<String, Object> parsed = yaml.load(result);
         assertNotNull(parsed, "Must produce valid YAML");
     }
 
     @Test
-    void openspecYamlTemplate_hasRequiredFields() {
-        String result = TemplateProvider.openspecYamlTemplate("proposed");
+    void openspecYamlTemplate_hasSchemaAndCreatedOnly() {
+        // Matches real `openspec new change`: the given schema + created, no status, and NOT the retired
+        // invented `openspec-change` schema value.
+        String result = TemplateProvider.openspecYamlTemplate("spec-driven");
         Yaml yaml = new Yaml();
         Map<String, Object> parsed = yaml.load(result);
 
-        assertEquals("openspec-change", parsed.get("schema"),
-                "schema must be 'openspec-change'");
-        assertEquals("proposed", parsed.get("status"));
+        assertEquals("spec-driven", parsed.get("schema"), "schema is the given schema, not 'openspec-change'");
         assertNotNull(parsed.get("created"), "created date must be present");
+        assertFalse(parsed.containsKey("status"), "the invented status: field is retired");
     }
 
     @Test
     void openspecYamlTemplate_usesTodayDate() {
-        String result = TemplateProvider.openspecYamlTemplate("proposed");
+        String result = TemplateProvider.openspecYamlTemplate("spec-driven");
         assertTrue(result.contains(LocalDate.now().toString()),
                 "created date must be today's date");
     }
 
     @Test
-    void openspecYamlTemplate_statusReflectsParameter() {
-        String proposed = TemplateProvider.openspecYamlTemplate("proposed");
-        assertTrue(proposed.contains("status: proposed"));
-
-        String applied = TemplateProvider.openspecYamlTemplate("applied");
-        assertTrue(applied.contains("status: applied"));
+    void openspecYamlTemplate_schemaReflectsParameter_createdUnquoted() {
+        String wp = TemplateProvider.openspecYamlTemplate("workspace-planning");
+        assertTrue(wp.contains("schema: workspace-planning"), "the schema arg is emitted verbatim");
+        assertFalse(wp.contains("openspec-change"), "never the retired invented schema value");
+        // created is UNQUOTED, matching real `openspec new change` (an unquoted date scalar).
+        assertFalse(wp.contains("created: \""), "created must be unquoted");
     }
 
     // --- config.yaml template ---

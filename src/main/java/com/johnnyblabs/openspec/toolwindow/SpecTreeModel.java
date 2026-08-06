@@ -66,20 +66,18 @@ public class SpecTreeModel {
         boolean cliAvailable = isCliAvailable();
 
         for (Change change : changes) {
-            ChangeStatus status = changeService.getStatus(change);
-
             // Resolve the artifact DAG once: it drives both the artifact child nodes and the
             // change-node apply-ready rollup badge.
             ChangeArtifactDag dag = cliAvailable ? loadArtifactDag(change) : null;
             int[] taskCounts = readTaskCounts(change);
 
-            String label = buildChangeLabel(change.getName(), status, taskCounts);
+            String label = buildChangeLabel(change.getName(), taskCounts);
             TreeNodeType changeType = changeNodeType(dag);
             String changeTooltip = buildChangeTooltip(change, dag, taskCounts);
 
             DefaultMutableTreeNode changeNode = new DefaultMutableTreeNode(
                     new TreeNodeData(label, changeType, change.getPath(), change.getName(), null, changeTooltip, null,
-                            new TreeNodeData.ChangeLabelParts(change.getName(), status, taskCounts)));
+                            new TreeNodeData.ChangeLabelParts(change.getName(), taskCounts)));
 
             // Try CLI-based artifact DAG first; fall back to on-disk artifact listing otherwise.
             boolean dagLoaded = addDagArtifactNodes(changeNode, change, dag);
@@ -117,15 +115,12 @@ public class SpecTreeModel {
     }
 
     /**
-     * Builds the change node's label: {@code name [status] X/Y}. The status suffix is
-     * omitted for {@link ChangeStatus#UNKNOWN}; the {@code X/Y} task progress suffix is
-     * omitted when {@code taskCounts} is null (no tasks artifact) or has zero tasks.
+     * Builds the change node's label: {@code name X/Y}. The {@code X/Y} task-progress suffix is
+     * omitted when {@code taskCounts} is null (no tasks artifact) or has zero tasks. (The invented
+     * {@code [status]} tag is retired — active vs archived is directory location, not a metadata field.)
      */
-    static String buildChangeLabel(String name, ChangeStatus status, int[] taskCounts) {
+    static String buildChangeLabel(String name, int[] taskCounts) {
         StringBuilder sb = new StringBuilder(name);
-        if (status != null && status != ChangeStatus.UNKNOWN) {
-            sb.append(" ").append(status.toLabel());
-        }
         if (taskCounts != null && taskCounts.length == 2 && taskCounts[1] > 0) {
             sb.append(" ").append(taskCounts[0]).append("/").append(taskCounts[1]);
         }
@@ -300,11 +295,10 @@ public class SpecTreeModel {
 
         /**
          * Structured pieces of a change node's label, so the cell renderer can fragment it — name in
-         * the default (primary) color, the {@code [status]} tag in its meaning color, and the
-         * {@code X/Y} task count dimmed — instead of painting one concatenated string in one color.
-         * Null for every non-change node. The flat {@link #label} still carries the concatenated form
-         * for search/tooltip/tests.
+         * the default (primary) color and the {@code X/Y} task count dimmed — instead of painting one
+         * concatenated string in one color. Null for every non-change node. The flat {@link #label}
+         * still carries the concatenated form for search/tooltip/tests.
          */
-        public record ChangeLabelParts(String name, ChangeStatus status, int[] taskCounts) {}
+        public record ChangeLabelParts(String name, int[] taskCounts) {}
     }
 }

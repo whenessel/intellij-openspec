@@ -45,7 +45,6 @@ class ChangeMetadataContractTest {
         // resolves to a Date — a naive String-only or local-tz path would drop it or day-shift it.
         assertEquals("2026-08-05", m.getCreated());
         assertEquals("Honor upstream change metadata so a CLI-valid file never red-flags", m.getGoal());
-        assertNull(m.getStatus());
         assertNull(m.getSkipSpecs());
     }
 
@@ -86,13 +85,15 @@ class ChangeMetadataContractTest {
     }
 
     @Test
-    void parsesLegacyStatusProposedFile() {
-        // Backward-compat anchor: a legacy plugin-scaffolded file still parses, status reader intact.
-        ChangeMetadata m = ChangeMetadataParser.parse(fixture("legacy-status-proposed.openspec.yaml")).metadata();
+    void parsesLegacyStatusFileToleratingIgnoredStatusKey() {
+        // Backward-compat anchor: a legacy plugin-scaffolded file that still carries the retired
+        // `status:` key parses without error — status is now just an ignored unknown key (strip
+        // contract), which is exactly why retiring the reader was safe.
+        ChangeMetadataParser.ParseResult r = ChangeMetadataParser.parse(fixture("legacy-status-proposed.openspec.yaml"));
+        assertFalse(r.isMalformed());
+        ChangeMetadata m = r.metadata();
         assertNotNull(m);
         assertEquals("openspec-change", m.getSchema());
-        assertEquals("proposed", m.getStatus());
-        assertEquals(ChangeStatus.PROPOSED, ChangeStatus.fromString(m.getStatus()));
         assertEquals("2026-03-18", m.getCreated()); // quoted in the file -> String, passed through
     }
 

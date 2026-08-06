@@ -189,10 +189,33 @@ class ScaffoldingContractTest {
     // --- .openspec.yaml template ---
 
     @Test
-    void openspecYamlTemplate_hasChangeSchema() {
-        String yaml = TemplateProvider.openspecYamlTemplate("proposed");
-        assertTrue(yaml.contains("schema: openspec-change"),
-                ".openspec.yaml must use 'openspec-change' schema");
+    void openspecYamlTemplate_emitsGivenSchemaNotInventedValue() {
+        String yaml = TemplateProvider.openspecYamlTemplate("spec-driven");
+        assertTrue(yaml.contains("schema: spec-driven"), ".openspec.yaml emits the given schema");
+        assertFalse(yaml.contains("openspec-change"), "never the retired invented schema value");
+        assertFalse(yaml.contains("status:"), "no status: field");
+    }
+
+    @Test
+    void scaffoldChangeMetadata_matchesRealNewChangeShape() throws Exception {
+        // Contract: the scaffolded .openspec.yaml parses to the same shape as REAL `openspec new change`
+        // output (a committed capture) via the plugin's own reader — schema + created, no status.
+        String scaffolded = TemplateProvider.openspecYamlTemplate("spec-driven");
+        String captured = new String(getClass().getResourceAsStream(
+                "/fixtures/cli/1.7.0/change-metadata/baseline-schema-created.openspec.yaml").readAllBytes(),
+                java.nio.charset.StandardCharsets.UTF_8);
+
+        com.johnnyblabs.openspec.model.ChangeMetadata s =
+                com.johnnyblabs.openspec.model.ChangeMetadataParser.parse(scaffolded).metadata();
+        com.johnnyblabs.openspec.model.ChangeMetadata c =
+                com.johnnyblabs.openspec.model.ChangeMetadataParser.parse(captured).metadata();
+        assertNotNull(s);
+        assertNotNull(c);
+        assertEquals(c.getSchema(), s.getSchema(), "same schema as real new change");
+        assertNotNull(s.getCreated());
+        // The captured new-change file's created: is unquoted; the scaffold must match that style.
+        assertFalse(captured.contains("created: \""), "captured new-change created is unquoted (guard)");
+        assertFalse(scaffolded.contains("created: \""), "scaffold created must be unquoted like the CLI");
     }
 
     // --- Spec format validation patterns ---
