@@ -83,7 +83,8 @@ class ExploreContextServiceTest {
 
             String context = service.assembleContext();
 
-            assertTrue(context.contains("Version: 1.2.0"));
+            // `version:` is no longer surfaced — it's a plugin-internal field, off-model for the AI prompt.
+            assertFalse(context.contains("Version:"));
             assertTrue(context.contains("Schema: spec-driven"));
             assertTrue(context.contains("> An IntelliJ plugin for spec-driven development."));
             assertTrue(context.contains("**Rules:**"));

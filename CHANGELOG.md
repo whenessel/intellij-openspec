@@ -13,6 +13,7 @@
 ### Fixed
 
 - **Change metadata that uses newer OpenSpec keys no longer triggers a false parse-error warning.** A change whose `.openspec.yaml` carries newer optional keys — for example `goal` (written by `openspec new change --goal`), `affected_areas`, `initiative`, or `skip_specs` — was read with a strict parser, so any key the plugin did not model raised a spurious "`.openspec.yaml` parse error" warning on every change-list refresh and dropped the change's status/schema/created (it showed as `UNKNOWN`). The plugin now parses change metadata leniently — mirroring the OpenSpec CLI's own behavior of ignoring unrecognized keys — and reserves the warning for genuinely malformed YAML.
+- **Config-validation no longer flags `config.yaml` states the OpenSpec CLI accepts.** The plugin no longer warns on a `version:` value (a plugin-internal field the CLI ignores), no longer nags for a `profile:` field (which belongs to the global workflow profile, not project config), and now treats a missing `schema:` as a quiet advisory rather than a warning (OpenSpec defaults it to `spec-driven`). A custom-forked schema (`openspec schema fork`) no longer falsely warns when the CLI isn't available to list it — schema-name recognition flags a name only when the CLI supplies the authoritative set, while a genuine typo still warns.
 
 ## v0.6.0
 

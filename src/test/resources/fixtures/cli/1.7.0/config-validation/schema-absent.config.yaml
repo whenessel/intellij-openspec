@@ -1,0 +1,3 @@
+# no schema field — OpenSpec defaults to spec-driven
+context: |
+  Tech stack: TypeScript, React.

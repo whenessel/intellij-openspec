@@ -203,10 +203,14 @@ public final class BuiltInValidator {
             }
         }
 
-        // Cross-validate change schema against the known-set (built-ins UNION CLI runtime).
-        // See SchemaService.getKnownSchemaNames for semantics; built-ins are always the floor,
-        // and custom-forked schemas (`openspec schema fork`) ride along when the CLI is available.
-        if (change.getMetadata() != null && change.getMetadata().getSchema() != null) {
+        // Cross-validate change schema against the known-set (built-ins UNION CLI runtime), but ONLY
+        // when that known-set is authoritative (the CLI is available and supports schema management).
+        // When the CLI is down the set collapses to the built-in floor, so a legitimate custom fork
+        // (`openspec schema fork`, listed by `openspec schemas --json`) would falsely warn — and the
+        // real CLI never rejects a schema name on `validate`. Guarding keeps the plugin no stricter
+        // than the CLI: a genuine typo still warns when the CLI is present to supply the real set.
+        if (knownSetIsAuthoritative()
+                && change.getMetadata() != null && change.getMetadata().getSchema() != null) {
             String changeSchema = change.getMetadata().getSchema();
             java.util.Set<String> known = getKnownSchemaNames();
             if (!known.contains(changeSchema)) {
@@ -291,16 +295,21 @@ public final class BuiltInValidator {
         }
 
         if (config.getSchema() == null || config.getSchema().isEmpty()) {
-            // WARNING, not ERROR. `openspec validate` never reads config.yaml and never fails on a
-            // missing schema — upstream tolerates its absence and defaults to `spec-driven` (verified
-            // against the real CLI: missing/empty/unknown schema and even malformed YAML all validate
-            // clean). So this is a non-failing hygiene nudge, never a verdict-failing error; making it
-            // an ERROR would be stricter than the client the plugin wraps.
-            issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, 1,
+            // INFO, not WARNING/ERROR. `openspec validate` never reads config.yaml and is clean for a
+            // missing schema — upstream tolerates its absence and defaults to `spec-driven`. A WARNING
+            // squiggle on a file the CLI accepts would be stricter than the client the plugin wraps, so
+            // this is an advisory-only hygiene nudge — `schema` is the one field upstream documents as
+            // required, and a silent default is a real footgun if a user forks a schema and forgets to
+            // point config at it.
+            issues.add(new ValidationIssue(ValidationIssue.Severity.INFO, path, 1,
                     "config.yaml has no 'schema' field; OpenSpec defaults to 'spec-driven' — "
                             + "add one to be explicit", "config-schema-required"));
-        } else {
-            // Schema-name recognition is CLI-runtime-driven; see SchemaService.getKnownSchemaNames.
+        } else if (knownSetIsAuthoritative()) {
+            // Schema-name recognition is CLI-runtime-driven and checked ONLY when the known-set is
+            // authoritative (CLI available + schema-supported). When the CLI is down the set collapses
+            // to the built-in floor, so a legitimate custom fork (listed by `openspec schemas --json`)
+            // would falsely warn — and the real CLI never rejects a schema name. Guarding keeps the
+            // plugin no stricter than the CLI; a genuine typo still warns when the CLI supplies the set.
             java.util.Set<String> known = getKnownSchemaNames();
             if (!known.contains(config.getSchema())) {
                 issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, 1,
@@ -312,15 +321,11 @@ public final class BuiltInValidator {
             }
         }
 
-        // Version field validation: the `version:` field is plugin-internal — upstream's Zod
-        // schema strips it. Absence is not an issue. If a value IS set, check it's recognized
-        // so typos in this field surface as a hint.
-        if (config.getVersion() != null && !config.getVersion().isEmpty()
-                && !VersionSupport.allVersions().contains(config.getVersion())) {
-            issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, 1,
-                    "Version '" + config.getVersion() + "' is not recognized. " +
-                            "Known versions: " + VersionSupport.allVersions(), "config-version-unknown"));
-        }
+        // No `version:` validation. `version:` is a plugin-internal field upstream's Zod schema strips
+        // and never reads — `openspec validate` is clean for ANY `version:` value — so warning on a
+        // value that isn't the single V1_2 config-format baseline was stricter than the CLI (and fired
+        // even on legacy 1.0.0/1.1.0 that VersionSupport.fromString routes to V1_2). The getVersion()
+        // reader stays as the config-format-axis fallback in OpenSpecSettings.getEffectiveVersion.
 
         // No separate required-field loop: the only field upstream's Zod requires is `schema`, and a
         // missing/empty `schema` is already reported once above as `config-schema-required`. The old
@@ -329,8 +334,8 @@ public final class BuiltInValidator {
         // on VersionSupport for a future config-format baseline that requires a field beyond `schema`;
         // it is intentionally no longer wired to a duplicate check here.
 
-        // `profile:` is not in upstream's Zod schema; the plugin reads it only for tree-view
-        // display and AI-prompt context (both null-safe). No required-field issue when absent.
+        // `profile:` is not in upstream's Zod schema and has no reader in the plugin (OpenSpecConfig
+        // .getProfile() is unused) — its absence is never a config issue.
 
         boolean passed = issues.stream().noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR);
         return new ValidationResult(passed, issues, "built-in");
@@ -339,6 +344,19 @@ public final class BuiltInValidator {
     private VersionSupport getVersionSupport() {
         String version = OpenSpecSettings.getInstance(project).getEffectiveVersion(project);
         return VersionSupport.fromString(version);
+    }
+
+    /**
+     * Whether the schema known-set is AUTHORITATIVE — i.e. the CLI is available and supports schema
+     * management, so {@link #getKnownSchemaNames()} reflects real project-local forks
+     * (`openspec schemas --json`) rather than collapsing to the built-in floor. Schema-recognition
+     * warnings ({@code config-schema-invalid}, {@code change-schema-incompatible}) fire only when this
+     * is true; otherwise a legitimate custom fork the plugin cannot see would falsely warn, which the
+     * real CLI never does.
+     */
+    private boolean knownSetIsAuthoritative() {
+        SchemaService schemaService = project.getService(SchemaService.class);
+        return schemaService != null && schemaService.isSchemaSupported();
     }
 
     /**
