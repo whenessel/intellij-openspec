@@ -136,4 +136,47 @@ class UpdateOutputParserContractTest {
                     "the header must be its own line");
         }
     }
+
+    /**
+     * 1.7-generation twin of {@link RealOutputContract}. Two generation differences pinned here: 1.7
+     * dropped the {@code Migrated: custom profile} preamble from the clean-update output entirely, and
+     * {@code init --tools junie} now scaffolds six legacy {@code opsx-*} command files (the four 1.6
+     * ones plus {@code opsx-sync.md} and {@code opsx-update.md}) — so both the pending and the
+     * post-force regenerated "Files to remove" lists carry six entries (1.6's regenerated list stayed
+     * at four because its migrated custom profile didn't regenerate {@code opsx-sync}).
+     */
+    @Nested
+    class RealOutputContractV17 {
+
+        @Test
+        void parsesPendingBlockOfSixFiles() {
+            List<String> files = UpdateOutputParser.parseLegacyCleanup(
+                    loadFixture("1.7.0/update-legacy-pending.txt"));
+            assertEquals(List.of(
+                    ".junie/commands/opsx-apply.md",
+                    ".junie/commands/opsx-archive.md",
+                    ".junie/commands/opsx-explore.md",
+                    ".junie/commands/opsx-propose.md",
+                    ".junie/commands/opsx-sync.md",
+                    ".junie/commands/opsx-update.md"), files,
+                    "1.7 init --tools junie scaffolds six legacy opsx-* files");
+        }
+
+        @Test
+        void parsesRegeneratedPendingBlockOfSixFiles() {
+            List<String> files = UpdateOutputParser.parseLegacyCleanup(
+                    loadFixture("1.7.0/update-legacy-pending-regenerated.txt"));
+            assertEquals(6, files.size(),
+                    "1.7 post-force regeneration re-flags all six legacy junie command files");
+            assertTrue(files.contains(".junie/commands/opsx-sync.md"));
+            assertTrue(files.contains(".junie/commands/opsx-update.md"));
+        }
+
+        @Test
+        void cleanOutputWithoutMigratedPreambleYieldsEmpty() {
+            assertTrue(UpdateOutputParser.parseLegacyCleanup(
+                            loadFixture("1.7.0/update-clean.txt")).isEmpty(),
+                    "1.7's clean update (no migration preamble) must not read as a pending block");
+        }
+    }
 }

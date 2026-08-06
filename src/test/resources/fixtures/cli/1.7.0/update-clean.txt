@@ -1,0 +1,4 @@
+✓ All 1 tool(s) up to date (v1.7.0)
+  Tools: claude
+
+Use --force to refresh files anyway.

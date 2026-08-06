@@ -48,6 +48,10 @@ class StoreWorksetWriteContractTest {
         return fixtureAt("1.6.0", name);
     }
 
+    private static String fixture17(String name) {
+        return fixtureAt("1.7.0", name);
+    }
+
     private static String fixtureAt(String cliVersion, String name) {
         String path = "/fixtures/cli/" + cliVersion + "/" + name;
         try (InputStream is = StoreWorksetWriteContractTest.class.getResourceAsStream(path)) {
@@ -240,5 +244,53 @@ class StoreWorksetWriteContractTest {
         assertEquals("error", top.severity());
         assertEquals("unhealthy_store_root", top.code());
         assertNotNull(top.fix(), "the doctor fix must be retained verbatim");
+    }
+
+    // ---- store register, 1.7 generation (twins of the 1.6 register set) ------
+
+    @Test
+    void parsesReal17StoreRegisterFreshRootSuccess() {
+        WriteResult r = CoordinationService.parseWriteEnvelope(
+                true, fixture17("store-register-fresh-root.json"), "ok", false);
+        assertTrue(r.success());
+        assertEquals("/fixture/fresh-root", r.createdPath());
+        assertTrue(r.createdFiles().contains(".openspec-store/store.yaml"));
+        assertTrue(r.diagnostics().isEmpty(), "a fresh-root register is clean — no diagnostics");
+        assertNull(r.fix());
+    }
+
+    @Test
+    void parsesReal17StoreRegisterPointerDeclaredRefusal() {
+        WriteResult r = CoordinationService.parseWriteEnvelope(
+                false, fixture17("store-register-pointer-declared.json"), "ok", false);
+        assertFalse(r.success());
+        Diagnostic d = r.diagnostics().get(0);
+        assertEquals("store_root_pointer_declared", d.code());
+        assertEquals("store.pointer", d.target());
+        assertNotNull(r.fix());
+        assertTrue(r.fix().contains("store:"));
+        assertTrue(r.message().contains("externalized"));
+    }
+
+    @Test
+    void parsesReal17StoreRegisterInvalidPointerRefusal() {
+        WriteResult r = CoordinationService.parseWriteEnvelope(
+                false, fixture17("store-register-invalid-pointer.json"), "ok", false);
+        assertFalse(r.success());
+        Diagnostic d = r.diagnostics().get(0);
+        assertEquals("invalid_store_pointer", d.code());
+        assertEquals("store.pointer", d.target());
+        assertNotNull(r.fix());
+    }
+
+    @Test
+    void parsesReal17StoreRegisterIdentityConfirmationRequired() {
+        WriteResult r = CoordinationService.parseWriteEnvelope(
+                false, fixture17("store-register-confirmation-required.json"), "ok", false);
+        assertFalse(r.success());
+        Diagnostic d = r.diagnostics().get(0);
+        assertEquals("store_register_identity_confirmation_required", d.code());
+        assertNotNull(r.fix());
+        assertTrue(r.fix().contains("--yes"));
     }
 }

@@ -35,8 +35,9 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class SpecParserCliStructureContractTest {
 
+    // The corpus markdown is authored once (1.6.0) and reused as the capture INPUT for every
+    // generation; only the captured CLI STRUCTURE output is version-specific.
     private static final String CORPUS_DIR = "/fixtures/cli/1.6.0/parity-corpus/openspec/specs";
-    private static final String STRUCTURE_DIR = "/fixtures/cli/1.6.0/spec-structure";
 
     /** Every corpus spec id, discovered from the committed corpus directory on the test classpath. */
     private static List<String> corpusSpecIds() throws Exception {
@@ -64,12 +65,28 @@ class SpecParserCliStructureContractTest {
     }
 
     @Test
-    void everyCorpusSpecStructureMatchesCapturedCli() throws Exception {
+    void everyCorpusSpecStructureMatchesCaptured16Cli() throws Exception {
+        assertStructureParity("/fixtures/cli/1.6.0/spec-structure");
+    }
+
+    @Test
+    void everyCorpusSpecStructureMatchesCaptured17Cli() throws Exception {
+        assertStructureParity("/fixtures/cli/1.7.0/spec-structure");
+    }
+
+    /**
+     * Assert the plugin parser recovers the same requirement/scenario structure the captured CLI
+     * {@code show} output reports, for every corpus spec, against one CLI generation's captures. The
+     * corpus markdown (the parser INPUT) is shared; only {@code structureDirResource} varies, so a
+     * generation whose {@code show --json} reshaped structure counts fails independently of the other.
+     */
+    private void assertStructureParity(String structureDirResource) throws Exception {
         List<String> ids = corpusSpecIds();
         assertFalse(ids.isEmpty(), "corpus must not be empty");
 
         // Corpus-drift guard: exactly one captured .show.json per corpus spec dir, and vice versa.
-        Path structureDir = Path.of(SpecParserCliStructureContractTest.class.getResource(STRUCTURE_DIR).toURI());
+        Path structureDir = Path.of(
+                SpecParserCliStructureContractTest.class.getResource(structureDirResource).toURI());
         List<String> capturedIds;
         try (Stream<Path> entries = Files.list(structureDir)) {
             capturedIds = entries.map(p -> p.getFileName().toString())
@@ -79,14 +96,15 @@ class SpecParserCliStructureContractTest {
                     .toList();
         }
         assertEquals(ids, capturedIds,
-                "corpus drift: the set of corpus spec dirs must equal the set of captured .show.json files");
+                "corpus drift for " + structureDirResource
+                        + ": the set of corpus spec dirs must equal the set of captured .show.json files");
 
         SpecParsingService service = new SpecParsingService(null);
         List<String> failures = new ArrayList<>();
 
         for (String id : ids) {
             String specMd = resource(CORPUS_DIR + "/" + id + "/spec.md");
-            JsonObject show = JsonParser.parseString(resource(STRUCTURE_DIR + "/" + id + ".show.json"))
+            JsonObject show = JsonParser.parseString(resource(structureDirResource + "/" + id + ".show.json"))
                     .getAsJsonObject();
 
             SpecFile parsed = service.parseSpecContent(specMd, id, "/fixture/" + id + "/spec.md");

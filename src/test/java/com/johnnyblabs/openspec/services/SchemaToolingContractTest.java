@@ -39,6 +39,10 @@ class SchemaToolingContractTest {
         return loadFixture("1.6.0/" + name);
     }
 
+    private static String fixture17(String name) {
+        return loadFixture("1.7.0/" + name);
+    }
+
     @Nested
     class SchemaValidateContract {
 
@@ -229,6 +233,99 @@ class SchemaToolingContractTest {
             Map<String, String> paths =
                     SchemaService.parseTemplatePaths(fixture16("templates-builtin.json"));
 
+            assertEquals(4, paths.size());
+            assertEquals(java.util.List.of("proposal", "specs", "design", "tasks"),
+                    java.util.List.copyOf(paths.keySet()));
+            assertTrue(paths.get("proposal").endsWith("templates/proposal.md"));
+            assertTrue(paths.get("specs").endsWith("templates/spec.md"));
+        }
+    }
+
+    /** 1.7-generation twin of {@link SchemaValidateContractV16}. */
+    @Nested
+    class SchemaValidateContractV17 {
+
+        @Test
+        void parsesCleanValidation() {
+            SchemaValidationReport report =
+                    SchemaService.parseSchemaValidation(fixture17("schema-validate-clean.json"));
+            assertNotNull(report);
+            assertEquals("custom-flow", report.name());
+            assertTrue(report.valid());
+            assertTrue(report.issues().isEmpty());
+            assertFalse(report.isCliFailure());
+        }
+
+        @Test
+        void parsesMissingTemplateIssue() {
+            SchemaValidationReport report =
+                    SchemaService.parseSchemaValidation(fixture17("schema-validate-missing-template.json"));
+            assertNotNull(report);
+            assertFalse(report.valid());
+            assertEquals(1, report.issues().size());
+            SchemaValidationReport.Issue issue = report.issues().getFirst();
+            assertEquals("error", issue.level());
+            assertEquals("artifacts.design.template", issue.path());
+            assertTrue(issue.message().contains("design.md"));
+        }
+
+        @Test
+        void parsesSchemaYamlParseError() {
+            SchemaValidationReport report =
+                    SchemaService.parseSchemaValidation(fixture17("schema-validate-broken.json"));
+            assertNotNull(report);
+            assertFalse(report.valid());
+            assertEquals(1, report.issues().size());
+            assertEquals("schema.yaml", report.issues().getFirst().path());
+            assertTrue(report.issues().getFirst().message().startsWith("Parse error"));
+        }
+    }
+
+    /** 1.7-generation twin of {@link SchemaWhichContractV16}. */
+    @Nested
+    class SchemaWhichContractV17 {
+
+        @Test
+        void parsesPackageBuiltIn() {
+            SchemaResolution resolution =
+                    SchemaService.parseSchemaResolution(fixture17("schema-which-builtin.json"));
+            assertNotNull(resolution);
+            assertEquals("spec-driven", resolution.name());
+            assertEquals("package", resolution.source());
+            assertTrue(resolution.path().contains("@fission-ai/openspec/schemas/spec-driven"));
+            assertFalse(resolution.isShadowing());
+        }
+
+        @Test
+        void parsesProjectFork() {
+            SchemaResolution resolution =
+                    SchemaService.parseSchemaResolution(fixture17("schema-which-project.json"));
+            assertNotNull(resolution);
+            assertEquals("custom-flow", resolution.name());
+            assertEquals("project", resolution.source());
+            assertFalse(resolution.isShadowing());
+        }
+
+        @Test
+        void parsesProjectCopyShadowingPackageBuiltIn() {
+            SchemaResolution resolution =
+                    SchemaService.parseSchemaResolution(fixture17("schema-which-shadowing.json"));
+            assertNotNull(resolution);
+            assertEquals("spec-driven", resolution.name());
+            assertEquals("project", resolution.source());
+            assertTrue(resolution.isShadowing());
+            assertEquals(java.util.List.of("package"), resolution.shadowedSources());
+        }
+    }
+
+    /** 1.7-generation twin of {@link TemplatesContractV16}. */
+    @Nested
+    class TemplatesContractV17 {
+
+        @Test
+        void parsesBuiltInTemplateMap() {
+            Map<String, String> paths =
+                    SchemaService.parseTemplatePaths(fixture17("templates-builtin.json"));
             assertEquals(4, paths.size());
             assertEquals(java.util.List.of("proposal", "specs", "design", "tasks"),
                     java.util.List.copyOf(paths.keySet()));

@@ -42,6 +42,10 @@ class StoreWorksetContractTest {
         return fixtureAt("1.6.0", name);
     }
 
+    private static String fixture17(String name) {
+        return fixtureAt("1.7.0", name);
+    }
+
     private static String fixtureAt(String cliVersion, String name) {
         String path = "/fixtures/cli/" + cliVersion + "/" + name;
         try (InputStream is = StoreWorksetContractTest.class.getResourceAsStream(path)) {
@@ -169,5 +173,22 @@ class StoreWorksetContractTest {
         // This diagnostic carries no fix key — it must parse as null, not empty-string or throw.
         assertNull(configMissing.fix());
         assertFalse(configMissing.message().isEmpty());
+    }
+
+    // ---- 1.7 generation: healthy-empty doctor (twin of the 1.6 case) ---------
+
+    @Test
+    void healthyEmptyStoreParsesHealthyOn17Generation() {
+        List<StoreEntry> stores = CoordinationService.parseStoreDoctor(
+                fixture17("store-doctor-healthy-empty.json"));
+        assertEquals(1, stores.size());
+        StoreEntry fresh = stores.get(0);
+        assertEquals("fresh-root", fresh.id());
+        assertEquals(Boolean.TRUE, fresh.openspecRootHealthy());
+        assertEquals(Boolean.TRUE, fresh.metadataPresent());
+        assertEquals(Boolean.TRUE, fresh.metadataValid());
+        assertEquals(Boolean.FALSE, fresh.gitRepository());
+        assertTrue(fresh.diagnostics().isEmpty(),
+                "a healthy-empty store has no diagnostics — absence of planning dirs is not an issue");
     }
 }
