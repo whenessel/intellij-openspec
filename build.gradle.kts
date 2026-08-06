@@ -162,6 +162,12 @@ tasks.jacocoTestReport {
 // SpecPreviewFileReadTest). Removing high-coverage code + its tests lowers the AGGREGATE ratio
 // even though no retained code lost coverage. Measured after the trim: 0.387/0.364/0.362; floors
 // set just below with extra LINE headroom for the documented CLI-integration wobble.
+//
+// RAISED 2026-08-05 (honor-change-metadata-strip-and-skip-specs): 0.385/0.360/0.360 →
+// 0.386/0.362/0.360. The tolerant change-metadata parse added a pure ChangeMetadataParser +
+// ChangeMetadata.fromMap seam, contract-tested (ok + malformed branches) against captured 1.7.0
+// fixtures. Measured 0.3918/0.3696/0.3661; INSTRUCTION/LINE nudged to ~0.006 below measured, BRANCH
+// left at 0.360 (already ~0.006 below — the volatile counter keeps its wobble headroom).
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     // Match the report: instrumented classes + the test JVM's execution data.
@@ -176,14 +182,14 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "INSTRUCTION"
                 value = "COVEREDRATIO"
-                minimum = "0.385".toBigDecimal()
+                minimum = "0.386".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.360".toBigDecimal()
+                minimum = "0.362".toBigDecimal()
             }
         }
         rule {

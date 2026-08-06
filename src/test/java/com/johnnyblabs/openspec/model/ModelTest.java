@@ -74,6 +74,31 @@ class ModelTest {
             assertEquals("proposed", meta.getStatus());
             assertEquals("2026-03-06", meta.getCreated());
         }
+
+        @Test
+        void newReadOnlyFieldsRoundTrip() {
+            ChangeMetadata meta = new ChangeMetadata();
+            meta.setGoal("g");
+            meta.setAffectedAreas(java.util.List.of("a", "b"));
+            meta.setInitiative(java.util.Map.of("store", "s", "id", "i"));
+            meta.setSkipSpecs(Boolean.TRUE);
+
+            assertEquals("g", meta.getGoal());
+            assertEquals(java.util.List.of("a", "b"), meta.getAffectedAreas());
+            assertEquals("s", meta.getInitiative().get("store"));
+            assertEquals(Boolean.TRUE, meta.getSkipSpecs());
+            assertTrue(meta.isSkipSpecs());
+        }
+
+        @Test
+        void newFieldsDefaultSafe() {
+            ChangeMetadata meta = new ChangeMetadata();
+            assertNull(meta.getGoal());
+            assertNull(meta.getSkipSpecs());
+            assertFalse(meta.isSkipSpecs());
+            assertTrue(meta.getAffectedAreas().isEmpty());
+            assertTrue(meta.getInitiative().isEmpty());
+        }
     }
 
     @Nested

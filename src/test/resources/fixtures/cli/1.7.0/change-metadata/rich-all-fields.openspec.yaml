@@ -1,0 +1,10 @@
+schema: spec-driven
+created: 2026-08-05
+goal: Broaden change-metadata modeling to the upstream field set
+affected_areas:
+  - services
+  - model
+initiative:
+  store: my-store
+  id: my-initiative
+skip_specs: true

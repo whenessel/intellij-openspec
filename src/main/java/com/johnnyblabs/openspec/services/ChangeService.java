@@ -9,16 +9,12 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.johnnyblabs.openspec.model.Change;
 import com.johnnyblabs.openspec.model.ChangeMetadata;
+import com.johnnyblabs.openspec.model.ChangeMetadataParser;
 import com.johnnyblabs.openspec.model.ChangeStatus;
 import com.johnnyblabs.openspec.util.OpenSpecFileUtil;
 import com.johnnyblabs.openspec.util.OpenSpecNotifier;
 import com.johnnyblabs.openspec.version.VersionSupport;
 import com.johnnyblabs.openspec.settings.OpenSpecSettings;
-import org.yaml.snakeyaml.LoaderOptions;
-import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.Constructor;
-import org.yaml.snakeyaml.error.MarkedYAMLException;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -143,28 +139,32 @@ public final class ChangeService {
             VirtualFile metaFile = changeDir.findChild(".openspec.yaml");
             if (metaFile != null) {
                 try {
-                    ChangeMetadata metadata;
+                    // Read the .openspec.yaml text inside the appropriate threading context, then hand
+                    // it to the pure, lenient parser. Unknown/newer keys are ignored (upstream strip
+                    // contract); the warning is reserved for genuinely malformed YAML.
+                    String content;
                     if (ApplicationManager.getApplication() == null
                             || ApplicationManager.getApplication().isDispatchThread()) {
                         try (InputStream is = metaFile.getInputStream()) {
-                            Yaml yaml = new Yaml(new Constructor(ChangeMetadata.class, new LoaderOptions()));
-                            metadata = yaml.loadAs(is, ChangeMetadata.class);
+                            content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
                         }
                     } else {
-                        metadata = ReadAction.compute(() -> {
+                        content = ReadAction.compute(() -> {
                             try (InputStream is = metaFile.getInputStream()) {
-                                Yaml yaml = new Yaml(new Constructor(ChangeMetadata.class, new LoaderOptions()));
-                                return yaml.loadAs(is, ChangeMetadata.class);
+                                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
                             }
                         });
                     }
-                    change.setMetadata(metadata);
-                } catch (MarkedYAMLException e) {
-                    String problem = e.getProblem() != null ? e.getProblem() : "invalid YAML";
-                    LOG.warn("Failed to parse change metadata: " + metaFile.getPath() + " — " + problem, e);
-                    OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_SYSTEM, "Configuration",
-                            ".openspec.yaml parse error in '" + changeDir.getName() + "': " + problem,
-                            com.intellij.notification.NotificationType.WARNING);
+                    ChangeMetadataParser.ParseResult result = ChangeMetadataParser.parse(content);
+                    if (result.isMalformed()) {
+                        String problem = result.problem() != null ? result.problem() : "invalid YAML";
+                        LOG.warn("Failed to parse change metadata: " + metaFile.getPath() + " — " + problem);
+                        OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_SYSTEM, "Configuration",
+                                ".openspec.yaml parse error in '" + changeDir.getName() + "': " + problem,
+                                com.intellij.notification.NotificationType.WARNING);
+                    } else {
+                        change.setMetadata(result.metadata());
+                    }
                 } catch (Exception e) {
                     LOG.warn("Failed to read change metadata: " + metaFile.getPath(), e);
                 }
