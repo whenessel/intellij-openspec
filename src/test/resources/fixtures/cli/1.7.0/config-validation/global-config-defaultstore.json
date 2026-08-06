@@ -1,0 +1,6 @@
+{
+  "featureFlags": {},
+  "profile": "core",
+  "delivery": "both",
+  "defaultStore": "demo-store"
+}

@@ -1,0 +1,13 @@
+schema: spec-driven
+operations:
+  apply:
+    guidance:
+      - "Run the full test suite before applying the change."
+  archive:
+    guidance:
+      - "Ensure the changelog is updated before archiving."
+rules:
+  proposal:
+    - "Keep the Why section concise."
+  tasks:
+    - "Every task maps to a test."

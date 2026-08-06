@@ -340,6 +340,22 @@ class WorkflowProfileServiceTest {
                 assertTrue(wf.contains("update"), "the real workflows array was parsed, not CORE_DEFAULTS");
             }
         }
+
+        @Test
+        void toleratesDefaultStoreKeyInConfigList() {
+            // 1.7's global `defaultStore` surfaces in `config list --json`; the parser must ignore it
+            // (it reads only `profile`/`workflows`) and never false-flag or crash. This fixture has no
+            // `workflows`, so the profile parses and the workflow set falls back to CORE_DEFAULTS.
+            String json = fixture("1.7.0/config-validation/global-config-defaultstore.json");
+            try (MockedStatic<CliRunner> cliStatic = mockStatic(CliRunner.class)) {
+                cliStatic.when(() -> CliRunner.run(project, "config", "list", "--json"))
+                        .thenReturn(new CliRunner.CliResult(0, json, ""));
+
+                assertEquals("core", service.getActiveProfileName());
+                assertEquals(WorkflowProfileService.CORE_DEFAULTS, service.getActiveWorkflows(),
+                        "no workflows array → CORE_DEFAULTS fallback; defaultStore is ignored");
+            }
+        }
     }
 
     private static String fixture(String name) {
