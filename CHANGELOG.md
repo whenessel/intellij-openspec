@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+
+- **OpenSpec CLI 1.7.x is now a supported line.** 1.7 support is additive — the store/workset coordination model is unchanged from 1.5/1.6, so nothing is re-gated. The plugin recognizes 1.7's new optional surfaces without complaint: newer `.openspec.yaml` change-metadata keys (`skip_specs`, alongside `goal`/`affected_areas`/`initiative`) are read for display instead of raising a false parse-error; the new `config.yaml` keys (`operations`, `defaultStore`) are tolerated; and `status --json`'s additive per-artifact dependency edges parse cleanly (artifacts are keyed by id, so the accompanying schema-order reorder has no effect). Verified against captured real 1.7.0 CLI output. The minimum supported CLI remains 1.3.0.
+
 ### Changed
 
 - **The tool-window tree is now focused on Changes.** The Browse tree shows the Changes section — your changes with per-artifact status — and no longer duplicates a spec/archive/config file tree: specs, archived changes, and `openspec/config.yaml` are browsed in the standard Project View (which already lists `openspec/**`) and open in the editor. A main spec opens in the editor with the platform's Markdown preview rather than the tool-window preview pane, which is now dedicated to change surfaces. Change nodes lead with the change **name** in the primary color, with the `[status]` tag in its meaning color and the `X/Y` task count as dimmed secondary text — so the name no longer competes with its metadata, and a complete count is not colored as "done" (the status icon badge already tells that story).
