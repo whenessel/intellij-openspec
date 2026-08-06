@@ -2,8 +2,14 @@ package com.johnnyblabs.openspec.integration;
 
 import com.intellij.codeInspection.InspectionManager;
 import com.intellij.codeInspection.ProblemDescriptor;
+import com.intellij.codeInspection.ProblemHighlightType;
+import com.intellij.openapi.application.WriteAction;
+import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.psi.PsiFile;
+import com.intellij.psi.PsiManager;
 import com.johnnyblabs.openspec.validation.ConfigValidationInspection;
+
+import java.nio.charset.StandardCharsets;
 
 /**
  * Integration tests for ConfigValidationInspection.
@@ -22,9 +28,8 @@ public class ConfigValidationInspectionTest extends OpenSpecIntegrationTestBase 
         assertEquals("Valid config should have no problems", 0, problems.length);
     }
 
-    public void testMissingSchemaFieldError() {
-        // Create a config.yaml without schema field — but since inspection checks parent dir,
-        // we test with a standalone file (which won't match the parent dir check)
+    public void testNonOpenspecConfigIsSkipped() {
+        // A config.yaml not parented under openspec/ short-circuits the field-level checks.
         PsiFile file = myFixture.configureByText("config.yaml",
                 "profile:\n  name: Test\n");
 
@@ -32,8 +37,6 @@ public class ConfigValidationInspectionTest extends OpenSpecIntegrationTestBase 
         ProblemDescriptor[] problems = inspection.checkFile(file,
                 InspectionManager.getInstance(getProject()), false);
 
-        // The file's parent won't be "openspec" so inspection skips it
-        // This validates the guard clause works correctly
         assertEquals("Non-openspec config.yaml should be skipped", 0, problems.length);
     }
 
@@ -46,5 +49,39 @@ public class ConfigValidationInspectionTest extends OpenSpecIntegrationTestBase 
                 InspectionManager.getInstance(getProject()), false);
 
         assertEquals("Non-config files should be skipped", 0, problems.length);
+    }
+
+    public void testMissingProfileProducesNoProblem() throws Exception {
+        // The profile nag is removed: an openspec/config.yaml with a schema but no `profile:` must
+        // produce ZERO problems. `profile` is the global workflow profile, never a project config field.
+        PsiFile file = writeOpenspecConfig("schema: spec-driven\n");
+
+        ProblemDescriptor[] problems = new ConfigValidationInspection().checkFile(file,
+                InspectionManager.getInstance(getProject()), false);
+
+        assertEquals("no profile nag; schema present -> zero problems", 0, problems.length);
+    }
+
+    public void testMissingSchemaIsInformationNudge() throws Exception {
+        // The schema-absent nudge is demoted to INFORMATION (advisory), never a WARNING squiggle —
+        // `openspec validate` is clean on a missing schema, so a warning would be stricter than the CLI.
+        PsiFile file = writeOpenspecConfig("context: An IntelliJ plugin.\n");
+
+        ProblemDescriptor[] problems = new ConfigValidationInspection().checkFile(file,
+                InspectionManager.getInstance(getProject()), false);
+
+        assertEquals("exactly one problem: the schema nudge", 1, problems.length);
+        assertEquals("schema nudge must be INFORMATION, not WARNING",
+                ProblemHighlightType.INFORMATION, problems[0].getHighlightType());
+    }
+
+    /** Overwrite the fixture's openspec/config.yaml and return its PsiFile (parented under openspec/). */
+    private PsiFile writeOpenspecConfig(String content) throws Exception {
+        VirtualFile vf = myFixture.findFileInTempDir("openspec/config.yaml");
+        assertNotNull("openspec/config.yaml should exist in the test project", vf);
+        WriteAction.run(() -> vf.setBinaryContent(content.getBytes(StandardCharsets.UTF_8)));
+        PsiFile file = PsiManager.getInstance(getProject()).findFile(vf);
+        assertNotNull(file);
+        return file;
     }
 }

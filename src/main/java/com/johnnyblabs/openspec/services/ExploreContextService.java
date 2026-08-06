@@ -55,11 +55,10 @@ public final class ExploreContextService {
         OpenSpecConfig config = configService.getConfig();
         if (config != null) {
             context.append("## Project Config\n");
-            // Only emit version: when present. It is a plugin-internal, display-only field the plugin
-            // no longer scaffolds; a schema-only config has none, and appending "Version: null" is noise.
-            if (config.getVersion() != null && !config.getVersion().isEmpty()) {
-                context.append("- Version: ").append(config.getVersion()).append("\n");
-            }
+            // `version:` is intentionally NOT surfaced here: it's a plugin-internal field upstream
+            // strips and never reads, so emitting it into the AI-prompt context presents an off-model
+            // field as real project config. The getVersion() reader stays for the config-format-axis
+            // fallback (OpenSpecSettings.getEffectiveVersion), just not surfaced.
             if (config.getSchema() != null) {
                 context.append("- Schema: ").append(config.getSchema()).append("\n");
             }

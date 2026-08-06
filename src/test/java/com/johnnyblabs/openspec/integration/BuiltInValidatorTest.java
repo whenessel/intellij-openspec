@@ -3,12 +3,18 @@ package com.johnnyblabs.openspec.integration;
 import com.intellij.openapi.application.WriteAction;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.testFramework.ServiceContainerUtil;
+import com.johnnyblabs.openspec.services.SchemaService;
 import com.johnnyblabs.openspec.validation.BuiltInValidator;
 import com.johnnyblabs.openspec.validation.ValidationIssue;
 import com.johnnyblabs.openspec.validation.ValidationResult;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Integration tests for BuiltInValidator.
@@ -141,18 +147,17 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
         assertTrue(result.passed());
     }
 
-    public void testMissingSchemaIsANonFailingWarning() throws Exception {
-        // `openspec validate` never reads config.yaml and never fails on a missing schema (upstream
-        // defaults to spec-driven), so this is a WARNING, not an ERROR — the plugin must not fail a
-        // config state the CLI tolerates.
+    public void testMissingSchemaIsANonFailingInfoNudge() throws Exception {
+        // `openspec validate` is clean on a missing schema (upstream defaults to spec-driven), so a
+        // WARNING squiggle would be stricter than the CLI — the plugin emits an INFO advisory only.
         overwriteFile("openspec/config.yaml",
                 "version: \"1.2.0\"\n\nprofile:\n  name: Test\n");
 
         ValidationResult result = validator.validateConfig();
-        assertTrue("config-schema-required must be a WARNING, not an ERROR",
+        assertTrue("config-schema-required must be an INFO advisory, not a WARNING/ERROR",
                 result.issues().stream().anyMatch(i ->
                         "config-schema-required".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.WARNING));
+                        i.severity() == ValidationIssue.Severity.INFO));
         assertTrue("a missing schema must NOT fail the verdict", result.passed());
         // Config validation produces no ERRORs at all — it never fails the verdict.
         assertTrue("config validation must emit no ERROR-severity issues",
@@ -162,12 +167,31 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                 result.issues().stream().noneMatch(i -> "config-field-required".equals(i.rule())));
     }
 
-    public void testInvalidSchemaTriggersWarning() throws Exception {
+    public void testUnknownSchemaWithCliUnavailableIsClean() throws Exception {
+        // Guard: with the CLI unavailable (the default test env), the known-set collapses to the
+        // built-in floor, so the plugin can't see project-local forks. A non-built-in schema must NOT
+        // warn — the real CLI never rejects a schema name, and a legit fork would otherwise falsely red.
+        overwriteFile("openspec/config.yaml",
+                "schema: my-team-flow\nversion: \"1.2.0\"\n\nprofile:\n  name: Test\n");
+
+        ValidationResult result = validator.validateConfig();
+        assertTrue("config-schema-invalid must NOT fire when the known-set is non-authoritative (CLI down)",
+                result.issues().stream().noneMatch(i -> "config-schema-invalid".equals(i.rule())));
+    }
+
+    public void testUnknownSchemaWithCliAvailableStillWarns() throws Exception {
+        // With an AUTHORITATIVE known-set (CLI available + schema-supported), a genuine unknown schema
+        // still warns — the guard relaxes CLI-down false-positives without masking real typos.
+        SchemaService authoritative = mock(SchemaService.class);
+        when(authoritative.isSchemaSupported()).thenReturn(true);
+        when(authoritative.getKnownSchemaNames()).thenReturn(Set.of("spec-driven"));
+        ServiceContainerUtil.replaceService(getProject(), SchemaService.class, authoritative, getTestRootDisposable());
+
         overwriteFile("openspec/config.yaml",
                 "schema: bogus-schema\nversion: \"1.2.0\"\n\nprofile:\n  name: Test\n");
 
         ValidationResult result = validator.validateConfig();
-        assertTrue("Should have config-schema-invalid issue",
+        assertTrue("config-schema-invalid must still fire on an unknown schema when the known-set is authoritative",
                 result.issues().stream().anyMatch(i ->
                         "config-schema-invalid".equals(i.rule()) &&
                         i.severity() == ValidationIssue.Severity.WARNING));
@@ -214,15 +238,16 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
         assertTrue("config absence should not fail validation", result.passed());
     }
 
-    public void testUnknownVersionTriggersWarning() throws Exception {
+    public void testUnknownVersionIsClean() throws Exception {
+        // `version:` is plugin-internal; the CLI strips it and validates clean for ANY value. The
+        // plugin no longer warns on an unrecognized version — doing so was stricter than the CLI.
         overwriteFile("openspec/config.yaml",
                 "schema: spec-driven\nversion: \"9.9.9\"\n\nprofile:\n  name: Test\n");
 
         ValidationResult result = validator.validateConfig();
-        assertTrue("Should have config-version-unknown issue",
-                result.issues().stream().anyMatch(i ->
-                        "config-version-unknown".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.WARNING));
+        assertTrue("config-version-unknown must no longer be emitted (the CLI never reads version:)",
+                result.issues().stream().noneMatch(i -> "config-version-unknown".equals(i.rule())));
+        assertTrue("an unrecognized version must not fail the verdict", result.passed());
     }
 
     public void testValidVersionProducesNoVersionIssues() throws Exception {
@@ -283,8 +308,10 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                                 && i.severity() == ValidationIssue.Severity.ERROR));
     }
 
-    public void testChangeWithIncompatibleSchemaTriggersWarning() throws Exception {
-        // Set project to version 1.0.0 which only supports spec-driven
+    public void testChangeSchemaIncompatibleGuardedWhenCliUnavailable() throws Exception {
+        // Guard: with the CLI unavailable (default test env) the known-set collapses to the built-in
+        // floor, so a change schema the plugin can't verify must NOT warn — the real CLI never rejects
+        // a schema name, and a legit fork would otherwise falsely red.
         overwriteFile("openspec/config.yaml",
                 "schema: spec-driven\nversion: \"1.0.0\"\n\nprofile:\n  name: Test\n");
         myFixture.addFileToProject("openspec/changes/incompat-change/.openspec.yaml",
@@ -294,7 +321,26 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
         refreshVfs();
 
         ValidationResult result = validator.validateChanges();
-        assertTrue("Should have change-schema-incompatible issue",
+        assertTrue("change-schema-incompatible must NOT fire when the known-set is non-authoritative",
+                result.issues().stream().noneMatch(i -> "change-schema-incompatible".equals(i.rule())));
+    }
+
+    public void testChangeSchemaIncompatibleStillWarnsWhenCliAuthoritative() throws Exception {
+        SchemaService authoritative = mock(SchemaService.class);
+        when(authoritative.isSchemaSupported()).thenReturn(true);
+        when(authoritative.getKnownSchemaNames()).thenReturn(Set.of("spec-driven"));
+        ServiceContainerUtil.replaceService(getProject(), SchemaService.class, authoritative, getTestRootDisposable());
+
+        overwriteFile("openspec/config.yaml",
+                "schema: spec-driven\nversion: \"1.0.0\"\n\nprofile:\n  name: Test\n");
+        myFixture.addFileToProject("openspec/changes/incompat-change/.openspec.yaml",
+                "schema: tdd\n");
+        myFixture.addFileToProject("openspec/changes/incompat-change/proposal.md",
+                "## Why\n\nTest\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChanges();
+        assertTrue("change-schema-incompatible must still fire on an unknown change schema when authoritative",
                 result.issues().stream().anyMatch(i ->
                         "change-schema-incompatible".equals(i.rule()) &&
                         i.severity() == ValidationIssue.Severity.WARNING &&
@@ -442,19 +488,19 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
 
     public void testCliAuthoritativeSurfacesConfigWarningsWithoutFailingWhenCliClean() throws Exception {
         // The built-in validator still OWNS config.yaml when the CLI is present — but config checks are
-        // non-failing (the CLI never fails on config). A missing schema surfaces as a WARNING alongside
-        // a clean CLI verdict; it does not red the whole-project result.
+        // non-failing (the CLI never fails on config). A missing schema surfaces as an INFO advisory
+        // alongside a clean CLI verdict; it does not red the whole-project result.
         overwriteFile("openspec/config.yaml", "version: \"1.2.0\"\n");  // no schema
         refreshVfs();
 
         ValidationResult result = com.johnnyblabs.openspec.actions.OpenSpecValidateAction
                 .combineWithCli(validator, com.johnnyblabs.openspec.actions.ValidateTarget.wholeProject(), cleanCli());
 
-        assertTrue("a config warning must NOT fail a clean-CLI verdict", result.passed());
-        assertTrue("the config-schema-required WARNING is still surfaced for display",
+        assertTrue("a config advisory must NOT fail a clean-CLI verdict", result.passed());
+        assertTrue("the config-schema-required INFO advisory is still surfaced for display",
                 result.issues().stream().anyMatch(i ->
                         "config-schema-required".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.WARNING));
+                        i.severity() == ValidationIssue.Severity.INFO));
     }
 
     public void testCliAuthoritativeSingleItemDefersEntirelyToCli() throws Exception {

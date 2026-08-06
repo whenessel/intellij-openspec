@@ -1,0 +1,24 @@
+[
+  {
+    "name": "my-custom-fork",
+    "description": "Default OpenSpec workflow - proposal → specs → design → tasks",
+    "artifacts": [
+      "proposal",
+      "specs",
+      "design",
+      "tasks"
+    ],
+    "source": "project"
+  },
+  {
+    "name": "spec-driven",
+    "description": "Default OpenSpec workflow - proposal → specs → design → tasks",
+    "artifacts": [
+      "proposal",
+      "specs",
+      "design",
+      "tasks"
+    ],
+    "source": "package"
+  }
+]

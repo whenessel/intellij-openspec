@@ -68,30 +68,24 @@ public class ConfigValidationInspection extends LocalInspectionTool {
             if (!text.contains("schema:")) {
                 PsiElement element = findNonEmptyElement(file, 0);
                 if (element != null) {
-                    // WARNING, not ERROR: OpenSpec tolerates a missing schema and defaults to
-                    // 'spec-driven' (the CLI never fails on it), so this is a hygiene nudge, mirroring
-                    // the built-in validator's config-schema-required WARNING.
+                    // INFORMATION, not WARNING: `openspec validate` is clean on a missing schema
+                    // (upstream defaults to 'spec-driven'), so a warning squiggle would be stricter than
+                    // the CLI. This is an advisory-only nudge, mirroring the built-in validator's
+                    // config-schema-required INFO.
                     problems.add(manager.createProblemDescriptor(
                             element,
                             "OpenSpec config.yaml has no 'schema' field; it defaults to 'spec-driven' "
                                     + "— add one to be explicit",
                             (LocalQuickFix) null,
-                            ProblemHighlightType.WARNING,
+                            ProblemHighlightType.INFORMATION,
                             isOnTheFly));
                 }
             }
-
-            if (!text.contains("profile:")) {
-                PsiElement element = findNonEmptyElement(file, 0);
-                if (element != null) {
-                    problems.add(manager.createProblemDescriptor(
-                            element,
-                            "OpenSpec config.yaml should contain a 'profile' field",
-                            (LocalQuickFix) null,
-                            ProblemHighlightType.WARNING,
-                            isOnTheFly));
-                }
-            }
+            // No `profile:` nag: `profile` is the GLOBAL workflow profile (`openspec config profile`),
+            // never a project config.yaml field, and it's absent from a clean `openspec init` config and
+            // from upstream's Zod schema. Nagging for it warned on a CLI-clean file (and implied an
+            // off-model concept). The "Profile field absent is accepted" validation scenario already
+            // documents that absence is a non-issue.
         }
 
         return problems.toArray(ProblemDescriptor.EMPTY_ARRAY);
