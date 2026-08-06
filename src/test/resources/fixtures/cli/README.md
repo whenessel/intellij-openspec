@@ -226,3 +226,21 @@ the parser can be wrong. Captured under an isolated `HOME`/`XDG_*` env; no machi
   `ConfigProfileDetail.fromJson` to parse — the source that parser was written against no longer
   exists. Captured as evidence and documented in `ConfigProfileDetailTest`; re-sourcing the Settings
   profile section from `config list --json` is a separate change.
+
+## `1.7.0/config-validation/` — 1.7 config-field recognition (operations / rules / defaultStore)
+
+Real 1.7 config shapes the plugin's tolerant reader must ignore without false-flagging (it is never
+stricter than the CLI). No code change was needed — captured to *lock* the no-false-flag behavior.
+
+- `operations-and-rules.config.yaml` — a project `openspec/config.yaml` carrying 1.7's optional
+  `operations: {apply?/archive?: {guidance: string[]}}` and `rules: {<artifactId>: string[]}` (the
+  real record-of-arrays shape). **Proven CLI-accepted**: `openspec validate --all --json` on a clean
+  project with this config exits 0 (the CLI parses the config on load, so acceptance = a valid shape).
+  `ConfigServiceTest` asserts `fromMap` reads `schema` and skips the list-valued `rules` without
+  crashing (it models only String-valued rules); `BuiltInValidatorTest` + `ConfigValidationInspection
+  Test` assert neither raises an ERROR or a plugin-invented WARNING on it.
+- `global-config-defaultstore.json` — the machine-level global config after `openspec config set
+  defaultStore <id>` (`{featureFlags, profile, delivery, defaultStore}`), the same shape
+  `config list --json` returns once a default store is set. `defaultStore` is out-of-model
+  (machine-level store routing); `WorkflowProfileServiceTest` asserts `parseSnapshot` ignores it
+  (reads only `profile`/`workflows`). Paths sanitized to `/fixture`.

@@ -75,6 +75,28 @@ public class ConfigValidationInspectionTest extends OpenSpecIntegrationTestBase 
                 ProblemHighlightType.INFORMATION, problems[0].getHighlightType());
     }
 
+    public void testOperationsAndRulesConfigProducesNoProblems() throws Exception {
+        // A real 1.7 config.yaml with `operations` (apply/archive guidance) and list-shaped `rules`
+        // — optional keys the CLI accepts (validate clean) and the plugin's reader ignores. The
+        // inspection must not false-flag them: the plugin is never stricter than the client.
+        PsiFile file = writeOpenspecConfig(fixture("1.7.0/config-validation/operations-and-rules.config.yaml"));
+
+        ProblemDescriptor[] problems = new ConfigValidationInspection().checkFile(file,
+                InspectionManager.getInstance(getProject()), false);
+
+        assertEquals("1.7 operations/rules config must raise no inspection problems", 0, problems.length);
+    }
+
+    private static String fixture(String name) {
+        String path = "/fixtures/cli/" + name;
+        try (java.io.InputStream is = ConfigValidationInspectionTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** Overwrite the fixture's openspec/config.yaml and return its PsiFile (parented under openspec/). */
     private PsiFile writeOpenspecConfig(String content) throws Exception {
         VirtualFile vf = myFixture.findFileInTempDir("openspec/config.yaml");

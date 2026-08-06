@@ -225,6 +225,30 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                 result.passed());
     }
 
+    public void testOperationsAndRulesConfigRaisesNoIssue() throws Exception {
+        // 1.7 optional config keys — `operations` (apply/archive guidance) + list-shaped `rules` —
+        // are ignored by the reader and accepted by the CLI (validate clean). validateConfig must
+        // emit no ERROR and no plugin-invented WARNING: schema is present, so the config is clean.
+        overwriteFile("openspec/config.yaml", opsRulesFixture());
+
+        ValidationResult result = validator.validateConfig();
+        assertTrue("no ERROR on a 1.7 operations/rules config",
+                result.issues().stream().noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR));
+        assertTrue("no WARNING on a 1.7 operations/rules config (schema present, extra keys ignored)",
+                result.issues().stream().noneMatch(i -> i.severity() == ValidationIssue.Severity.WARNING));
+        assertTrue("a valid 1.7 config must pass", result.passed());
+    }
+
+    private static String opsRulesFixture() {
+        String path = "/fixtures/cli/1.7.0/config-validation/operations-and-rules.config.yaml";
+        try (java.io.InputStream is = BuiltInValidatorTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     public void testMissingConfigYamlIsClean() throws Exception {
         // Upstream OpenSpec treats openspec/config.yaml as optional — its readProjectConfig
         // returns null with the comment "No config is OK". The plugin matches that contract.

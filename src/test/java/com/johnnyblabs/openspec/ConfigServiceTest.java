@@ -87,4 +87,23 @@ class ConfigServiceTest {
         assertNotNull(config.getRules());
         assertTrue(config.getRules().isEmpty());
     }
+
+    @Test
+    void toleratesOperationsAndListShapedRulesFromCli17() throws Exception {
+        // A real 1.7 config.yaml carries optional `operations` (apply/archive guidance) and `rules`
+        // shaped `artifactId → string[]`. The tolerant Map→fromMap reader must ignore `operations`
+        // entirely (no getter, no crash) and skip the list-valued `rules` (it models only
+        // String-valued rules), matching the CLI which accepts this config. Captured/proven fixture.
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(
+                "fixtures/cli/1.7.0/config-validation/operations-and-rules.config.yaml")) {
+            assertNotNull(is, "operations-and-rules fixture not found on the test classpath");
+            Map<String, Object> raw = new Yaml().load(is);
+            OpenSpecConfig config = OpenSpecConfig.fromMap(raw);
+
+            assertEquals("spec-driven", config.getSchema());
+            assertTrue(config.getRules().isEmpty(),
+                    "1.7 list-shaped rules (artifactId → string[]) are skipped by the String-valued "
+                            + "reader without crashing; got: " + config.getRules());
+        }
+    }
 }
