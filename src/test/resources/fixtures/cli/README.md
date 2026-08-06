@@ -121,3 +121,32 @@ of what this generation changed:
   main specs for the MODIFY/REMOVE/RENAME targets under `openspec/specs/<cap>/spec.md`, author a
   change with the four delta operations across two capabilities, then run `show` per change id
   and `sed` the project root path to `/fixture` (`root.path` is the only sanitized field).
+
+## `1.7.0/change-metadata/` — change `.openspec.yaml` shapes (for the tolerant-parse contract)
+
+Real 1.7.0-CLI change-metadata files, consumed by `ChangeMetadataContractTest` /
+`ChangeMetadataParserToleranceTest` / `ChangeServiceMetadataToleranceTest`. This dir is
+**intentionally partial** (change-metadata scoped); a broader 1.7 status/validate/instructions
+recapture + a `…V17` `CliContractTest` nest is a separate follow-up. `.openspec.yaml` files carry
+no absolute paths or hostnames, so nothing is sanitized — only the capture-day `created:` value
+is fixed (`2026-08-05`) and asserted verbatim.
+
+- `baseline-schema-created.openspec.yaml` / `new-change-goal.openspec.yaml` — **verbatim** output of
+  `openspec new change <n>` and `openspec new change <n> --goal "…"` under an isolated
+  `HOME`/`XDG_*` env after `openspec init --tools none`. `--goal` is the only `new change` flag that
+  writes a metadata field. Note `created:` is **unquoted** — the untyped SnakeYAML resolver turns a
+  bare `2026-08-05` scalar into a `java.util.Date`, so the reader must accept String OR Date.
+- `rich-all-fields.openspec.yaml` / `skip-specs-only.openspec.yaml` — **derived** (the CLI has no
+  writer flag for `affected_areas`/`initiative`/`skip_specs`), shaped per the CLI's Zod schema
+  (`core/change-metadata/schema.js`: `affected_areas` array, `initiative` `{store,id}` object,
+  `skip_specs` boolean) and **proven reader-accepted**: `openspec validate <n> --strict` → *valid*
+  (with `skip_specs: true` making the delta-less change valid).
+- `initiative-as-string.openspec.yaml` — **negative control**: same session, `initiative` as a
+  string. `openspec validate <n> --strict` → *invalid* with `initiative: Invalid input: expected
+  object, received string`. Proves the acceptance oracle actually discriminates field shape (and
+  confirms unknown *keys* — vs wrong-shaped known keys — validate clean, i.e. the strip contract).
+- `legacy-status-proposed.openspec.yaml` — a **copy** of the archived on-disk
+  `openspec/changes/archive/2026-03-18-config-yaml-viewer/.openspec.yaml` (authentic legacy
+  `schema: openspec-change` / `status: proposed` / quoted `created`). The backward-compat anchor.
+- `malformed.openspec.yaml` — a **deliberately corrupt** file (a user typo, not a CLI shape),
+  labeled as such; exercises only the warn branch (a `MarkedYAMLException` at load).

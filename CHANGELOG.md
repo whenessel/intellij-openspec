@@ -10,6 +10,10 @@
 - **Spec content search moved to Search Everywhere.** The always-on tree content filter is replaced by a Search Everywhere contributor: type a term that appears only inside a requirement's body or scenario text and it surfaces the matching requirement by name, opening its spec in the editor at that requirement. The search runs off the UI thread over your local OpenSpec files without building or persisting an index, so it also works during indexing.
 - **One "Verify" surface for the pre-archive check.** The separate "Compliance / Pre-Flight" button and vocabulary are retired in favor of a single on-vocabulary **Verify** surface that renders three states: *ready to archive*, *in progress* (unfinished but valid — a neutral, bypassable state mirroring `openspec archive --yes`), and *blocked* (a validation failure — the only hard gate). "Verify" now means the same check from the tool-window button, the menu action, and the archive pre-flight; an unfinished-but-valid change is no longer over-stated as a red "archive blocked" error.
 
+### Fixed
+
+- **Change metadata that uses newer OpenSpec keys no longer triggers a false parse-error warning.** A change whose `.openspec.yaml` carries newer optional keys — for example `goal` (written by `openspec new change --goal`), `affected_areas`, `initiative`, or `skip_specs` — was read with a strict parser, so any key the plugin did not model raised a spurious "`.openspec.yaml` parse error" warning on every change-list refresh and dropped the change's status/schema/created (it showed as `UNKNOWN`). The plugin now parses change metadata leniently — mirroring the OpenSpec CLI's own behavior of ignoring unrecognized keys — and reserves the warning for genuinely malformed YAML.
+
 ## v0.6.0
 
 ### Changed
