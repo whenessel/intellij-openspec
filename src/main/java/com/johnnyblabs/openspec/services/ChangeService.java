@@ -10,7 +10,6 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.johnnyblabs.openspec.model.Change;
 import com.johnnyblabs.openspec.model.ChangeMetadata;
 import com.johnnyblabs.openspec.model.ChangeMetadataParser;
-import com.johnnyblabs.openspec.model.ChangeStatus;
 import com.johnnyblabs.openspec.util.OpenSpecFileUtil;
 import com.johnnyblabs.openspec.util.OpenSpecNotifier;
 import com.johnnyblabs.openspec.version.VersionSupport;
@@ -40,28 +39,6 @@ public final class ChangeService {
         return getChangesFromDir(OpenSpecFileUtil.getArchiveDir(project));
     }
 
-    public ChangeStatus getStatus(Change change) {
-        if (change.getMetadata() != null && change.getMetadata().getStatus() != null) {
-            return ChangeStatus.fromString(change.getMetadata().getStatus());
-        }
-        return ChangeStatus.UNKNOWN;
-    }
-
-    public void updateStatus(Change change, ChangeStatus newStatus) throws IOException {
-        VirtualFile changeDir = com.intellij.openapi.vfs.VirtualFileManager.getInstance()
-                .findFileByUrl(com.intellij.openapi.vfs.VfsUtilCore.pathToUrl(change.getPath()));
-        if (changeDir == null) return;
-
-        VirtualFile metaFile = changeDir.findChild(".openspec.yaml");
-        if (metaFile == null) return;
-
-        WriteAction.run(() -> {
-            String content = new String(metaFile.contentsToByteArray(), StandardCharsets.UTF_8);
-            String updated = content.replaceAll("status:\\s*\\w+", "status: " + newStatus.name().toLowerCase());
-            metaFile.setBinaryContent(updated.getBytes(StandardCharsets.UTF_8));
-        });
-    }
-
     public String archiveFirstActive() throws IOException {
         List<Change> active = getActiveChanges();
         if (active.isEmpty()) return null;
@@ -89,8 +66,9 @@ public final class ChangeService {
             }
         });
 
-        // Update status to archived
-        change.getMetadata().setStatus("archived");
+        // Archived-ness is directory location (changes/archive/), not a metadata field — the invented
+        // status: write is retired. (This line previously did an unguarded getMetadata().setStatus on
+        // possibly-null metadata AFTER the move committed, NPE-ing into a half-succeeded archive.)
         return change.getName();
     }
 

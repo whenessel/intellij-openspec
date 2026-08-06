@@ -43,9 +43,10 @@ public final class ScaffoldingService {
         return WriteAction.compute(() -> {
             VirtualFile changeDir = finalChangesDir.createChildDirectory(this, safeName);
 
-            // .openspec.yaml
+            // .openspec.yaml — schema+created only, matching real `openspec new change` (no status:)
             writeFile(changeDir, ".openspec.yaml",
-                    TemplateProvider.openspecYamlTemplate("proposed"));
+                    TemplateProvider.openspecYamlTemplate(
+                            OpenSpecSettings.getInstance(project).getEffectiveSchema(project)));
 
             // proposal.md (always required)
             writeFile(changeDir, "proposal.md",

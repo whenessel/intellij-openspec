@@ -347,6 +347,26 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                         i.message().contains("incompat-change")));
     }
 
+    public void testScaffoldSchemaProducesNoChangeSchemaWarning() throws Exception {
+        // The fixed scaffold writes `schema: spec-driven` (a built-in), so even with an AUTHORITATIVE
+        // known-set the change-schema-incompatible lint the OLD invented `openspec-change` value tripped
+        // is gone — proving the scaffold-schema fix silences that self-inflicted warning.
+        SchemaService authoritative = mock(SchemaService.class);
+        when(authoritative.isSchemaSupported()).thenReturn(true);
+        when(authoritative.getKnownSchemaNames()).thenReturn(Set.of("spec-driven"));
+        ServiceContainerUtil.replaceService(getProject(), SchemaService.class, authoritative, getTestRootDisposable());
+
+        overwriteFile("openspec/config.yaml", "schema: spec-driven\n");
+        myFixture.addFileToProject("openspec/changes/scaffolded/.openspec.yaml",
+                "schema: spec-driven\ncreated: 2026-08-05\n");
+        myFixture.addFileToProject("openspec/changes/scaffolded/proposal.md", "## Why\n\nTest\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChanges();
+        assertTrue("a spec-driven scaffold must not trip change-schema-incompatible",
+                result.issues().stream().noneMatch(i -> "change-schema-incompatible".equals(i.rule())));
+    }
+
     public void testDeltaSpecWithoutSectionsTriggersWarning() {
         // Delta spec validation uses LocalFileSystem which doesn't work in temp VFS.
         // This test verifies the validator handles it gracefully (no crash).

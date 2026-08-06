@@ -6,7 +6,6 @@ import com.intellij.ui.ColoredTreeCellRenderer;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.LayeredIcon;
 import com.intellij.ui.SimpleTextAttributes;
-import com.johnnyblabs.openspec.model.ChangeStatus;
 
 import javax.swing.*;
 import javax.swing.tree.DefaultMutableTreeNode;
@@ -15,8 +14,8 @@ import java.awt.*;
 /**
  * Multi-fragment tree renderer. Built on {@link ColoredTreeCellRenderer} (not the single-color
  * {@code DefaultTreeCellRenderer}) so a change node reads name-first: the change <b>name</b> in the
- * default/primary color, the {@code [status]} tag in its meaning color, and the {@code X/Y} task
- * count dimmed as a trailing secondary counter. Selection legibility is handled by the base
+ * default/primary color and the {@code X/Y} task count dimmed as a trailing secondary counter.
+ * Selection legibility is handled by the base
  * (it forces the selection foreground on a focused-selected row), so — unlike the old renderer — no
  * manual selection-color branching is needed (mirrors {@code CoordinationPanel.CoordinationCellRenderer}).
  */
@@ -47,8 +46,6 @@ public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
         return layered;
     }
 
-    private static final JBColor PROPOSED_COLOR = new JBColor(new Color(0, 128, 0), new Color(120, 220, 120));
-    private static final JBColor APPLIED_COLOR = new JBColor(new Color(0, 0, 200), new Color(120, 160, 255));
     private static final JBColor MISSING_COLOR = new JBColor(Color.GRAY, new Color(150, 150, 150));
     private static final JBColor DONE_COLOR = new JBColor(new Color(0, 128, 0), new Color(120, 220, 120));
     private static final JBColor READY_COLOR = new JBColor(new Color(0, 0, 200), new Color(120, 160, 255));
@@ -56,8 +53,6 @@ public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
 
     // Per-fragment attributes, cached once (never allocate inside customizeCellRenderer). Bold/italic
     // come from the STYLE_* bits, not Font.deriveFont — SimpleColoredComponent ignores per-fragment font.
-    private static final SimpleTextAttributes PROPOSED_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, PROPOSED_COLOR);
-    private static final SimpleTextAttributes APPLIED_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, APPLIED_COLOR);
     private static final SimpleTextAttributes DONE_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, DONE_COLOR);
     private static final SimpleTextAttributes READY_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, READY_COLOR);
     private static final SimpleTextAttributes BLOCKED_ATTR = new SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, BLOCKED_COLOR);
@@ -95,12 +90,10 @@ public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
 
     /**
      * Fragments a change node so the row reads name-first. The <b>name</b> is the default color
-     * (primary — the identifier the eye scans for); the {@code [status]} tag keeps its meaning color
-     * (green=proposed / blue=applied — the only inline proposed↔applied cue, since both share the
-     * plain change icon); the {@code X/Y} count is dimmed gray. The count is deliberately NOT greened
-     * at N/N — "done" is owned by the {@code CHANGE_DONE} icon badge, which is driven by the artifact
-     * DAG (a distinct upstream signal from tasks.md checkboxes and free to diverge). Falls back to the
-     * flat label if structured parts are absent.
+     * (primary — the identifier the eye scans for) and the {@code X/Y} count is dimmed gray. The count
+     * is deliberately NOT greened at N/N — "done" is owned by the {@code CHANGE_DONE} icon badge, which
+     * is driven by the artifact DAG (a distinct upstream signal from tasks.md checkboxes and free to
+     * diverge). Falls back to the flat label if structured parts are absent.
      */
     private void appendChangeFragments(SpecTreeModel.TreeNodeData data) {
         SpecTreeModel.TreeNodeData.ChangeLabelParts parts = data.changeParts();
@@ -118,39 +111,19 @@ public class SpecTreeCellRenderer extends ColoredTreeCellRenderer {
 
     /**
      * The pure fragmentation decision for a change node, extracted so the visual-hierarchy contract is
-     * unit-testable without a running IDE: the name is always {@code REGULAR_ATTRIBUTES} (never a
-     * status color), the status tag (when shown) carries its meaning color, and the {@code X/Y} count
-     * is always {@code GRAYED_ATTRIBUTES} — including at {@code N/N}, so a complete task count is never
-     * greened (that "done" story belongs to the icon badge, on the distinct artifact-DAG signal).
+     * unit-testable without a running IDE: the name is always {@code REGULAR_ATTRIBUTES} (primary), and
+     * the {@code X/Y} count is always {@code GRAYED_ATTRIBUTES} — including at {@code N/N}, so a complete
+     * task count is never greened (that "done" story belongs to the icon badge, on the artifact-DAG signal).
      */
     static java.util.List<LabelFragment> changeFragments(SpecTreeModel.TreeNodeData.ChangeLabelParts parts) {
         java.util.List<LabelFragment> fragments = new java.util.ArrayList<>();
         fragments.add(new LabelFragment(parts.name(), SimpleTextAttributes.REGULAR_ATTRIBUTES));
-
-        SimpleTextAttributes statusAttr = statusAttributes(parts.status());
-        if (statusAttr != null) {
-            fragments.add(new LabelFragment(" " + parts.status().toLabel(), statusAttr));
-        }
 
         int[] counts = parts.taskCounts();
         if (counts != null && counts.length == 2 && counts[1] > 0) {
             fragments.add(new LabelFragment(" " + counts[0] + "/" + counts[1], SimpleTextAttributes.GRAYED_ATTRIBUTES));
         }
         return fragments;
-    }
-
-    /**
-     * Meaning color for the {@code [status]} tag, or null when no tag is shown ({@code UNKNOWN} —
-     * matching {@code buildChangeLabel}, which omits the suffix for UNKNOWN). A non-proposed/applied
-     * status (e.g. ARCHIVED) shows the tag in the default color.
-     */
-    private static SimpleTextAttributes statusAttributes(ChangeStatus status) {
-        if (status == null || status == ChangeStatus.UNKNOWN) return null;
-        return switch (status) {
-            case PROPOSED -> PROPOSED_ATTR;
-            case APPLIED -> APPLIED_ATTR;
-            default -> SimpleTextAttributes.REGULAR_ATTRIBUTES;
-        };
     }
 
     /**

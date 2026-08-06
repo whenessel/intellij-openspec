@@ -18,13 +18,12 @@ import java.util.Map;
  * load (see {@link ChangeMetadataParser}), mirroring {@link OpenSpecConfig#fromMap(Map)} and upstream's
  * strip contract: unknown/newer keys are ignored, never errored.
  *
- * <p>{@code schema}/{@code status}/{@code created} are retained (the status reader is still consumed
- * elsewhere). The newer fields are <strong>read-only</strong> — surfaced for display/labeling only;
- * no validation gate keys off them.
+ * <p>{@code schema}/{@code created} are retained. The newer fields are <strong>read-only</strong> —
+ * surfaced for display/labeling only; no validation gate keys off them. A legacy {@code status:} key
+ * (the plugin's retired change-status invention) is now just an ignored unknown key (strip contract).
  */
 public class ChangeMetadata {
     private String schema;
-    private String status;
     private String created;
     private String goal;
     private List<String> affectedAreas = Collections.emptyList();
@@ -44,7 +43,6 @@ public class ChangeMetadata {
             return meta;
         }
         meta.schema = asString(map.get("schema"));
-        meta.status = asString(map.get("status"));
         meta.created = asDateString(map.get("created"));
         meta.goal = asString(map.get("goal"));
         meta.affectedAreas = asStringList(map.get("affected_areas"));
@@ -108,14 +106,6 @@ public class ChangeMetadata {
 
     public void setSchema(String schema) {
         this.schema = schema;
-    }
-
-    public String getStatus() {
-        return status;
-    }
-
-    public void setStatus(String status) {
-        this.status = status;
     }
 
     public String getCreated() {

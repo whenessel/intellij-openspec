@@ -3,7 +3,6 @@ package com.johnnyblabs.openspec.toolwindow;
 import com.johnnyblabs.openspec.model.ArtifactInfo;
 import com.johnnyblabs.openspec.model.ArtifactStatus;
 import com.johnnyblabs.openspec.model.ChangeArtifactDag;
-import com.johnnyblabs.openspec.model.ChangeStatus;
 import com.johnnyblabs.openspec.toolwindow.SpecTreeModel.TreeNodeType;
 import org.junit.jupiter.api.Test;
 
@@ -50,28 +49,29 @@ class SpecTreeModelLabelTest {
 
     @Test
     void changeLabelAppendsTaskProgress() {
-        String label = SpecTreeModel.buildChangeLabel("my-change", ChangeStatus.PROPOSED, new int[]{3, 7});
+        String label = SpecTreeModel.buildChangeLabel("my-change", new int[]{3, 7});
         assertTrue(label.contains("3/7"), "task progress X/Y must appear: " + label);
-        assertTrue(label.contains("my-change"));
-        assertTrue(label.contains("[proposed]"));
+        assertEquals("my-change 3/7", label);
     }
 
     @Test
     void changeLabelHasNoSlashWhenNoTasksArtifact() {
-        String label = SpecTreeModel.buildChangeLabel("my-change", ChangeStatus.PROPOSED, null);
+        String label = SpecTreeModel.buildChangeLabel("my-change", null);
         assertFalse(label.contains("/"), "no task suffix when there is no tasks artifact: " + label);
-        assertEquals("my-change [proposed]", label);
+        assertEquals("my-change", label);
     }
 
     @Test
     void changeLabelHasNoSuffixForZeroTasks() {
-        String label = SpecTreeModel.buildChangeLabel("my-change", ChangeStatus.APPLIED, new int[]{0, 0});
+        String label = SpecTreeModel.buildChangeLabel("my-change", new int[]{0, 0});
         assertFalse(label.contains("/"), "an empty tasks file yields no X/Y suffix: " + label);
+        assertEquals("my-change", label);
     }
 
     @Test
-    void changeLabelOmitsStatusWhenUnknown() {
-        String label = SpecTreeModel.buildChangeLabel("my-change", ChangeStatus.UNKNOWN, new int[]{1, 4});
+    void changeLabelIsNameAndCount() {
+        // The invented [status] tag is retired — the label is just the name (+ optional X/Y count).
+        String label = SpecTreeModel.buildChangeLabel("my-change", new int[]{1, 4});
         assertEquals("my-change 1/4", label);
     }
 
