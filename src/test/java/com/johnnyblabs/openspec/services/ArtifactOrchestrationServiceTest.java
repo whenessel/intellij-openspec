@@ -518,4 +518,77 @@ class ArtifactOrchestrationServiceTest {
     private static String jsonEscapedPath(java.nio.file.Path p) {
         return p.toString().replace("\\", "\\\\");
     }
+
+    private static String fixture(String name) {
+        String path = "/fixtures/cli/" + name;
+        try (java.io.InputStream is = ArtifactOrchestrationServiceTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * {@link ArtifactOrchestrationService#completedDownstream} — the DONE artifacts a regeneration
+     * could invalidate, which feeds the Regenerate confirmation dialog. Pinned against the real
+     * captured 1.6 and 1.7 status DAGs. 1.7 adds the CLI's {@code requires} edges and reorders
+     * {@code artifacts[]} to schema order; the derivation must consume the real edges (precise,
+     * order-independent) on 1.7 and fall back to the positional heuristic on pre-1.7 output.
+     */
+    @Nested
+    class CompletedDownstream {
+
+        @Test
+        void specs_downstreamIsTasksOnly_andInvariantAcrossGenerations() {
+            List<ArtifactInfo> a16 = CliOutputParser.parseChangeStatus(fixture("1.6.0/status.json")).getArtifacts();
+            List<ArtifactInfo> a17 = CliOutputParser.parseChangeStatus(fixture("1.7.0/status.json")).getArtifacts();
+
+            // Guard: the two generations exercise the two code paths (edges present vs absent) and
+            // genuinely differ in array order — so this can't silently become a tautology.
+            assertTrue(a17.stream().anyMatch(x -> !x.requires().isEmpty()), "1.7 must carry requires edges");
+            assertTrue(a16.stream().allMatch(x -> x.requires().isEmpty()), "1.6 must have no requires edges");
+            assertNotEquals(a16.stream().map(ArtifactInfo::id).toList(),
+                    a17.stream().map(ArtifactInfo::id).toList(), "orders must differ");
+
+            assertEquals(List.of("tasks"),
+                    ArtifactOrchestrationService.completedDownstream(a17, "specs"),
+                    "1.7: only tasks requires specs");
+            assertEquals(List.of("tasks"),
+                    ArtifactOrchestrationService.completedDownstream(a16, "specs"),
+                    "1.6 fallback: tasks is the only DONE artifact after specs");
+        }
+
+        @Test
+        void specs_downstreamOn1_7_excludesUnrelatedSiblingDesign() {
+            // The precise fix: design requires proposal, NOT specs — the old positional heuristic
+            // over-listed it on the 1.7 order. The requires-driven derivation must not.
+            List<ArtifactInfo> a17 = CliOutputParser.parseChangeStatus(fixture("1.7.0/status.json")).getArtifacts();
+            assertFalse(ArtifactOrchestrationService.completedDownstream(a17, "specs").contains("design"),
+                    "design does not depend on specs and must not be listed as its downstream");
+        }
+
+        @Test
+        void proposal_downstreamOn1_7_isTransitiveDoneOnly() {
+            // proposal is required (transitively) by specs, design, tasks — but specs is READY, so
+            // only the DONE dependents surface, in array order.
+            List<ArtifactInfo> a17 = CliOutputParser.parseChangeStatus(fixture("1.7.0/status.json")).getArtifacts();
+            assertEquals(List.of("design", "tasks"),
+                    ArtifactOrchestrationService.completedDownstream(a17, "proposal"));
+        }
+
+        @Test
+        void noRequiresEdges_usesPositionalFallback() {
+            // A pre-1.7-shaped DAG (no requires) must use the original list-order heuristic.
+            List<ArtifactInfo> artifacts = List.of(
+                    new ArtifactInfo("proposal", "proposal.md", ArtifactStatus.DONE, List.of()),
+                    new ArtifactInfo("design", "design.md", ArtifactStatus.DONE, List.of()),
+                    new ArtifactInfo("tasks", "tasks.md", ArtifactStatus.DONE, List.of()));
+            assertEquals(List.of("tasks"),
+                    ArtifactOrchestrationService.completedDownstream(artifacts, "design"),
+                    "fallback: DONE artifacts appearing after 'design' in the list");
+            assertEquals(List.of("design", "tasks"),
+                    ArtifactOrchestrationService.completedDownstream(artifacts, "proposal"));
+        }
+    }
 }
