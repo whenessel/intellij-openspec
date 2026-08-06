@@ -168,6 +168,12 @@ tasks.jacocoTestReport {
 // ChangeMetadata.fromMap seam, contract-tested (ok + malformed branches) against captured 1.7.0
 // fixtures. Measured 0.3918/0.3696/0.3661; INSTRUCTION/LINE nudged to ~0.006 below measured, BRANCH
 // left at 0.360 (already ~0.006 below — the volatile counter keeps its wobble headroom).
+// RAISED 2026-08-06 (verify-status-requires-and-id-keying): 0.386/0.362/0.360 → 0.388/0.366/0.364.
+// Adopting the CLI's status `requires` edges for downstream reasoning brought the previously-0%-
+// covered getCompletedDownstream under test, and ScaffoldingOverrideTest now exercises the real
+// applyScaffoldingOverrides (was a hand-copy). All new coverage is pure/deterministic (no added
+// CLI-integration lines), so the wobble profile is unchanged. Measured 0.3943/0.3734/0.3707; floors
+// set ~0.006 below (LINE kept a touch lower for the documented CLI-integration line wobble).
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     // Match the report: instrumented classes + the test JVM's execution data.
@@ -182,21 +188,21 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "INSTRUCTION"
                 value = "COVEREDRATIO"
-                minimum = "0.386".toBigDecimal()
+                minimum = "0.388".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.362".toBigDecimal()
+                minimum = "0.366".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "BRANCH"
                 value = "COVEREDRATIO"
-                minimum = "0.360".toBigDecimal()
+                minimum = "0.364".toBigDecimal()
             }
         }
     }

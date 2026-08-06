@@ -711,6 +711,17 @@ class CliContractTest {
                     "1.7 tasks artifact must carry requires edges on specs+design; got " + requires.get("tasks"));
         }
 
+        @Test
+        void artifactInfoModelBindsRequiresEdges() {
+            // Proves Gson deserializes the 1.7 `requires` array into ArtifactInfo's 5-arg canonical
+            // constructor — the data downstream dependency reasoning consumes.
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status.json"));
+            assertEquals(List.of("specs", "design"), byId(dag, "tasks").requires());
+            assertEquals(List.of("proposal"), byId(dag, "design").requires());
+            assertTrue(byId(dag, "proposal").requires().isEmpty(),
+                    "the root proposal artifact carries no requires edges");
+        }
+
         /**
          * A 1.7 {@code skip_specs: true} change reports its specs artifact as {@code skipped} and the
          * change {@code isComplete: true}. The plugin's {@link ArtifactStatus} enum has no SKIPPED

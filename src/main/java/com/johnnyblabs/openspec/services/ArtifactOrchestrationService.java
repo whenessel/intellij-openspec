@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -157,8 +159,43 @@ public final class ArtifactOrchestrationService {
     public List<String> getCompletedDownstream(String changeName, String artifactId) {
         ChangeArtifactDag dag = getArtifactStatus(changeName);
         if (dag == null) return List.of();
+        return completedDownstream(dag.getArtifacts(), artifactId);
+    }
 
-        List<ArtifactInfo> artifacts = dag.getArtifacts();
+    /**
+     * The DONE artifacts that depend on {@code artifactId} — i.e. those a regeneration of it could
+     * make inconsistent. Pure and static so it can be pinned directly against captured status DAGs.
+     *
+     * <p>When the DAG carries the CLI's own dependency edges ({@code requires}, 1.7+), this walks
+     * those edges transitively — precise and independent of the array's order, so it never
+     * over-lists a sibling that merely appears later (1.7 reordered {@code artifacts[]} to schema
+     * order, which broke the old positional heuristic's assumption). Pre-1.7 output has no
+     * {@code requires}, so it falls back to the original list-order heuristic (every DONE artifact
+     * appearing after {@code artifactId}), preserving 1.3–1.6 behavior exactly.
+     */
+    static List<String> completedDownstream(List<ArtifactInfo> artifacts, String artifactId) {
+        boolean hasRequiresEdges = artifacts.stream().anyMatch(a -> !a.requires().isEmpty());
+
+        if (hasRequiresEdges) {
+            // Transitive dependents over the reverse `requires` edges.
+            Set<String> dependents = new HashSet<>();
+            Deque<String> frontier = new ArrayDeque<>();
+            frontier.add(artifactId);
+            while (!frontier.isEmpty()) {
+                String target = frontier.poll();
+                for (ArtifactInfo a : artifacts) {
+                    if (a.requires().contains(target) && dependents.add(a.id())) {
+                        frontier.add(a.id());
+                    }
+                }
+            }
+            return artifacts.stream()
+                    .filter(a -> dependents.contains(a.id()) && a.status() == ArtifactStatus.DONE)
+                    .map(ArtifactInfo::id)
+                    .toList();
+        }
+
+        // Fallback (pre-1.7): positional — DONE artifacts appearing after `artifactId`.
         boolean found = false;
         List<String> downstream = new ArrayList<>();
         for (ArtifactInfo a : artifacts) {
