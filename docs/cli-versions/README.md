@@ -9,7 +9,8 @@ These analyses are the **epistemic base** for the plugin's version support — s
 | Version | Analysis | Covers |
 |---|---|---|
 | 1.4 | [1.4.md](1.4.md) | 1.3 → 1.4 delta (parser/validation fixes; the beta coordination model + `workspace-planning` schema; new skills-only assistants) |
+| 1.7 | [1.7.md](1.7.md) | 1.6 → 1.7 delta (additive superset: `skip_specs`, `status --json` `requires` edges, `operations.guidance`, `defaultStore`, static `SKILL.md` publish) |
 
-*Planned: `1.5.md` (1.4 → 1.5 — stores/worksets replace the coordination model).*
+*Planned backfill: `1.5.md` (1.4 → 1.5 — stores/worksets replace the coordination model) and `1.6.md` (1.5 → 1.6 — store "healthy-empty" health + the `update-change` workflow). For the full version×availability grid across 1.3.x–1.7.x, see the [Workflow availability matrix](../openspec-support.md#workflow-availability-matrix-cli-13x--17x).*
 
 For the plugin's at-a-glance support matrix (capability × support status), see [OpenSpec Client Coverage](../openspec-support.md). This directory is the reasoned analysis behind those support decisions.

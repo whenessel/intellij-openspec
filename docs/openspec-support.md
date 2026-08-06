@@ -20,17 +20,74 @@ This section is the **single source of truth** for the plugin's per-CLI-version 
 
 - **Current plugin version: 0.6.0** (authoritative source: `build.gradle.kts` / the JetBrains Marketplace listing; restated here so other docs have one place to link).
 - **Minimum CLI: 1.3.0.** Below the floor, the plugin shows a one-time upgrade nudge and degrades gracefully to its built-in paths (project detection, init, spec browser, tool window, validation).
-- **Supported CLI lines: `1.3.x`, `1.4.x`, `1.5.x`, and `1.6.x`** — each with the per-line contract below. The plugin's built-in validator follows CLI 1.6 validation semantics (SHALL/MUST-only keyword rule, fence-aware keyword/scenario evaluation, and the advisory INFO hint for skipped delta headers), verified by a verdict-parity contract test against captured 1.6.0 CLI output.
+- **Supported CLI lines: `1.3.x`, `1.4.x`, `1.5.x`, `1.6.x`, and `1.7.x`** — each with the per-line contract below. The plugin's built-in **spec** validator follows CLI 1.6/1.7 validation semantics — unchanged across those lines: the SHALL/MUST-only keyword rule, fence-aware keyword/scenario evaluation, and the advisory INFO hint for skipped delta headers — verified by a verdict-parity contract test against captured 1.6.0 CLI output. (1.7 changed no spec-validation semantics; its additive surfaces are covered per the `1.7.x` contract below.)
 - **`1.3.x`:** coordination is below its floor — the Coordination tab is read-only (Awareness) only if legacy on-disk state exists, else Hidden; **no coordination write actions**.
 - **`1.4.x` (baseline, tested against 1.4.1):** live coordination reads (`workspace` / `context-store` / `initiative`) **plus IDE write actions** at the Full tier — New Initiative, Set Up Context Store, Set Up Workspace — gated to the `[1.4.0, 1.5.0)` window. These write actions are **self-retiring**: CLI 1.5.0 removed the underlying commands, so they disappear on a 1.5 upgrade.
 - **`1.5.x` line:** CLI 1.5.0 replaced the 1.4 coordination commands with the **store / workset** model. The plugin surfaces that model above a `1.5.0` store floor (evaluated from the detected CLI version), with a built-in fallback that reads the global data dir directly. At the Full tier it exposes CLI-delegated **store/workset write actions** (store setup/register/unregister/remove, workset create/open/remove) and a `store doctor`-driven health strip. The legacy 1.4 write actions are not offered here.
 - **`1.6.x` line:** the store/workset model and all JSON shapes are unchanged from 1.5, but **store-health semantics changed**: a fresh/config-only store root (no `openspec/specs`, `openspec/changes`, or `openspec/changes/archive` yet) now **registers successfully** and `store doctor` reports it **healthy** with per-directory `present: false` detail — 1.5 refused the same root at register (`store_register_root_unhealthy`, a code 1.6 no longer emits, along with the retired `openspec_{specs,changes,archive}_missing` diagnostics). Registering a root whose `openspec/config.yaml` declares `store:` is refused with new codes (`store_root_pointer_declared`, `invalid_store_pointer`), and registering a never-registered root asks for identity confirmation. The plugin reads health solely from the CLI's own `healthy` flag, so healthy-empty stores list without any error marker, and register refusals surface the CLI's message and `fix` verbatim on either generation. No new gate: the `1.5.0` store floor is unchanged.
+- **`1.7.x` line:** the store/workset model and all coordination JSON shapes are **unchanged from 1.5/1.6** — no new coordination gate. 1.7 support is **additive**, and the plugin was aligned to it: a change's `.openspec.yaml` is parsed **leniently** (upstream strips unknown keys), so newer metadata keys — `goal` / `affected_areas` / `initiative` (present since 1.4.1) and the 1.7-new `skip_specs` — are read **display-only** instead of raising a spurious parse-error, and config validation no longer warns on states the CLI accepts clean (a `version:` value it ignores, a missing `schema:` beyond a non-failing INFO nudge, or a custom-forked schema when the CLI known-set is unavailable). The 1.7 config keys `operations.{apply,archive}.guidance` and the global `defaultStore` are **tolerated** (ignored, never flagged), and `status --json`'s new per-artifact `requires` edges parse additively (the plugin keys artifacts by id, so the accompanying schema-order reorder is inert). Verified against captured real 1.7.0 CLI output under `../src/test/resources/fixtures/cli/1.7.0/`.
 - The plugin is **runtime-version-aware**: recognized schema names are the union of its built-in set and the live `openspec schemas` list, and version-sensitive behavior is gated on the detected CLI version.
 - **Independent axis:** the checked-in config-format version (a legacy `openspec/config.yaml` `version: 1.2.0`) is *not* the CLI version and is unchanged across CLI 1.2.x / 1.3.x / 1.4.x. The plugin no longer *scaffolds* this field (fresh configs are schema-only, matching `openspec init`), but still *reads* it from a legacy config that carries it.
 
 > Verified by comparing CLI 1.3.1 ↔ 1.4.0: all change-lifecycle workflows (incl. `verify-change`) and the `status` / `instructions` / `templates` / `schemas` / `validate` / `show` commands exist at the 1.3 floor, as do the `schema which` / `schema validate` subcommands (re-verified empirically on 1.3.1, 2026-07-04 — the schema tooling surface needs no gate beyond the 1.3.0 floor). The `workspace-planning` schema and the `workspace` / `context-store` / `initiative` commands are 1.4 additions (see [`cli-versions/1.4.md`](cli-versions/1.4.md) for the cited analysis). The `openspec set` command is **confirmed on the 1.4 line** (verified on a real 1.4.1 CLI, 2026-07-04): `set change <name> --initiative <id> [--store <id> | --store-path <path>] [--json]` links a repo-local change to an initiative — coordination-beta machinery removed in CLI 1.5.0, deliberately given no plugin surface.
 >
 > **CLI 1.5.0 removed the `workspace` / `context-store` / `initiative` commands and the `workspace-planning` schema** (replaced by the `store` / `workset` model). The plugin's built-in schema set is therefore `spec-driven` only, and coordination is gated to the `[1.4.0, 1.5.0)` window — on a 1.5.0+ CLI the plugin never invokes the removed commands and the Coordination tab stands down (read-only Awareness if legacy on-disk state exists, Hidden otherwise).
+
+## Workflow availability matrix (CLI 1.3.x → 1.7.x)
+
+A version-oriented view of what each OpenSpec CLI line offers and whether the plugin supports it. **core** = ships in upstream `@fission-ai/openspec`; **custom** = the user opts in via a fork/config (upstream provides the *mechanism*, not the artifact); **removed** = existed earlier, deleted in this line; **n-a** = never existed. Every version boundary below was verified from the actual npm tarballs' `dist/` (1.3.1 / 1.4.1 / 1.5.0 / 1.6.0) and the installed 1.7.0, cross-checked against the upstream `CHANGELOG.md`.
+
+> **Core vs. custom, in one line:** *core* is what every install of a line guarantees — the `spec-driven` schema + its four artifacts, the full base workflow set, the line's coordination model, and the `core` workflow profile. *Custom/expanded* is what a user adds on top: forked schemas (`openspec schema fork`), custom workflow profiles, and per-project/per-machine config knobs (`operations.guidance`, `rules`, `references`, `defaultStore`, `skip_specs`). A fork is recognized by the plugin automatically because `SchemaService.getKnownSchemaNames()` unions the built-in floor with the live `openspec schemas` list.
+
+### Schemas (artifact pipelines)
+
+| Affordance | 1.3.x | 1.4.x | 1.5.x | 1.6.x | 1.7.x | Plugin |
+|---|---|---|---|---|---|---|
+| `spec-driven` schema (proposal→specs→design→tasks) | core | core | core | core | core | ✅ built-in fallback + live `schemas --json` |
+| `workspace-planning` schema | n-a | core | removed | n-a | n-a | 🟡 recognized (1.4-window), not authored |
+| Custom forks (`schema fork`/`init`/`which`/`validate`) | custom | custom | custom | custom | custom | ✅ full `SchemaService` loop (floor 1.3.0) |
+
+### Workflow skills / commands
+
+| Affordance | 1.3.x | 1.4.x | 1.5.x | 1.6.x | 1.7.x | Plugin |
+|---|---|---|---|---|---|---|
+| propose · apply-change · archive-change · explore · sync-specs | core | core | core | core | core | ✅ built-in actions + AI skills |
+| verify-change | core | core | core | core | core | 🟡 status-DAG-driven Verify (delegated semantics) |
+| onboard · feedback | core | core | core | core | core | onboard = plugin wizard · feedback = deliberately not surfaced |
+| **update-change** (`/opsx:update`) | n-a | n-a | n-a | core | core | ⬜ out-of-model (revise/continue already cover it) |
+| static `SKILL.md` publish · `.agents` target · Codex skills-only | n-a | n-a | n-a | n-a | core | n-a (AI-tool skill-mirror concern) |
+
+### Coordination / multi-change models
+
+| Affordance | 1.3.x | 1.4.x | 1.5.x | 1.6.x | 1.7.x | Plugin |
+|---|---|---|---|---|---|---|
+| `workspace` / `context-store` / `initiative` (+ `set change`) | n-a | core | removed | n-a | n-a | ✅ window-gated `[1.4.0, 1.5.0)`, self-retiring writes |
+| `store` / `workset` | n-a | n-a | core | core | core | ✅ store floor ≥1.5.0, CLI-delegated + on-disk fallback |
+| store "healthy-empty" register/doctor semantics | — | — | strict | relaxed | relaxed | ✅ reads the CLI's own `healthy` flag |
+
+### Config + profiles
+
+| Affordance | 1.3.x | 1.4.x | 1.5.x | 1.6.x | 1.7.x | Plugin |
+|---|---|---|---|---|---|---|
+| Global workflow profile `config profile [preset]` (`core`) | core | core | core | core | core | ✅ status-bar widget + action gating |
+| `config.yaml`: `schema` (req) / `context` / `rules` | core | core | core | core | core | ✅ built-in reader/validator (schema = INFO nudge) |
+| `config.yaml` `store:` pointer + `references:` | n-a | n-a | core | core | core | 🟡 tolerated (ignored, never flagged) |
+| `config.yaml` `operations.{apply,archive}.guidance` | n-a | n-a | n-a | n-a | core | 🟡 tolerated (not injected — AI-bridge concern) |
+| Global `defaultStore` | n-a | n-a | n-a | n-a | core | ⬜ out-of-model (machine-level store routing) |
+
+### Change metadata (`.openspec.yaml`) + 1.7 affordances
+
+| Affordance | 1.3.x | 1.4.x | 1.5.x | 1.6.x | 1.7.x | Plugin |
+|---|---|---|---|---|---|---|
+| `.openspec.yaml` (`schema`, `created`) | n-a¹ | core | core | core | core | ✅ lenient parse (strip contract) |
+| `goal` / `affected_areas` / `initiative` metadata | n-a | core | core | core | core | ✅ read-only (display) |
+| `skip_specs: true` | n-a | n-a | n-a | n-a | core | ✅ read-only (parsed; archive honoring deferred) |
+| `instructions apply` / `instructions archive` | n-a | n-a | n-a | n-a | core | ⬜ out-of-model (plugin archive is built-in VFS) |
+| `status --json` per-artifact `requires` edges | n-a | n-a | n-a | n-a | core | 🟡 parses additively; DAG-from-`requires` is a follow-up |
+
+¹ The `.openspec.yaml` schema file first appears in 1.4.1; on 1.3.x a change has no metadata file.
+
+**Bottom line:** across 1.3.x–1.7.x, the plugin needs **no functional work** — its runtime is version-aware and already gates/degrades correctly, and 1.7's additive surfaces were aligned by the 2026-08-05 changes (lenient `.openspec.yaml` parse + `skip_specs`; config-validator relaxations), fixture-backed under `../src/test/resources/fixtures/cli/1.7.0/`. The ⬜ rows are intentionally out-of-model (AI-tool skill mirrors, agent-instruction injection, machine-level store routing) — surfacing them would reimplement the CLI or invent state the client doesn't expose in the IDE.
 
 ## Change-lifecycle workflows
 
