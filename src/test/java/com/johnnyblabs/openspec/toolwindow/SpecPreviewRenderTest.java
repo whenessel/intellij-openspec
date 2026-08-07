@@ -65,6 +65,18 @@ class SpecPreviewRenderTest {
     }
 
     @Test
+    void emptyStatePlaceholderNamesOnlyChanges() {
+        // Post-restructure the tree has no spec/requirement nodes — only selecting a change populates
+        // the pane, so the placeholder must name only "a change" (regression guard for the stale copy
+        // that still promised spec/requirement/artifact selection).
+        String empty = SpecPreviewRenderer.emptyState();
+        assertTrue(empty.contains(SpecPreviewRenderer.EMPTY_STATE_MARKER));
+        assertTrue(empty.contains("Select a change"), "placeholder must name the real trigger");
+        assertFalse(empty.toLowerCase().contains("requirement"),
+                "placeholder must not mention the retired requirement node type");
+    }
+
+    @Test
     void classifyRoutesNodeTypesToTheRightKind() {
         // Plain-spec (SPEC_DOMAIN/REQUIREMENT) node types are retired — the tree no longer holds them
         // and classify no longer routes to MAIN_SPEC (specs open in the editor). The surviving

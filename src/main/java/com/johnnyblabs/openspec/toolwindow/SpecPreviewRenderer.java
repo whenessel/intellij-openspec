@@ -197,7 +197,7 @@ public final class SpecPreviewRenderer {
     /** The placeholder fragment shown when nothing previewable is selected. */
     public static String emptyState() {
         return "<div class=\"" + EMPTY_STATE_MARKER + "\" style=\"text-align:center; padding-top:40px;\">"
-                + "<p>Select a spec, requirement, change artifact, or a change to see its consolidated deltas.</p>"
+                + "<p>Select a change to see its consolidated deltas.</p>"
                 + "</div>";
     }
 
