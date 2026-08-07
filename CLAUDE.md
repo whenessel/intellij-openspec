@@ -90,6 +90,18 @@ Project subagents live in `.claude/agents/`. Their descriptions state when to in
 
 ## Release & publishing
 
+**Release-state preflight — do this BEFORE proposing any release step or version number.** Never infer release state from memory, a memory-index hook, or the resting `version = "..."` in `build.gradle.kts` — that value is the *last shipped* release, not the next one. Derive it from git and the changelog every time:
+
+```bash
+git tag -l 'v*' | sort -V | tail -1          # last SHIPPED version
+git rev-list "$(git tag -l 'v*' | sort -V | tail -1)"..HEAD --count   # commits since (0 ⇒ nothing to release)
+awk '/^## Unreleased/{f=1;next} /^## v/{f=0} f' CHANGELOG.md | grep -c '\S'   # Unreleased non-empty?
+```
+
+If HEAD is at the last tag and `## Unreleased` is empty, there is nothing to cut — say so. Otherwise the next version is the user's semver choice **strictly greater than the last tag** (the minor-vs-patch call is theirs, never inferred). If the last tag already equals the version you were about to prep, STOP — that release shipped; the pending work is the *next* one.
+
+**Doc-fidelity is a precondition, not a mid-cut afterthought.** Before *suggesting* the release process, run the doc-fidelity gate over the user-facing surfaces (`docs/marketplace-page.md`, `docs/feature-comparison-matrix.md`, `docs/feature-reference.md`) against the `## Unreleased` feature set, and land any refresh as its own doc commit. (`/release-cut` also gates on this at step 3, but surfacing stale user-facing docs *before* the cut is proposed avoids a late scramble — this is why the v0.5.0 pass was nearly skipped.)
+
 - Never run `publishPlugin` locally. CI handles signing and JetBrains Marketplace publishing on `v*` tag push.
 - Use `/release-cut <version>` to start a release — it bumps `build.gradle.kts`, rolls `## Unreleased` into a versioned changelog section (`./gradlew patchChangelog`), and opens the release PR.
 - Use `/release-prep <version>` before tagging — it validates `build.gradle.kts`, `CHANGELOG.md`, build, archived changes, and tracker state.
