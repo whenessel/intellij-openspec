@@ -891,5 +891,18 @@ class CliContractTest {
             assertTrue(result.issues().stream()
                     .anyMatch(i -> "change/broken-change".equals(i.filePath())));
         }
+
+        @Test
+        void proposalLessChangeReadsAsValid() {
+            // A change with a valid delta but no proposal.md is valid per the CLI — it resolves
+            // changes by directory existence, not by requiring proposal.md (upstream #1182). Locks
+            // that fact behind the proposal-required ERROR->WARNING demotion: a future CLI that starts
+            // requiring proposal.md breaks here loudly.
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture17("validate-single-change-no-proposal.json"));
+            assertNotNull(result);
+            assertTrue(result.passed());
+            assertTrue(result.issues().isEmpty());
+        }
     }
 }

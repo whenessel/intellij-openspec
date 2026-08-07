@@ -300,20 +300,49 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                 proposalErrors.isEmpty());
     }
 
-    public void testMissingProposalTriggersError() {
-        // Create a change without proposal.md (only .openspec.yaml)
+    public void testMissingProposalIsNonFailingWarning() {
+        // A change without proposal.md: change-proposal-required is a NON-FAILING WARNING, not an
+        // ERROR — the real CLI validates a proposal-less change (with a valid delta) as valid, so
+        // failing on it would make the plugin more restrictive than the client it wraps.
         myFixture.addFileToProject("openspec/changes/bad-change/.openspec.yaml",
-                "schema: spec-driven\nstatus: proposed\n");
+                "schema: spec-driven\n");
         myFixture.addFileToProject("openspec/changes/bad-change/design.md",
                 "## Design\n\nSome design.\n");
         refreshVfs();
 
         ValidationResult result = validator.validateChanges();
-        assertTrue("Should have change-proposal-required issue",
+        assertTrue("change-proposal-required should be a non-failing WARNING",
                 result.issues().stream().anyMatch(i ->
                         "change-proposal-required".equals(i.rule()) &&
-                        i.severity() == ValidationIssue.Severity.ERROR &&
+                        i.severity() == ValidationIssue.Severity.WARNING &&
                         i.message().contains("bad-change")));
+        assertFalse("change-proposal-required must not be an ERROR",
+                result.issues().stream().anyMatch(i ->
+                        "change-proposal-required".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.ERROR));
+    }
+
+    public void testProposalLessChangeWithValidDeltaPasses() {
+        // A change with a valid ADDED delta but no proposal.md validates clean in the built-in
+        // (CLI-absent) fallback — matching the CLI, which resolves changes by directory existence and
+        // does not require proposal.md. Bites a regression: if change-proposal-required were still an
+        // ERROR, the verdict would flip to failed.
+        myFixture.addFileToProject("openspec/changes/no-proposal-change/specs/reporting/spec.md",
+                "## ADDED Requirements\n\n### Requirement: Export report\n" +
+                        "The system SHALL export a report as PDF.\n\n" +
+                        "#### Scenario: User exports\n- **WHEN** the user clicks export\n" +
+                        "- **THEN** a PDF is produced\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("no-proposal-change");
+        assertTrue("a proposal-less change with a valid delta must pass the built-in verdict",
+                result.passed());
+        assertTrue("change-proposal-required present as a non-failing WARNING",
+                result.issues().stream().anyMatch(i ->
+                        "change-proposal-required".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.WARNING));
+        assertFalse("no ERROR-severity issue on a proposal-less-but-valid change",
+                result.issues().stream().anyMatch(i -> i.severity() == ValidationIssue.Severity.ERROR));
     }
 
     public void testMissingArtifactTriggersWarning() {
