@@ -199,8 +199,12 @@ faithfully:
   twins (forward tripwires). `spec-structure` + `validate-parity-corpus.json` were re-captured by
   **reusing the `1.6.0/parity-corpus` markdown as capture input** (the corpus is authored once);
   `SpecParserCliStructureContractTest` runs the same structure-parity check against both generations'
-  `spec-structure/` captures, and `ValidatorVerdictVersionStabilityTest` asserts the two generations'
-  `validate-parity-corpus` id→valid maps are equal.
+  `spec-structure/` captures, and `ValidatorVerdictVersionStabilityTest` now **auto-discovers every
+  committed `fixtures/cli/*/validate-parity-corpus.json`** (and its `-strict` twin) and asserts each
+  carries the anchor (`1.6.0`) `id→valid` map — so a future generation is covered with no test edit.
+  Pre-1.6 generations are deliberately NOT in this set: their CLI rules predate the corpus dialect and
+  legitimately verdict it differently (fence-aware scenario counting @1.4, multi-line requirement-body
+  keyword reading @1.6), so `1.3.0` shape-stability is locked by its own `validate.json` instead.
 
 ## `1.7.0/` — CLI-parser fixture-gap closures (schemas / config list / --version / config profile)
 
@@ -226,6 +230,35 @@ the parser can be wrong. Captured under an isolated `HOME`/`XDG_*` env; no machi
   `ConfigProfileDetail.fromJson` to parse — the source that parser was written against no longer
   exists. Captured as evidence and documented in `ConfigProfileDetailTest`; re-sourcing the Settings
   profile section from `config list --json` is a separate change.
+- `validate-parity-corpus-strict.json` — real `openspec validate --all --strict --json` over the shared
+  `1.6.0/parity-corpus` markdown (13 items, 9 valid). On this corpus no item is valid-with-only-a-CLI
+  warning, so the strict `id→valid` map equals the default map. Backs the **strict dimension** of
+  `ValidatorVerdictParityTest` (asserts the plugin's built-in strict *fallback* verdict never exceeds
+  the CLI's strict verdict, driving the real `applyStrictFallbackVerdict`) and the strict arm of
+  `ValidatorVerdictVersionStabilityTest`. `root.path` sanitized to `/fixture/parity-corpus`.
+
+### Durable next-generation capture (both parity twins)
+
+When a new CLI generation ships, capture its parity corpus so the version-agnostic guards pick it up
+with **zero test edits** (the discovery globs `validate-parity-corpus.json` and its `-strict` twin per
+generation). Install that CLI, then under an isolated env — `HOME`, `XDG_DATA_HOME`, `XDG_CONFIG_HOME`,
+`XDG_STATE_HOME` all in a fresh `mktemp -d`, `OPENSPEC_TELEMETRY=0`:
+
+```
+cd "$(mktemp -d)" && openspec init --tools none
+cp -R <repo>/src/test/resources/fixtures/cli/1.6.0/parity-corpus/openspec/specs/.   openspec/specs/
+cp -R <repo>/src/test/resources/fixtures/cli/1.6.0/parity-corpus/openspec/changes/. openspec/changes/
+P=$PWD
+openspec validate --all --json          | sed "s#$P#/fixture/parity-corpus#g" > validate-parity-corpus.json
+openspec validate --all --strict --json | sed "s#$P#/fixture/parity-corpus#g" > validate-parity-corpus-strict.json
+```
+
+Reuse the `1.6.0/parity-corpus` markdown as the capture INPUT — the corpus is authored **once**; never
+re-author it per generation (that is what reintroduces era mismatch). Commit both under
+`fixtures/cli/<gen>/`. On macOS the project path resolves under `/private`, so confirm `root.path` is
+exactly `/fixture/parity-corpus` (strip any leftover `/private` prefix). A differing `id→valid` map is
+a **real tightened-verdict signal** — investigate the CLI change; never edit a committed fixture to
+force a guard green.
 
 ## `1.7.0/config-validation/` — 1.7 config-field recognition (operations / rules / defaultStore)
 

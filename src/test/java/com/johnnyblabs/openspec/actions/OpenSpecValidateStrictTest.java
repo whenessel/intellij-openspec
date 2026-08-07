@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -68,17 +69,54 @@ class OpenSpecValidateStrictTest {
         assertTrue(OpenSpecValidateAction.summaryText("whole project", pass, true).contains("passed ("));
     }
 
-    // --- CLI-absent verdict flip (trap #2: pure flip, warning STAYS a WARNING; config excluded) ---
+    // --- CLI-absent verdict flip (allow-list): a plugin-invented lint WARNING must NOT flip strict,
+    //     because the real CLI never emits it — flipping would make the plugin stricter than the CLI ---
 
     @Test
-    void strictFallback_flipsVerdictOnWarnings_withoutReseveritying() {
-        ValidationResult warnOnly = new ValidationResult(true, List.of(warning("spec-title-required")), "built-in");
-        ValidationResult flipped = OpenSpecValidateAction.applyStrictFallbackVerdict(warnOnly, true);
+    void strictFallback_doesNotFlipOnCliSilentLintWarnings() {
+        // Every built-in non-config WARNING is a lint the real CLI never emits (or, for
+        // delta-spec-sections, a condition the CLI reports as an ERROR — not a warning). None is in
+        // CLI_MIRRORING_STRICT_WARNINGS, so a warnings-only fallback carrying them must PASS under
+        // strict — otherwise the plugin would be more restrictive than the client it wraps.
+        for (String rule : List.of("spec-title-required", "change-artifact-missing",
+                "change-schema-incompatible", "delta-removed-fields", "delta-spec-sections")) {
+            ValidationResult warnOnly = new ValidationResult(true, List.of(warning(rule)), "built-in");
+            ValidationResult after = OpenSpecValidateAction.applyStrictFallbackVerdict(warnOnly, true);
+            assertTrue(after.passed(), "strict must NOT flip on the CLI-silent lint '" + rule + "'");
+            assertEquals(ValidationIssue.Severity.WARNING, after.issues().get(0).severity(),
+                    "the issue STAYS a WARNING — no re-severity");
+        }
+    }
 
-        assertFalse(flipped.passed(), "strict flips a warning-only result to FAILED");
+    @Test
+    void strictFallback_flipMechanics_whenRuleIsInFlipSet() {
+        // The flip-positive branch is unreachable via the empty production set, so exercise it through
+        // the explicit-set overload: a WARNING whose rule IS in the set flips the verdict to FAILED,
+        // with issues preserved verbatim, source preserved, and NO re-severity.
+        ValidationResult warnOnly = new ValidationResult(true, List.of(warning("mirrored-rule")), "built-in");
+        ValidationResult flipped =
+                OpenSpecValidateAction.applyStrictFallbackVerdict(warnOnly, true, Set.of("mirrored-rule"));
+        assertFalse(flipped.passed(), "a warning in the flip set fails the strict verdict");
         assertEquals(0, flipped.errorCount(), "no errors were invented");
+        assertEquals(warnOnly.issues(), flipped.issues(), "issues preserved verbatim");
+        assertEquals("built-in", flipped.source(), "source preserved");
         assertEquals(ValidationIssue.Severity.WARNING, flipped.issues().get(0).severity(),
                 "the issue STAYS a WARNING — the flip is a verdict change, not a re-severity");
+
+        // A warning NOT in the set does not flip.
+        ValidationResult other = new ValidationResult(true, List.of(warning("some-other-rule")), "built-in");
+        assertTrue(OpenSpecValidateAction.applyStrictFallbackVerdict(other, true, Set.of("mirrored-rule")).passed(),
+                "a warning absent from the flip set must not fail strict");
+    }
+
+    @Test
+    void cliMirroringStrictWarningSet_isEmptyToday() {
+        // Guards the allow-list's intent: no built-in WARNING currently mirrors a CLI strict-warning,
+        // so the set is empty. A future addition must be source-verified against the real CLI first —
+        // this assertion is the tripwire that forces that justification.
+        assertTrue(OpenSpecValidateAction.CLI_MIRRORING_STRICT_WARNINGS.isEmpty(),
+                "the CLI-mirroring strict-warning set must stay empty until a real CLI-mirrored "
+                        + "WARNING is source-verified and ported");
     }
 
     @Test

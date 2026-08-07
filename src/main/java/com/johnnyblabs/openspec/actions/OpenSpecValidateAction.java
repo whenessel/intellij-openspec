@@ -20,6 +20,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Validates the OpenSpec project structure, specs, and changes.
@@ -96,20 +97,50 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
     }
 
     /**
-     * Apply the per-run strict verdict flip to a built-in fallback result (used when the CLI is
-     * absent or its run failed). Under strict, non-config WARNINGs fail the verdict too — mirroring
-     * the CLI's {@code --strict} (which fails on warnings) while keeping {@code config.yaml} guidance
-     * non-failing in both modes (the CLI never fails on config; config rows are display-only). Issues
-     * are NOT re-severity-ed — a warning stays a WARNING; only the top-level verdict flips. Package-
-     * private for tests.
+     * Rules whose WARNING mirrors a warning the real OpenSpec CLI itself emits and fails on under
+     * {@code --strict} — the ONLY WARNINGs that may flip the built-in strict fallback verdict.
+     *
+     * <p>Currently EMPTY: every built-in non-config WARNING is either a plugin-invented lint the CLI
+     * never emits ({@code spec-title-required}, {@code change-artifact-missing},
+     * {@code change-schema-incompatible}, {@code delta-removed-fields}) or a condition the CLI reports
+     * as an ERROR rather than a warning ({@code delta-spec-sections}). Flipping strict on any of them
+     * would make the plugin more restrictive than the client it wraps. Add a rule here ONLY when it is
+     * source-verified that {@code openspec validate --strict} emits an equivalent WARNING (e.g. a
+     * future port of the CLI's {@code PURPOSE_TOO_BRIEF}). An allow-list is deliberate: a new rule
+     * then defaults to non-flipping (laxer — the safe direction for a never-more-restrictive invariant)
+     * rather than flipping (stricter).
      */
-    static ValidationResult applyStrictFallbackVerdict(ValidationResult result, boolean strict) {
+    static final Set<String> CLI_MIRRORING_STRICT_WARNINGS = Set.of();
+
+    /**
+     * Apply the per-run strict verdict flip to a built-in fallback result (used when the CLI is
+     * absent or its run failed). Under strict, a WARNING fails the verdict only when its rule is in
+     * {@link #CLI_MIRRORING_STRICT_WARNINGS} — a warning the real CLI itself emits and fails on under
+     * {@code --strict}. That set is empty today, so no built-in WARNING flips a strict fallback: the
+     * plugin's own lint WARNINGs (which the CLI never emits) must not make it more restrictive than
+     * the client it wraps. {@code config.yaml} guidance likewise never fails (config rows are
+     * display-only; those rules were never in the set). Issues are NOT re-severity-ed — a warning
+     * stays a WARNING; only the top-level verdict flips. {@code public} so a parity test can drive the
+     * real verdict logic without shelling out (mirrors {@link #combineWithCli}).
+     */
+    public static ValidationResult applyStrictFallbackVerdict(ValidationResult result, boolean strict) {
+        return applyStrictFallbackVerdict(result, strict, CLI_MIRRORING_STRICT_WARNINGS);
+    }
+
+    /**
+     * Overload taking the flip-rule set explicitly. Production always calls the two-arg form
+     * ({@link #CLI_MIRRORING_STRICT_WARNINGS}, empty today); this seam lets a test exercise the
+     * flip-positive branch — verdict flip, issues preserved, source preserved, no re-severity —
+     * without waiting for that set to gain a real CLI-mirrored member. Package-private for tests.
+     */
+    static ValidationResult applyStrictFallbackVerdict(ValidationResult result, boolean strict,
+                                                       Set<String> flipRules) {
         if (!strict || !result.passed()) {
             return result; // not strict, or already failing on an ERROR — nothing to flip
         }
         boolean strictPassed = result.issues().stream().noneMatch(i ->
                 i.severity() == ValidationIssue.Severity.WARNING
-                        && (i.rule() == null || !i.rule().startsWith("config-")));
+                        && i.rule() != null && flipRules.contains(i.rule()));
         return strictPassed ? result
                 : new ValidationResult(false, result.issues(), result.source());
     }
