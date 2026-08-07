@@ -2,7 +2,7 @@
 
 A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code extensions.
 
-> **Maintenance: Snapshot** — reviewed per release, not per-change. This plugin's own row is kept current; the VS Code extension data (versions, install counts, features) is a point-in-time competitive survey and may lag reality. **Last reviewed: 2026-08-02** (plugin v0.6.0). For the version-by-version support matrix (what the plugin covers vs. the OpenSpec client), see [OpenSpec Client Coverage](openspec-support.md) instead.
+> **Maintenance: Snapshot** — reviewed per release, not per-change. This plugin's own row is kept current; the VS Code extension data (versions, install counts, features) is a point-in-time competitive survey and may lag reality. **Last reviewed: 2026-08-07** (plugin v0.7.0). For the version-by-version support matrix (what the plugin covers vs. the OpenSpec client), see [OpenSpec Client Coverage](openspec-support.md) instead.
 
 ---
 
@@ -10,7 +10,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 
 | Extension | IDE | Publisher | Version | Installs | Status |
 |---|---|---|---|---|---|
-| **OpenSpec IntelliJ Plugin** | IntelliJ IDEA 2024.2+ | johnnyblabs | 0.6.0 | — | Published |
+| **OpenSpec IntelliJ Plugin** | IntelliJ IDEA 2024.2+ | johnnyblabs | 0.7.0 | — | Published |
 | **OpenSpec** (Codder13) | VS Code | Denis Bolba | 0.0.5 | 1,972 | Community, proposed official |
 | **OpenSpec for Copilot** | VS Code | atman-dev | 1.0.0 | 956 | Community |
 | **OpenSpec VSCode** | VS Code | AngDrew | 1.3.0 | 592 | Community |
