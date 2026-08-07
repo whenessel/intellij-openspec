@@ -1,9 +1,15 @@
 package com.johnnyblabs.openspec.settings;
 
+import com.johnnyblabs.openspec.services.CliDetectionService;
+import com.johnnyblabs.openspec.services.WorkflowProfileService;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashSet;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for the workflow-profile combo helpers in {@link OpenSpecSettingsPanel}.
@@ -129,6 +135,77 @@ class OpenSpecSettingsPanelProfileTest {
         void arbitraryUnknownValue_returnsTrue() {
             assertTrue(OpenSpecSettingsPanel.isOrphanValue("spec-driven"));
             assertTrue(OpenSpecSettingsPanel.isOrphanValue("whatever-future-preset"));
+        }
+    }
+
+    /**
+     * The Config Profile section's data resolution ({@code computeConfigProfileView}) — the rewire
+     * from the never-real {@code config profile --json} to {@link WorkflowProfileService}
+     * (which reads {@code config list --json}). Tests the pure seam directly; the Swing rendering
+     * ({@code applyConfigProfileView}) stays under manual/sandbox verification like the rest of the panel.
+     */
+    @Nested
+    class ConfigProfileSection {
+
+        @Test
+        void rendersActiveProfileAndWorkflowsFromService() {
+            CliDetectionService detection = mock(CliDetectionService.class);
+            when(detection.isAvailable()).thenReturn(true);
+            WorkflowProfileService service = mock(WorkflowProfileService.class);
+            when(service.getActiveProfileName()).thenReturn("core");
+            // Exact set from fixtures/cli/1.7.0/config-list.json — including `update`, which
+            // distinguishes the real config-list workflows from the 5-item CORE_DEFAULTS fallback.
+            when(service.getActiveWorkflows()).thenReturn(new LinkedHashSet<>(
+                    List.of("propose", "explore", "apply", "update", "sync", "archive")));
+
+            // Pass a DISTINCT local name ("" = the default combo value) so asserting displayName=="core"
+            // proves the name came from the CLI-resolved service, not echoed from the local param —
+            // the section must show the resolved active profile, not the persisted combo selection.
+            OpenSpecSettingsPanel.ConfigProfileView view =
+                    OpenSpecSettingsPanel.computeConfigProfileView(detection, service, "");
+
+            assertFalse(view.fallback(), "CLI available → not a fallback view");
+            assertEquals("core", view.displayName(), "name comes from the service, not the local param");
+            assertEquals(List.of("propose", "explore", "apply", "update", "sync", "archive"),
+                    view.workflows());
+            // Proves the section actually consults WorkflowProfileService (config list --json),
+            // not the dead `config profile --json` path a regression would restore.
+            verify(service).refresh();
+            verify(service).getActiveProfileName();
+            verify(service).getActiveWorkflows();
+        }
+
+        @Test
+        void fallbackWhenCliUnavailable_doesNotTouchService() {
+            CliDetectionService detection = mock(CliDetectionService.class);
+            when(detection.isAvailable()).thenReturn(false);
+            WorkflowProfileService service = mock(WorkflowProfileService.class);
+
+            OpenSpecSettingsPanel.ConfigProfileView view =
+                    OpenSpecSettingsPanel.computeConfigProfileView(detection, service, "myprofile");
+
+            assertTrue(view.fallback());
+            assertEquals("myprofile", view.displayName(), "fallback carries the locally-stored name");
+            assertTrue(view.workflows().isEmpty());
+            verifyNoInteractions(service);
+        }
+
+        @Test
+        void fallbackWhenDetectionNull_doesNotTouchService() {
+            WorkflowProfileService service = mock(WorkflowProfileService.class);
+            OpenSpecSettingsPanel.ConfigProfileView view =
+                    OpenSpecSettingsPanel.computeConfigProfileView(null, service, "");
+            assertTrue(view.fallback());
+            verifyNoInteractions(service);
+        }
+
+        @Test
+        void descriptionRowIsGone() {
+            // The invented profile "description" must stay removed — OpenSpec emits none. The view
+            // record has no description component (compile-time), and the Swing field is deleted;
+            // lock the field so it can't be reintroduced.
+            assertThrows(NoSuchFieldException.class,
+                    () -> OpenSpecSettingsPanel.class.getDeclaredField("profileDescriptionLabel"));
         }
     }
 }

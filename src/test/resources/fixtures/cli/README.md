@@ -226,10 +226,10 @@ the parser can be wrong. Captured under an isolated `HOME`/`XDG_*` env; no machi
   "project" = fork) and `artifacts` — the parser previously read the never-emitted `isBuiltIn`/
   `artifactIds` keys (fixed in this change).
 - `config-profile-json-rejected.txt` — **pinned, not a JSON fixture.** `openspec config profile --json`
-  is rejected on 1.7 (`error: unknown option '--json'`), so the command produces no JSON for
-  `ConfigProfileDetail.fromJson` to parse — the source that parser was written against no longer
-  exists. Captured as evidence and documented in `ConfigProfileDetailTest`; re-sourcing the Settings
-  profile section from `config list --json` is a separate change.
+  is rejected on 1.7 (`error: unknown option '--json'`) — the option never existed. Kept as the
+  **tombstone** documenting why the Settings Config Profile section does NOT use `config profile --json`:
+  it re-sources the active profile name + workflows from `config list --json` (via `WorkflowProfileService`).
+  Do not reintroduce a `config profile --json` parser — there is nothing to parse.
 - `validate-parity-corpus-strict.json` — real `openspec validate --all --strict --json` over the shared
   `1.6.0/parity-corpus` markdown (13 items, 9 valid). On this corpus no item is valid-with-only-a-CLI
   warning, so the strict `id→valid` map equals the default map. Backs the **strict dimension** of

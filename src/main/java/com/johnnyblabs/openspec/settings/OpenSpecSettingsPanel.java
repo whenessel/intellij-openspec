@@ -19,7 +19,6 @@ import com.johnnyblabs.openspec.ai.AiCredentialStore;
 import com.johnnyblabs.openspec.ai.AiProvider;
 import com.johnnyblabs.openspec.ai.DirectApiService;
 import com.johnnyblabs.openspec.dialogs.NewSchemaDialog;
-import com.johnnyblabs.openspec.model.ConfigProfileDetail;
 import com.johnnyblabs.openspec.model.SchemaInfo;
 import com.johnnyblabs.openspec.services.CliDetectionService;
 import com.johnnyblabs.openspec.services.SchemaService;
@@ -95,7 +94,6 @@ public class OpenSpecSettingsPanel {
 
     // Config Profile section
     private JBLabel profileNameLabel;
-    private JBLabel profileDescriptionLabel;
     private JPanel workflowListPanel;
     private JBLabel profileFallbackLabel;
 
@@ -277,8 +275,6 @@ public class OpenSpecSettingsPanel {
 
     private JPanel buildConfigProfileSection() {
         profileNameLabel = new JBLabel(" ");
-        profileDescriptionLabel = new JBLabel(" ");
-        profileDescriptionLabel.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
 
         workflowListPanel = new JPanel();
         workflowListPanel.setLayout(new BoxLayout(workflowListPanel, BoxLayout.Y_AXIS));
@@ -289,7 +285,6 @@ public class OpenSpecSettingsPanel {
 
         JPanel panel = FormBuilder.createFormBuilder()
                 .addLabeledComponent(new JBLabel("Active profile:"), profileNameLabel)
-                .addComponent(profileDescriptionLabel)
                 .addComponent(workflowListPanel)
                 .addComponent(profileFallbackLabel)
                 .getPanel();
@@ -302,72 +297,85 @@ public class OpenSpecSettingsPanel {
     }
 
     /**
-     * Refreshes the Config Profile section by querying the CLI for profile details.
-     * Falls back to displaying the locally-stored profile name when CLI is unavailable.
+     * View model for the Config Profile section \u2014 the active profile name and its workflows, or a
+     * fallback marker (carrying the locally-stored name) when the CLI is unavailable. Has NO
+     * description field: OpenSpec models no profile-description concept, so the section shows name +
+     * workflows only.
+     */
+    record ConfigProfileView(String displayName, List<String> workflows, boolean fallback) {}
+
+    /**
+     * Resolves what the Config Profile section should show, off the EDT. Sources the active profile
+     * name and workflows from {@link WorkflowProfileService} (which reads {@code openspec config list
+     * --json}) \u2014 the same source the status-bar profile widget uses \u2014 and returns a fallback view
+     * carrying the locally-stored name when the CLI is unavailable. Pure and static so it can be
+     * unit-tested without a Swing panel. NB: {@code openspec config profile --json} is deliberately
+     * NOT used \u2014 that option does not exist in OpenSpec.
+     */
+    static ConfigProfileView computeConfigProfileView(CliDetectionService detection,
+                                                      WorkflowProfileService profileService,
+                                                      String localProfileName) {
+        String local = localProfileName != null ? localProfileName : "";
+        if (detection == null || !detection.isAvailable() || profileService == null) {
+            return new ConfigProfileView(local, List.of(), true);
+        }
+        profileService.refresh();
+        return new ConfigProfileView(profileService.getActiveProfileName(),
+                List.copyOf(profileService.getActiveWorkflows()), false);
+    }
+
+    /**
+     * Refreshes the Config Profile section from {@link WorkflowProfileService} (off the EDT), the same
+     * source the status-bar profile widget uses. Falls back to the locally-stored profile name when
+     * the CLI is unavailable.
      */
     void refreshConfigProfileSection() {
         CliDetectionService detection = project.getService(CliDetectionService.class);
-        if (detection == null || !detection.isAvailable()) {
-            showProfileFallback();
-            return;
-        }
-
-        String selectedProfile = getProfile();
-        profileNameLabel.setText(selectedProfile.isEmpty() ? "(default)" : selectedProfile);
-        profileDescriptionLabel.setText("Loading...");
+        WorkflowProfileService profileService = project.getService(WorkflowProfileService.class);
+        String localProfile = getProfile();
+        // Loading state (EDT): show the local name, drop stale workflows, hide the fallback marker.
+        profileNameLabel.setText(localProfile.isEmpty() ? "(default)" : localProfile);
         workflowListPanel.removeAll();
+        workflowListPanel.revalidate();
+        workflowListPanel.repaint();
         profileFallbackLabel.setVisible(false);
 
-        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            ConfigProfileView view;
             try {
-                String[] args = selectedProfile.isEmpty()
-                        ? new String[]{"config", "profile", "--json"}
-                        : new String[]{"config", "profile", selectedProfile, "--json"};
-                CliRunner.CliResult result = CliRunner.run(project, args);
-                ConfigProfileDetail detail;
-                if (result.isSuccess()) {
-                    detail = ConfigProfileDetail.fromJson(result.stdout());
-                } else {
-                    detail = ConfigProfileDetail.fallback(selectedProfile);
-                }
-                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
-                    updateProfileDisplay(detail);
-                });
+                view = computeConfigProfileView(detection, profileService, localProfile);
             } catch (Exception ex) {
                 LOG.debug("Failed to load profile details", ex);
-                com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(this::showProfileFallback);
+                view = new ConfigProfileView(localProfile, List.of(), true);
             }
+            ConfigProfileView finalView = view;
+            ApplicationManager.getApplication().invokeLater(() -> applyConfigProfileView(finalView));
         });
     }
 
-    private void updateProfileDisplay(ConfigProfileDetail detail) {
-        profileNameLabel.setText(detail.getName().isEmpty() ? "(default)" : detail.getName());
-        profileDescriptionLabel.setText(detail.getDescription().isEmpty() ? " " : detail.getDescription());
-        profileFallbackLabel.setVisible(false);
-
+    /** Renders a {@link ConfigProfileView} into the section. EDT only. */
+    private void applyConfigProfileView(ConfigProfileView view) {
         workflowListPanel.removeAll();
-        if (detail.getWorkflows().isEmpty()) {
+        if (view.fallback()) {
+            profileNameLabel.setText(view.displayName().isEmpty() ? "(not set)" : view.displayName());
+            profileFallbackLabel.setVisible(true);
+            workflowListPanel.revalidate();
+            workflowListPanel.repaint();
+            return;
+        }
+        profileNameLabel.setText(view.displayName().isEmpty() ? "(default)" : view.displayName());
+        profileFallbackLabel.setVisible(false);
+        if (view.workflows().isEmpty()) {
             JBLabel noWorkflows = new JBLabel("No workflow information available");
             noWorkflows.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
             workflowListPanel.add(noWorkflows);
         } else {
-            for (String workflow : detail.getWorkflows()) {
-                JBLabel workflowLabel = new JBLabel("  \u2022 " + workflow);
-                workflowListPanel.add(workflowLabel);
+            for (String workflow : view.workflows()) {
+                workflowListPanel.add(new JBLabel("  \u2022 " + workflow));
             }
         }
         workflowListPanel.revalidate();
         workflowListPanel.repaint();
-    }
-
-    private void showProfileFallback() {
-        String selectedProfile = getProfile();
-        profileNameLabel.setText(selectedProfile.isEmpty() ? "(not set)" : selectedProfile);
-        profileDescriptionLabel.setText(" ");
-        workflowListPanel.removeAll();
-        workflowListPanel.revalidate();
-        workflowListPanel.repaint();
-        profileFallbackLabel.setVisible(true);
     }
 
     private JPanel buildSchemasSection() {
