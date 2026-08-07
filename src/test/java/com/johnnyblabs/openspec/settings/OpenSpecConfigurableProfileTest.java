@@ -1,6 +1,7 @@
 package com.johnnyblabs.openspec.settings;
 
 import com.intellij.openapi.project.Project;
+import com.johnnyblabs.openspec.services.WorkflowProfileService;
 import com.johnnyblabs.openspec.services.WorkflowProfileSwitchService;
 import com.johnnyblabs.openspec.services.WorkflowProfileSwitchService.Outcome;
 import com.johnnyblabs.openspec.services.WorkflowProfileSwitchService.SwitchResult;
@@ -84,6 +85,32 @@ class OpenSpecConfigurableProfileTest {
 
             verify(settings).setProfile("custom");
         }
+    }
+
+    @Nested
+    class ProfileRefreshDelegation {
+
+        @Test
+        void scheduleProfileRefresh_delegatesToPanel_withoutRefreshingServiceDirectly() throws Exception {
+            // The panel owns the CLI read + render (refreshConfigProfileSection), so the Configurable
+            // must NOT also look up + refresh WorkflowProfileService — doing both ran
+            // `config list --json` twice per Settings Apply/Reset (regression guard).
+            invokeScheduleProfileRefresh();
+
+            verify(panel).refreshConfigProfileSection();
+            verify(project, never()).getService(WorkflowProfileService.class);
+        }
+    }
+
+    /** Uses reflection to invoke the private no-arg scheduleProfileRefresh with the mock panel injected. */
+    private void invokeScheduleProfileRefresh() throws Exception {
+        OpenSpecConfigurable configurable = new OpenSpecConfigurable(project);
+        java.lang.reflect.Field panelField = OpenSpecConfigurable.class.getDeclaredField("panel");
+        panelField.setAccessible(true);
+        panelField.set(configurable, panel);
+        Method method = OpenSpecConfigurable.class.getDeclaredMethod("scheduleProfileRefresh");
+        method.setAccessible(true);
+        method.invoke(configurable);
     }
 
     /**

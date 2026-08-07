@@ -1,12 +1,10 @@
 package com.johnnyblabs.openspec.settings;
 
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiCredentialStore;
 import com.johnnyblabs.openspec.ai.AiProvider;
-import com.johnnyblabs.openspec.services.WorkflowProfileService;
 import com.johnnyblabs.openspec.services.WorkflowProfileSwitchService;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
@@ -144,25 +142,17 @@ public class OpenSpecConfigurable implements Configurable {
     }
 
     /**
-     * D3 fallback refresh trigger. Runs {@code WorkflowProfileService.refresh()} on a
-     * pooled thread so the EDT isn't blocked, then re-renders the Config Profile section
-     * on EDT once the CLI call returns.
+     * D3 fallback refresh trigger: re-renders the Config Profile section from the CLI — catching the
+     * case where the user customized via the CLI/terminal, closed Settings without confirming, and
+     * reopens. Delegates to {@link OpenSpecSettingsPanel#refreshConfigProfileSection()}, which does the
+     * CLI read (`config list --json`) on a pooled thread via {@code WorkflowProfileService} and
+     * re-renders on the EDT. This method must NOT refresh the service itself: the panel already does,
+     * and doing both ran the CLI command twice per Settings Apply/Reset.
      */
     private void scheduleProfileRefresh() {
-        WorkflowProfileService service = project.getService(WorkflowProfileService.class);
-        if (service == null) return;
-        ApplicationManager.getApplication().executeOnPooledThread(() -> {
-            try {
-                service.refresh();
-            } catch (Throwable t) {
-                LOG.info("Profile refresh failed", t);
-            }
-            ApplicationManager.getApplication().invokeLater(() -> {
-                if (panel != null) {
-                    panel.refreshConfigProfileSection();
-                }
-            });
-        });
+        if (panel != null) {
+            panel.refreshConfigProfileSection();
+        }
     }
 
     @Override
