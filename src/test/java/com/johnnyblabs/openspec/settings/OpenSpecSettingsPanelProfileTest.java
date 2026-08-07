@@ -158,16 +158,20 @@ class OpenSpecSettingsPanelProfileTest {
             when(service.getActiveWorkflows()).thenReturn(new LinkedHashSet<>(
                     List.of("propose", "explore", "apply", "update", "sync", "archive")));
 
+            // Pass a DISTINCT local name ("" = the default combo value) so asserting displayName=="core"
+            // proves the name came from the CLI-resolved service, not echoed from the local param —
+            // the section must show the resolved active profile, not the persisted combo selection.
             OpenSpecSettingsPanel.ConfigProfileView view =
-                    OpenSpecSettingsPanel.computeConfigProfileView(detection, service, "core");
+                    OpenSpecSettingsPanel.computeConfigProfileView(detection, service, "");
 
             assertFalse(view.fallback(), "CLI available → not a fallback view");
-            assertEquals("core", view.displayName());
+            assertEquals("core", view.displayName(), "name comes from the service, not the local param");
             assertEquals(List.of("propose", "explore", "apply", "update", "sync", "archive"),
                     view.workflows());
             // Proves the section actually consults WorkflowProfileService (config list --json),
             // not the dead `config profile --json` path a regression would restore.
             verify(service).refresh();
+            verify(service).getActiveProfileName();
             verify(service).getActiveWorkflows();
         }
 
