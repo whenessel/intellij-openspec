@@ -189,7 +189,7 @@ Spec-Driven Development, OpenSpec, AI Integration, Code Generation, Requirements
 
 The tour shots live in [`docs/screenshots/`](screenshots/) — regenerate them with `./gradlew screenshotTour`. Recommended 4-5 for the listing (lead with the viewing/intelligence visuals):
 
-1. **Spec preview** (`07-spec-preview`) — the master/detail Browse tab: tree beside the rendered-markdown preview pane
+1. **Spec + change overview** (`01-spec-browser`) — a spec open in the editor with Markdown preview, beside the Changes-focused Browse tree and its consolidated change-deltas
 2. **Change deltas** (`08-change-deltas`) — the consolidated deltas view, grouped by capability/operation with badges
 3. **Tree badges** (`09-tree-badges`) — a change expanded showing artifact-status badge overlays (done / ready / blocked, X/Y progress)
 4. **Validation console** (`10-validation-console`) — grouped-by-file results with file:line links and per-severity coloring
