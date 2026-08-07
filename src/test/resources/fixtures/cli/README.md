@@ -73,6 +73,13 @@ of what this generation changed:
   `-spec` is a valid spec whose only issue is a WARNING (skipped on a `valid:true` item);
   `-change` is a clean change (no issues); `-change-invalid` is a delta-less change (one ERROR).
   Consumed by `CliContractTest.SingleItemValidateContractV16`. `root.path` sanitized to `/fixture`.
+- `1.7.0/validate-single-change-no-proposal.json` — a change with a valid ADDED delta but **no
+  `proposal.md`** (and no `.openspec.yaml`) validates `valid:true` / `issues:[]`: the CLI resolves
+  changes by directory existence, not by requiring a proposal (upstream #1182). Locks that fact behind
+  the plugin's `change-proposal-required` ERROR→WARNING demotion — a future CLI that starts requiring
+  `proposal.md` breaks `CliContractTest.SingleItemValidateContractV17.proposalLessChangeReadsAsValid`.
+  Standalone single-item capture; deliberately NOT added to the parity corpus (its distinct filename
+  is invisible to the version-stability guard's exact-filename glob, so the 1.6.0 anchor is untouched).
   Re-capture (per CLI generation): under an isolated `HOME`/`XDG_*` env, `openspec init`, author a
   spec under `openspec/specs/<cap>/spec.md`, a valid change and a delta-less change under
   `openspec/changes/`, then run `validate <id> --type spec|change --json` and `sed` the root path.

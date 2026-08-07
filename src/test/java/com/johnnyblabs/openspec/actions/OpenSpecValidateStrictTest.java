@@ -79,7 +79,8 @@ class OpenSpecValidateStrictTest {
         // CLI_MIRRORING_STRICT_WARNINGS, so a warnings-only fallback carrying them must PASS under
         // strict — otherwise the plugin would be more restrictive than the client it wraps.
         for (String rule : List.of("spec-title-required", "change-artifact-missing",
-                "change-schema-incompatible", "delta-removed-fields", "delta-spec-sections")) {
+                "change-proposal-required", "change-schema-incompatible", "delta-removed-fields",
+                "delta-spec-sections")) {
             ValidationResult warnOnly = new ValidationResult(true, List.of(warning(rule)), "built-in");
             ValidationResult after = OpenSpecValidateAction.applyStrictFallbackVerdict(warnOnly, true);
             assertTrue(after.passed(), "strict must NOT flip on the CLI-silent lint '" + rule + "'");

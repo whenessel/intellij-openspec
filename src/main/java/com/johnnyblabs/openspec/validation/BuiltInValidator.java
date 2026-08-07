@@ -185,8 +185,14 @@ public final class BuiltInValidator {
         String changePath = change.getPath();
 
         if (!change.getArtifactFiles().contains("proposal.md")) {
-            issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, changePath, 1,
-                    "Change '" + change.getName() + "' must have proposal.md", "change-proposal-required"));
+            // Always a non-failing WARNING — a plugin-invented lint the CLI never checks. The real CLI
+            // validates a proposal-less change that has a valid delta as valid (it resolves changes by
+            // directory existence, not by requiring proposal.md; upstream #1182), so failing on it would
+            // make the plugin more restrictive than the client it wraps. It is not in the strict
+            // CLI-mirroring warning set either, so a strict run does not flip on it. Symmetric with the
+            // change-artifact-missing lint below.
+            issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, changePath, 1,
+                    "Change '" + change.getName() + "' should have proposal.md", "change-proposal-required"));
         }
 
         for (String artifact : required) {
