@@ -60,8 +60,9 @@ Paste this HTML into the "Description" field on the plugin edit page:
 <h3>What It Does</h3>
 
 <ul>
-  <li><strong>Spec viewer &amp; navigator</strong> &mdash; Tree view of specs, changes, and
-    archives with search and filtering.</li>
+  <li><strong>Spec &amp; change navigator</strong> &mdash; A Changes-focused tree shows your
+    changes with per-artifact status; specs, archived changes, and <code>config.yaml</code>
+    browse in the standard Project View and open in the editor.</li>
   <li><strong>Workflow orchestrator</strong> &mdash; Walk through Init, Propose, Generate,
     Apply, and Archive from menus and toolbar buttons. A visual artifact
     pipeline shows what&rsquo;s done, what&rsquo;s ready, and what&rsquo;s blocked.
@@ -80,11 +81,11 @@ Paste this HTML into the "Description" field on the plugin edit page:
 <h3>Key Features</h3>
 
 <ul>
-  <li>Hierarchical tree view of specs, changes, and archives</li>
-  <li>Master/detail Browse tab &mdash; a read-only, theme-aware rendered-markdown preview pane beside the tree, so you can read a spec or change artifact without leaving the tool window (single-click to preview, double-click to open the file)</li>
+  <li>Changes-focused tree view of your changes with per-artifact status; specs, archived changes, and <code>config.yaml</code> browse in the standard Project View</li>
+  <li>Master/detail Browse tab &mdash; a read-only, theme-aware rendered-markdown preview pane beside the tree, dedicated to change surfaces (proposal / design / tasks and consolidated deltas), so you can read a change&rsquo;s artifacts without leaving the tool window (single-click to preview, double-click to open the file); main specs open in the editor with the platform&rsquo;s Markdown preview</li>
   <li>Consolidated change-deltas view &mdash; select a change to see everything it modifies at the spec level, grouped by capability and operation (ADDED / MODIFIED / REMOVED / RENAMED) with delta badges, assembled from the OpenSpec CLI</li>
   <li>Artifact-status badges overlaid on tree node icons (done / ready / blocked / not-created), with change nodes showing an X/Y task-progress count</li>
-  <li>Content-aware search &mdash; the Browse search box matches requirement and scenario text, not just node labels</li>
+  <li>Spec content search via Search Everywhere &mdash; type a term that appears only inside a requirement body or scenario and it surfaces that requirement, opening its spec in the editor at that requirement (runs off the UI thread over local files, no index, works during indexing)</li>
   <li>Validate from the Project View context menu, scoped to the clicked change or spec</li>
   <li>Grouped, navigable validation console &mdash; results grouped by file with clickable file:line links and per-severity coloring</li>
   <li>Visual artifact pipeline with status chips (done / ready / blocked)</li>
@@ -99,8 +100,8 @@ Paste this HTML into the "Description" field on the plugin edit page:
   <li>Explore panel: assembled project context for AI conversations</li>
   <li>Custom schema management: fork, create, and switch workflow schemas</li>
   <li>Config profile display and workflow management</li>
-  <li>Coordination tab: on an OpenSpec 1.4.x CLI, view and create/manage workspaces, context stores, and initiatives (these in-IDE create/set-up actions retire automatically when you upgrade to a 1.5 CLI); on a 1.5.x CLI, browse the newer stores and worksets model</li>
-  <li>Verify action: check artifact completeness and task progress</li>
+  <li>Coordination tab: on an OpenSpec 1.4.x CLI, view and create/manage workspaces, context stores, and initiatives (these in-IDE create/set-up actions retire automatically when you upgrade to a 1.5 CLI); on a 1.5.x or newer CLI, browse the newer stores and worksets model</li>
+  <li>Verify action: a single pre-archive check with three states &mdash; ready to archive, in progress (valid but unfinished, bypassable), or blocked (a validation failure, the only hard gate)</li>
   <li>Continue action: incremental one-artifact-at-a-time generation</li>
   <li>CLI update action: refresh agent instruction files from the IDE</li>
 </ul>

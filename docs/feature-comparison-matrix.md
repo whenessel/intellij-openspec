@@ -82,14 +82,14 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Feature | IntelliJ | Codder13 | atman-dev | AngDrew | AvantMedia |
 |---|---|---|---|---|---|
 | Dedicated tool window panel | Yes (right sidebar) | No | No | Yes (explorer) | Yes (panel) |
-| Specs tree browser | Yes | No | Partial | Yes | No |
+| Specs tree browser | Yes (Project View) | No | Partial | Yes | No |
 | Changes tree browser | Yes | No | No | Yes | Yes |
-| Archive tree browser | Yes | No | No | No | No |
+| Archive tree browser | Yes (Project View) | No | No | No | No |
 | Artifact nodes in tree | Yes (with status icons) | No | No | Partial | Yes |
 | Artifact-status badge overlays on tree icons | Yes (done/ready/blocked + X/Y task progress) | No | No | No | No |
 | Rendered-markdown preview pane (master/detail) | Yes | No | No | No | No |
 | Consolidated change-deltas view (CLI-sourced) | Yes (grouped by capability/operation, badged) | No | No | No | No |
-| Content search (requirement + scenario text) | Yes | No | No | No | No |
+| Content search (requirement + scenario text) | Yes (Search Everywhere) | No | No | No | No |
 | Tree auto-refresh on file changes | Yes (file watcher) | No | No | No | Yes |
 | Context menu actions on tree nodes | Yes (full action set) | No | No | Partial | No |
 | Workflow Action Panel (below tree) | Yes | No | No | No | No |
@@ -160,7 +160,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 
 ### IntelliJ Plugin (This Plugin)
 - Full IDE-native experience (inspections, annotations, line markers, tool window)
-- Master/detail spec-and-change viewer: a rendered-markdown preview pane beside the tree, with content-aware search over requirement and scenario text
+- Changes-focused tree with a rendered-markdown preview pane dedicated to change surfaces (proposal / design / tasks and consolidated deltas); specs, archived changes, and config browse in the Project View, and spec content search runs through Search Everywhere (opening the spec in the editor at the matching requirement)
 - Consolidated change-deltas view — everything a change modifies at the spec level, grouped by capability/operation and badged, assembled from the CLI, cross-linked to the per-capability delta diff
 - Artifact-status badge overlays on tree node icons (done / ready / blocked / not-created) with X/Y task-progress on change nodes
 - Grouped, navigable validation console (by file, clickable file:line links, per-severity color) plus a Project-View context-menu Validate scoped to the clicked change or spec

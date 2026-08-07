@@ -14,7 +14,7 @@ The OpenSpec tool window (right sidebar, or **View > Tool Windows > OpenSpec**) 
 
 | Tab | Purpose |
 |-----|---------|
-| **Browse** | Master/detail view of specs, changes, and archives: a tree beside a read-only rendered-markdown preview pane. Single-click to preview, double-click to open the file, right-click for context menu actions. Search matches requirement/scenario content, not just labels. |
+| **Browse** | Changes-focused master/detail view: a tree of your changes (each with per-artifact status) beside a read-only rendered-markdown preview pane dedicated to change surfaces. Single-click to preview, double-click to open the file, right-click for context menu actions. Specs, archived changes, and `openspec/config.yaml` browse in the standard Project View and open in the editor; spec content search is via Search Everywhere. |
 | **Console** | Output panel for CLI commands (init, validate, update, etc.). |
 | **Explore** | *(Only when Direct API is configured)* Thinking-space panel with inline topic input, markdown-rendered AI responses, and Copy/Clear toolbar. Appears automatically when you configure a Direct API provider in Settings. |
 | **Coordination** | *(Only when OpenSpec 1.4 coordination state or a coordination mode is detected)* Lists workspaces, context stores, and initiatives. See [Coordination Tab](#coordination-tab) below. |
@@ -71,20 +71,15 @@ Actions run off the UI thread; on failure the CLI's diagnostic message (and its 
 
 ```
 OpenSpec
-├── Specs
-│   ├── user-auth
-│   │   └── Requirement: session-management
-│   └── data-export
-│       └── Requirement: csv-format
-├── Changes
-│   └── add-greeting [proposed] 2/4     ← task progress X/Y
-│       ├── proposal        ● done badge
-│       ├── design          ● ready badge
-│       ├── specs (needs: design)  ✕ blocked badge
-│       └── tasks           ▲ not-created badge
-└── Archive
-    └── 2026-03-01-initial-setup
+└── Changes
+    └── add-greeting  2/4                ← name-first, dimmed task progress X/Y
+        ├── proposal        ● done badge
+        ├── design          ● ready badge
+        ├── specs (needs: design)  ✕ blocked badge
+        └── tasks           ▲ not-created badge
 ```
+
+> Specs, archived changes, and `openspec/config.yaml` are browsed in the standard Project View (which lists `openspec/**`) and open in the editor — the tool-window tree is dedicated to Changes.
 
 **Artifact status badges.** A change artifact's status is shown as a small badge overlaid on the
 node's icon — **done**, **ready**, **blocked**, or **not-created** — rather than as a glyph glued to
@@ -101,9 +96,11 @@ status badge — these are the nodes with client-owned status (apply-readiness, 
 requirement, delta-spec, and config nodes are never badged**, because the OpenSpec model attaches no
 status to a spec or requirement; a badge there would repeat the removed `@spec` coverage scorecard.
 
-The requirement and scenario counts under **Specs** are recovered by a line-oriented scanner that
-mirrors the OpenSpec CLI's own parsing, so the tree agrees with `openspec show` / `openspec validate`.
-The recognition rules:
+The plugin recovers a spec's requirement and scenario counts with a line-oriented scanner that
+mirrors the OpenSpec CLI's own parsing, so its reading of a spec agrees with `openspec show` /
+`openspec validate`. (The Changes-focused tree no longer renders a Specs section, but this scanner
+still backs spec parsing wherever the plugin reads a spec — the consolidated-deltas view and spec
+content search.) The recognition rules:
 
 - **Code fences are excluded.** Requirement headers, scenario headers, and normative keywords that
   appear only inside a fenced code block (` ``` ` or `~~~`) are not counted — they are examples, not
@@ -124,11 +121,11 @@ can be collapsed.
 
 - **Single-click** a node to render its document in the pane; **double-click** still opens the real
   file in the editor. The pane is always read-only — editing stays in the editor.
-- **Per node type.** The preview renders a **main capability spec** (`specs/<capability>/spec.md`), a
-  change's **proposal / design / tasks**, a change's **delta spec**
-  (`changes/<change>/specs/<capability>/spec.md`), or — for a **change** node — a **consolidated
-  deltas view** (below). A main spec and a delta spec are interpreted according to their own
-  structure and never conflated.
+- **Per node type.** The preview renders a change's **proposal / design / tasks**, a change's
+  **delta spec** (`changes/<change>/specs/<capability>/spec.md`), or — for a **change** node — a
+  **consolidated deltas view** (below). Main capability specs are not previewed in the pane; they
+  open in the editor with the platform's Markdown preview. A delta spec is interpreted according to
+  its own structure.
 - **Consolidated change-deltas view.** Selecting a **change** node renders a read-only, at-a-glance
   view of everything that change modifies at the spec level: a header and a one-line summary
   (capabilities touched · counts per operation), then each capability grouped together, then each
@@ -144,8 +141,6 @@ can be collapsed.
 - **Delta operation badges.** In a delta-spec preview — and in the consolidated deltas view — the
   `ADDED` / `MODIFIED` / `REMOVED` / `RENAMED` operation headers are visually badged so a change's
   proposed deltas read at a glance.
-- **Requirement anchoring.** Selecting a **Requirement** node scrolls the preview to that
-  requirement's section rather than resetting to the top.
 - **On-model.** The preview renders the source markdown of your own files, or (for the deltas view)
   the delta set the CLI reports. It does not synthesize a post-apply "effective" spec, and it does
   not score or show per-spec/per-delta status, progress, or coverage; change-owned state (delta
@@ -154,13 +149,13 @@ can be collapsed.
 Rendering runs off the UI thread (the file is read and rendered on a background thread, then the pane
 is updated on the UI thread), so selection stays responsive.
 
-### Full-Text Search
+### Spec Content Search (Search Everywhere)
 
-The Browse **search box** (Ctrl/Cmd+F to focus) filters the tree in real time, auto-expanding
-matches and restoring the tree when cleared. Matching reaches beyond node labels into **requirement
-body text and scenario text**, so a term that appears only inside a requirement's prose — "find where
-rate-limiting is specified" — surfaces that requirement and its spec. Content matching happens during
-the off-UI-thread model build over your local `openspec/` files; nothing is indexed or persisted.
+Spec content search lives in **Search Everywhere** (double-Shift). Type a term that appears only
+inside a requirement's **body or scenario text** — "find where rate-limiting is specified" — and the
+contributor surfaces the matching requirement by name, opening its spec in the editor scrolled to
+that requirement. It runs off the UI thread over your local `openspec/` files without building or
+persisting an index, so it also works while the IDE is indexing.
 
 ---
 

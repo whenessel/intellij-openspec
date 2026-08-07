@@ -24,30 +24,30 @@ After installing the plugin and restarting IntelliJ, open the OpenSpec tool wind
 - Click the **OpenSpec** icon in the right sidebar, or
 - Go to **View > Tool Windows > OpenSpec**
 
-If the project already has an `openspec/` directory, the tree populates automatically with **Specs**, **Changes**, and **Archive** nodes.
+If the project already has an `openspec/` directory, the Browse tab populates automatically with your **Changes** and their per-artifact status. Your **specs** and **archived changes** live under `openspec/` in the standard **Project View**, where they open in the editor.
 
 ## Step 2: Browse Specs
 
-Expand the **Specs** node to see all capabilities and their requirements:
+Your specs live under `openspec/specs/` in the standard **Project View** — expand it to see each capability, and open a `spec.md` to read it with the editor's Markdown preview:
 
 ```
-Specs
-├── user-auth
-│   ├── Requirement: session-management
-│   └── Requirement: password-policy
-└── data-export
-    └── Requirement: csv-format
+openspec/
+└── specs/
+    ├── user-auth/
+    │   └── spec.md
+    └── data-export/
+        └── spec.md
 ```
 
-**Double-click** any item to open its spec file. **Right-click** for context menu actions.
+To jump straight to a requirement by something it says — "where is rate-limiting specified?" — use **Search Everywhere** (double-tap Shift) and type the phrase: matching requirements surface by name and open their spec at that spot, with no setup or indexing required.
 
 ## Step 3: Track Changes
 
-The **Changes** node shows active work. Each change displays its artifact pipeline status:
+The **Browse** tab shows active work. Each change reads name-first with a dimmed `X/Y` task count, and displays its artifact pipeline status:
 
 ```
 Changes
-└── add-greeting [proposed]
+└── add-greeting  2/4
     ├── ✓ proposal       ← completed
     ├── ○ design         ← ready for generation
     ├── − specs          ← waiting on dependencies
