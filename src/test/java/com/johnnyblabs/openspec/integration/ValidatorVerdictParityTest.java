@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.intellij.openapi.vfs.VfsUtil;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.johnnyblabs.openspec.actions.OpenSpecValidateAction;
 import com.johnnyblabs.openspec.validation.BuiltInValidator;
 import com.johnnyblabs.openspec.validation.ValidationIssue;
 import com.johnnyblabs.openspec.validation.ValidationResult;
@@ -107,5 +108,46 @@ public class ValidatorVerdictParityTest extends OpenSpecIntegrationTestBase {
                 issues.stream().anyMatch(i -> "delta-skipped-header".equals(i.rule())
                         && i.filePath().contains("/nameless-change/")
                         && i.message().contains("missing a requirement name")));
+
+        // --- Strict dimension: the built-in strict FALLBACK verdict must never exceed the
+        // CLI's strict verdict either. Drive the REAL applyStrictFallbackVerdict per item (not an
+        // inline re-implementation) so this tracks the production carve-out. Goes RED on the pre-fix
+        // code: info-change/nameless-change carry a change-artifact-missing WARNING the old fallback
+        // flipped to FAILED, while the CLI reports them strict-VALID.
+        Map<String, Boolean> cliStrictVerdicts = new LinkedHashMap<>();
+        JsonObject strictFixture = JsonParser.parseString(
+                resource("/fixtures/cli/1.7.0/validate-parity-corpus-strict.json")).getAsJsonObject();
+        for (JsonElement el : strictFixture.getAsJsonArray("items")) {
+            JsonObject item = el.getAsJsonObject();
+            cliStrictVerdicts.put(item.get("id").getAsString(), item.get("valid").getAsBoolean());
+        }
+        assertTrue("strict fixture drift: expected 13 items, got " + cliStrictVerdicts.size(),
+                cliStrictVerdicts.size() == 13);
+        assertEquals("strict fixture: expected 9 CLI-strict-valid items", 9L,
+                cliStrictVerdicts.values().stream().filter(Boolean::booleanValue).count());
+
+        // Anti-degeneracy anchor: a CLI-strict-VALID change (info-change) must actually carry a
+        // non-config lint WARNING (change-artifact-missing — it has proposal.md but no tasks.md/
+        // design.md), so the strict PASS below proves the fix SPARES a genuinely-present lint warning
+        // rather than there being nothing to flip.
+        assertTrue("info-change must carry a change-artifact-missing WARNING for the strict test to bite",
+                issues.stream().anyMatch(i -> "change-artifact-missing".equals(i.rule())
+                        && i.filePath().contains("/info-change")
+                        && i.severity() == ValidationIssue.Severity.WARNING));
+
+        for (Map.Entry<String, Boolean> e : cliStrictVerdicts.entrySet()) {
+            String id = e.getKey();
+            String marker = "/" + id + "/";
+            List<ValidationIssue> perItem = issues.stream()
+                    .filter(i -> i.filePath().contains(marker) || i.filePath().endsWith("/" + id))
+                    .toList();
+            boolean pluginNonStrictPass = perItem.stream()
+                    .noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR);
+            ValidationResult perItemResult = new ValidationResult(pluginNonStrictPass, perItem, "built-in");
+            boolean pluginStrictPass =
+                    OpenSpecValidateAction.applyStrictFallbackVerdict(perItemResult, true).passed();
+            assertEquals("strict verdict parity for '" + id + "' (CLI-strict says " + e.getValue() + ")",
+                    (boolean) e.getValue(), pluginStrictPass);
+        }
     }
 }
