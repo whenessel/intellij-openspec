@@ -1,0 +1,36 @@
+{
+  "items": [
+    {
+      "id": "no-body",
+      "type": "spec",
+      "valid": false,
+      "issues": [
+        {
+          "level": "ERROR",
+          "path": "requirements[0]",
+          "message": "Requirement \"Empty\" must contain SHALL or MUST"
+        }
+      ],
+      "durationMs": 2
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "byType": {
+      "spec": {
+        "items": 1,
+        "passed": 0,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "/fixture",
+    "source": "nearest"
+  }
+}

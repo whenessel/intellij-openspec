@@ -10,15 +10,16 @@ import java.util.regex.Pattern;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests for BuiltInValidator validation rules extracted as logic tests.
- * Validates RFC 2119 keyword enforcement (ERROR), scenario clause enforcement (ERROR),
- * requirement-must-have-scenario rule, and delta spec structural validation.
+ * Rule-level tests for {@link BuiltInValidator}, driving the REAL
+ * {@link BuiltInValidator#validateSpecContent} (not a re-implemented mirror). Covers the 1.8
+ * body-conditional RFC 2119 keyword rule (WARNING when the requirement has a body, ERROR when it has
+ * none; the header-only variant is a WARNING), scenario-clause hints, the requirement-must-have-scenario
+ * rule, and delta spec structural validation.
  */
 class BuiltInValidatorRulesTest {
 
     // Patterns matching BuiltInValidator
     private static final Pattern REQUIREMENT_PATTERN = com.johnnyblabs.openspec.util.SpecPatterns.REQUIREMENT_HEADER;
-    private static final Pattern RFC_KEYWORD_PATTERN = Pattern.compile("\\b(SHALL|MUST)\\b");
     private static final Pattern SCENARIO_PATTERN = Pattern.compile("^#{4} Scenario:.+", Pattern.MULTILINE);
     private static final Pattern DELTA_SECTION_PATTERN = Pattern.compile("^## (ADDED|MODIFIED|REMOVED|RENAMED) Requirements", Pattern.MULTILINE);
     private static final Pattern RENAMED_ENTRY_PATTERN = Pattern.compile(
@@ -26,10 +27,10 @@ class BuiltInValidatorRulesTest {
     private static final Pattern REMOVED_REASON_PATTERN = Pattern.compile("\\*\\*\\s*Reason\\s*:?\\s*\\*\\*", Pattern.CASE_INSENSITIVE);
     private static final Pattern REMOVED_MIGRATION_PATTERN = Pattern.compile("\\*\\*\\s*Migration\\s*:?\\s*\\*\\*", Pattern.CASE_INSENSITIVE);
 
-    // --- 1.7: RFC 2119 keywords are ERROR ---
+    // --- 1.8: RFC 2119 keyword rule is severity-conditional on the requirement having a body ---
 
     @Test
-    void rfc2119_missingKeyword_isError() {
+    void rfc2119_missingKeyword_bodyPresent_isWarning() {
         String content = """
                 # Test Spec
 
@@ -42,8 +43,28 @@ class BuiltInValidatorRulesTest {
                 """;
         List<ValidationIssue> issues = validateSpec(content);
         assertTrue(issues.stream().anyMatch(i ->
+                i.severity() == ValidationIssue.Severity.WARNING && i.rule().equals("spec-rfc-keywords")),
+                "1.8: a body-carrying requirement without SHALL/MUST is a WARNING, not an ERROR");
+        assertTrue(issues.stream().noneMatch(i ->
                 i.severity() == ValidationIssue.Severity.ERROR && i.rule().equals("spec-rfc-keywords")),
-                "Missing RFC 2119 keyword should be ERROR");
+                "the missing-keyword rule must not ERROR when the requirement has a body");
+    }
+
+    @Test
+    void rfc2119_missingKeyword_noBody_isError() {
+        String content = """
+                # Test Spec
+
+                ### Requirement: Empty
+
+                #### Scenario: Login
+                - **WHEN** user submits credentials
+                - **THEN** system authenticates
+                """;
+        List<ValidationIssue> issues = validateSpec(content);
+        assertTrue(issues.stream().anyMatch(i ->
+                i.severity() == ValidationIssue.Severity.ERROR && i.rule().equals("spec-rfc-keywords")),
+                "1.8: a requirement with no body prose still ERRORs on the missing keyword");
     }
 
     @Test
@@ -82,7 +103,7 @@ class BuiltInValidatorRulesTest {
     // --- 1.7: Scenario clauses are ERROR ---
 
     @Test
-    void scenarioClauses_missingWhen_isError() {
+    void scenarioClauses_missingWhen_isInfo() {
         String content = """
                 # Test Spec
 
@@ -93,15 +114,17 @@ class BuiltInValidatorRulesTest {
                 - **THEN** something happens
                 """;
         List<ValidationIssue> issues = validateSpec(content);
+        // INFO, not ERROR — the CLI performs no clause-structure validation, so flagging it as an error
+        // would make the plugin stricter than the client it wraps (verified against real production).
         assertTrue(issues.stream().anyMatch(i ->
-                i.severity() == ValidationIssue.Severity.ERROR
+                i.severity() == ValidationIssue.Severity.INFO
                         && i.rule().equals("spec-scenario-clauses")
                         && i.message().contains("WHEN")),
-                "Missing WHEN clause should be ERROR");
+                "Missing WHEN clause is an informational (INFO) hint");
     }
 
     @Test
-    void scenarioClauses_missingThen_isError() {
+    void scenarioClauses_missingThen_isInfo() {
         String content = """
                 # Test Spec
 
@@ -113,14 +136,14 @@ class BuiltInValidatorRulesTest {
                 """;
         List<ValidationIssue> issues = validateSpec(content);
         assertTrue(issues.stream().anyMatch(i ->
-                i.severity() == ValidationIssue.Severity.ERROR
+                i.severity() == ValidationIssue.Severity.INFO
                         && i.rule().equals("spec-scenario-clauses")
                         && i.message().contains("THEN")),
-                "Missing THEN clause should be ERROR");
+                "Missing THEN clause is an informational (INFO) hint");
     }
 
     @Test
-    void scenarioClauses_missingBoth_isError() {
+    void scenarioClauses_missingBoth_isInfo() {
         String content = """
                 # Test Spec
 
@@ -132,10 +155,10 @@ class BuiltInValidatorRulesTest {
                 """;
         List<ValidationIssue> issues = validateSpec(content);
         assertTrue(issues.stream().anyMatch(i ->
-                i.severity() == ValidationIssue.Severity.ERROR
+                i.severity() == ValidationIssue.Severity.INFO
                         && i.rule().equals("spec-scenario-clauses")
                         && i.message().contains("WHEN and THEN")),
-                "Missing both clauses should be ERROR");
+                "Missing both clauses is an informational (INFO) hint");
     }
 
     @Test
@@ -483,6 +506,10 @@ class BuiltInValidatorRulesTest {
         List<ValidationIssue> issues = validateSpec(content);
         assertTrue(issues.stream().anyMatch(i -> i.rule().equals("spec-rfc-keyword-in-header")),
                 "Keyword in header only should get the targeted hint: " + issues);
+        assertTrue(issues.stream()
+                        .filter(i -> i.rule().equals("spec-rfc-keyword-in-header"))
+                        .allMatch(i -> i.severity() == ValidationIssue.Severity.WARNING),
+                "1.8: the header-only-keyword hint is a WARNING (body present); --strict re-promotes it");
         assertTrue(issues.stream().noneMatch(i -> i.rule().equals("spec-rfc-keywords")),
                 "Targeted hint replaces the generic missing-keyword error: " + issues);
         assertTrue(issues.stream()
@@ -509,7 +536,7 @@ class BuiltInValidatorRulesTest {
     }
 
     @Test
-    void keywordNowhere_staysGenericError() {
+    void keywordNowhere_bodyPresent_isWarning() {
         String content = """
                 # Test Spec
 
@@ -521,59 +548,24 @@ class BuiltInValidatorRulesTest {
                 - **THEN** the session starts
                 """;
         List<ValidationIssue> issues = validateSpec(content);
-        assertTrue(issues.stream().anyMatch(i -> i.rule().equals("spec-rfc-keywords")),
-                "No keyword anywhere keeps the generic error: " + issues);
+        assertTrue(issues.stream().anyMatch(i ->
+                        i.rule().equals("spec-rfc-keywords") && i.severity() == ValidationIssue.Severity.WARNING),
+                "1.8: no keyword anywhere in a body-carrying requirement is a WARNING: " + issues);
         assertTrue(issues.stream().noneMatch(i -> i.rule().equals("spec-rfc-keyword-in-header")),
                 "Targeted hint requires a keyword in the header: " + issues);
     }
 
     // --- Helpers: extract validation logic matching BuiltInValidator ---
 
+    /**
+     * Drives the REAL {@link BuiltInValidator#validateSpecContent} on a raw spec string, so these rule
+     * tests verify production behavior rather than a re-implemented mirror. The prior mirror was a
+     * vacuity smell — it could pass while production was wrong (and it never fence-masked, unlike
+     * production). Fence masking now happens inside the production method.
+     */
     private List<ValidationIssue> validateSpec(String content) {
         List<ValidationIssue> issues = new ArrayList<>();
-        String path = "test-spec.md";
-
-        Matcher reqMatcher = REQUIREMENT_PATTERN.matcher(content);
-        while (reqMatcher.find()) {
-            int reqStart = reqMatcher.start();
-            int reqLine = lineNumberAt(content, reqStart);
-            String reqHeader = reqMatcher.group(1).trim();
-            int nextReq = findNext(REQUIREMENT_PATTERN, content, reqMatcher.end());
-            String reqContent = content.substring(reqMatcher.end(), nextReq);
-
-            if (!RFC_KEYWORD_PATTERN.matcher(reqContent).find()) {
-                if (RFC_KEYWORD_PATTERN.matcher(reqMatcher.group()).find()) {
-                    issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
-                            "Requirement '" + reqHeader + "' has its RFC 2119 keyword only in the header — "
-                                    + "move the keyword onto the requirement body line", "spec-rfc-keyword-in-header"));
-                } else {
-                    issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
-                            "Requirement '" + reqHeader + "' must contain SHALL or MUST", "spec-rfc-keywords"));
-                }
-            }
-
-            if (!SCENARIO_PATTERN.matcher(reqContent).find()) {
-                issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
-                        "Requirement '" + reqHeader + "' must have at least one '#### Scenario:' block", "spec-scenario-required"));
-            }
-
-            Matcher scenMatcher = SCENARIO_PATTERN.matcher(reqContent);
-            while (scenMatcher.find()) {
-                int scenLine = reqLine + lineNumberAt(reqContent, scenMatcher.start()) - 1;
-                String scenHeader = scenMatcher.group().replaceFirst("^#{4}\\s*Scenario:\\s*", "").trim();
-                int nextScen = findNext(SCENARIO_PATTERN, reqContent, scenMatcher.end());
-                String scenContent = reqContent.substring(scenMatcher.end(), nextScen);
-
-                boolean hasWhen = Pattern.compile("\\bWHEN\\b").matcher(scenContent).find();
-                boolean hasThen = Pattern.compile("\\bTHEN\\b").matcher(scenContent).find();
-                if (!hasWhen || !hasThen) {
-                    String missing = !hasWhen && !hasThen ? "WHEN and THEN"
-                            : !hasWhen ? "WHEN" : "THEN";
-                    issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, scenLine,
-                            "Scenario '" + scenHeader + "' is missing " + missing + " clause(s)", "spec-scenario-clauses"));
-                }
-            }
-        }
+        BuiltInValidator.validateSpecContent(content, "test-spec.md", issues);
         return issues;
     }
 

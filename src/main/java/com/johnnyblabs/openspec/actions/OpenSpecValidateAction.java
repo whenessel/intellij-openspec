@@ -100,25 +100,30 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
      * Rules whose WARNING mirrors a warning the real OpenSpec CLI itself emits and fails on under
      * {@code --strict} — the ONLY WARNINGs that may flip the built-in strict fallback verdict.
      *
-     * <p>Currently EMPTY: every built-in non-config WARNING is either a plugin-invented lint the CLI
-     * never emits ({@code spec-title-required}, {@code change-artifact-missing},
-     * {@code change-schema-incompatible}, {@code delta-removed-fields}) or a condition the CLI reports
-     * as an ERROR rather than a warning ({@code delta-spec-sections}). Flipping strict on any of them
-     * would make the plugin more restrictive than the client it wraps. Add a rule here ONLY when it is
-     * source-verified that {@code openspec validate --strict} emits an equivalent WARNING (e.g. a
-     * future port of the CLI's {@code PURPOSE_TOO_BRIEF}). An allow-list is deliberate: a new rule
-     * then defaults to non-flipping (laxer — the safe direction for a never-more-restrictive invariant)
-     * rather than flipping (stricter).
+     * <p>Contains the missing-keyword rules ({@code spec-rfc-keywords}, {@code spec-rfc-keyword-in-header}):
+     * OpenSpec 1.8 demoted the "requirement must contain SHALL/MUST" rule to a WARNING in default mode
+     * for a body-carrying requirement, and reports that requirement {@code valid} in default but
+     * {@code valid:false} under {@code --strict} — so the built-in strict fallback must flip on it too
+     * (source-verified against the real 1.8.0 CLI parity corpus). Every OTHER built-in non-config
+     * WARNING stays out: it is either a plugin-invented lint the CLI never emits
+     * ({@code spec-title-required}, {@code change-artifact-missing}, {@code change-schema-incompatible},
+     * {@code delta-removed-fields}) or a condition the CLI reports as an ERROR rather than a warning
+     * ({@code delta-spec-sections}); flipping strict on any of those would make the plugin more
+     * restrictive than the client it wraps. Add a rule here ONLY when it is source-verified that
+     * {@code openspec validate --strict} emits an equivalent WARNING. An allow-list is deliberate: a
+     * new rule then defaults to non-flipping (laxer — the safe direction for a never-more-restrictive
+     * invariant) rather than flipping (stricter).
      */
-    static final Set<String> CLI_MIRRORING_STRICT_WARNINGS = Set.of();
+    static final Set<String> CLI_MIRRORING_STRICT_WARNINGS =
+            Set.of("spec-rfc-keywords", "spec-rfc-keyword-in-header");
 
     /**
      * Apply the per-run strict verdict flip to a built-in fallback result (used when the CLI is
      * absent or its run failed). Under strict, a WARNING fails the verdict only when its rule is in
      * {@link #CLI_MIRRORING_STRICT_WARNINGS} — a warning the real CLI itself emits and fails on under
-     * {@code --strict}. That set is empty today, so no built-in WARNING flips a strict fallback: the
-     * plugin's own lint WARNINGs (which the CLI never emits) must not make it more restrictive than
-     * the client it wraps. {@code config.yaml} guidance likewise never fails (config rows are
+     * {@code --strict} (currently the missing-keyword rules, per 1.8's demotion). The plugin's own lint
+     * WARNINGs (which the CLI never emits) stay out, so the fallback is never more restrictive than the
+     * client it wraps. {@code config.yaml} guidance likewise never fails (config rows are
      * display-only; those rules were never in the set). Issues are NOT re-severity-ed — a warning
      * stays a WARNING; only the top-level verdict flips. {@code public} so a parity test can drive the
      * real verdict logic without shelling out (mirrors {@link #combineWithCli}).
@@ -129,9 +134,9 @@ public class OpenSpecValidateAction extends OpenSpecBaseAction {
 
     /**
      * Overload taking the flip-rule set explicitly. Production always calls the two-arg form
-     * ({@link #CLI_MIRRORING_STRICT_WARNINGS}, empty today); this seam lets a test exercise the
-     * flip-positive branch — verdict flip, issues preserved, source preserved, no re-severity —
-     * without waiting for that set to gain a real CLI-mirrored member. Package-private for tests.
+     * ({@link #CLI_MIRRORING_STRICT_WARNINGS}); this seam lets a test drive the flip logic against an
+     * arbitrary rule set — verdict flip, issues preserved, source preserved, no re-severity —
+     * independent of the production set's current membership. Package-private for tests.
      */
     static ValidationResult applyStrictFallbackVerdict(ValidationResult result, boolean strict,
                                                        Set<String> flipRules) {

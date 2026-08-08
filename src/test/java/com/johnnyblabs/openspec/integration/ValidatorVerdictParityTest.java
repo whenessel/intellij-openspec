@@ -19,15 +19,18 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Verdict-parity contract: the plugin's built-in validator must agree with the real
- * OpenSpec CLI 1.6.0 on valid/invalid for a corpus exercising the rule classes both
- * implement (keyword family, fence masking, header-only keyword, scenario counting,
- * skipped-header INFO). The CLI side is the captured fixture
- * {@code fixtures/cli/1.6.0/validate-parity-corpus.json}; the corpus itself is committed
- * under {@code fixtures/cli/1.6.0/parity-corpus/} and materialized into the test project,
- * so both validators judge byte-identical content. Parity is semantic (same verdict),
- * not textual (messages/paths deliberately differ). Re-capture recipe: see the fixtures
- * README manifest.
+ * Verdict-parity contract: the plugin's built-in validator must agree with the real OpenSpec CLI on
+ * valid/invalid for a corpus exercising the rule classes both implement (keyword family, fence
+ * masking, header-only keyword, scenario counting, skipped-header INFO). The DEFAULT oracle is the
+ * laxest captured generation, {@code fixtures/cli/1.8.0/validate-parity-corpus.json} — 1.8 demoted the
+ * missing-SHALL rule to a non-failing default warning, and the plugin's fallback matches that
+ * (deliberately laxer than 1.6/1.7). The STRICT oracle is
+ * {@code fixtures/cli/1.8.0/validate-parity-corpus-strict.json}, where the missing-SHALL warning
+ * re-promotes (reproducing the 1.6 default map). The corpus markdown itself is committed once under
+ * {@code fixtures/cli/1.6.0/parity-corpus/} (authored once, reused as capture input for every
+ * generation) and materialized into the test project, so both validators judge byte-identical content.
+ * Parity is semantic (same verdict), not textual (messages/paths deliberately differ). Re-capture
+ * recipe: see the fixtures README manifest.
  */
 public class ValidatorVerdictParityTest extends OpenSpecIntegrationTestBase {
 
@@ -76,7 +79,7 @@ public class ValidatorVerdictParityTest extends OpenSpecIntegrationTestBase {
 
         Map<String, Boolean> cliVerdicts = new LinkedHashMap<>();
         JsonObject fixture = JsonParser.parseString(
-                resource("/fixtures/cli/1.6.0/validate-parity-corpus.json")).getAsJsonObject();
+                resource("/fixtures/cli/1.8.0/validate-parity-corpus.json")).getAsJsonObject();
         for (JsonElement el : fixture.getAsJsonArray("items")) {
             JsonObject item = el.getAsJsonObject();
             cliVerdicts.put(item.get("id").getAsString(), item.get("valid").getAsBoolean());
@@ -109,14 +112,16 @@ public class ValidatorVerdictParityTest extends OpenSpecIntegrationTestBase {
                         && i.filePath().contains("/nameless-change/")
                         && i.message().contains("missing a requirement name")));
 
-        // --- Strict dimension: the built-in strict FALLBACK verdict must never exceed the
-        // CLI's strict verdict either. Drive the REAL applyStrictFallbackVerdict per item (not an
-        // inline re-implementation) so this tracks the production carve-out. Goes RED on the pre-fix
-        // code: info-change/nameless-change carry a change-artifact-missing WARNING the old fallback
-        // flipped to FAILED, while the CLI reports them strict-VALID.
+        // --- Strict dimension: the built-in strict FALLBACK verdict must match the CLI's strict
+        // verdict. Drive the REAL applyStrictFallbackVerdict per item (not an inline re-implementation)
+        // so this tracks the production strict-warning set. Two flip classes are exercised: the
+        // missing-SHALL warnings (should-only/fenced-keyword/header-only-keyword) MUST flip a strict
+        // fallback to FAILED — they are in CLI_MIRRORING_STRICT_WARNINGS, matching 1.8's strict verdict
+        // — while a change-artifact-missing WARNING (info-change/nameless-change) MUST NOT, because the
+        // CLI reports those strict-VALID and the fallback must never be more restrictive.
         Map<String, Boolean> cliStrictVerdicts = new LinkedHashMap<>();
         JsonObject strictFixture = JsonParser.parseString(
-                resource("/fixtures/cli/1.7.0/validate-parity-corpus-strict.json")).getAsJsonObject();
+                resource("/fixtures/cli/1.8.0/validate-parity-corpus-strict.json")).getAsJsonObject();
         for (JsonElement el : strictFixture.getAsJsonArray("items")) {
             JsonObject item = el.getAsJsonObject();
             cliStrictVerdicts.put(item.get("id").getAsString(), item.get("valid").getAsBoolean());

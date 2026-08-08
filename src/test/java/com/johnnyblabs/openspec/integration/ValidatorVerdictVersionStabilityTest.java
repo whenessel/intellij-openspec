@@ -23,37 +23,54 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Durable, version-agnostic verdict-stability contract. {@link ValidatorVerdictParityTest} proves the
- * plugin's built-in validator matches the real CLI's verdicts on the parity corpus for the ANCHOR
- * generation (1.6.0, a heavy platform test). This lightweight, platform-free test proves the CLI's
- * <em>own</em> verdicts over that shared corpus did not drift across every OTHER captured generation:
- * it discovers every committed {@code fixtures/cli/<gen>/validate-parity-corpus.json} and asserts each
- * carries the same {@code id → valid} map as the anchor.
+ * plugin's built-in validator matches the real CLI's verdicts on the parity corpus for the DEFAULT
+ * anchor ({@code 1.8.0}, the laxest captured generation) and the STRICT anchor (the {@code 1.6.0}
+ * default map). This lightweight, platform-free test proves the CLI's <em>own</em> verdicts over that
+ * shared corpus stay consistent across every captured generation: it discovers every committed
+ * {@code fixtures/cli/<gen>/validate-parity-corpus.json} (and its {@code -strict} twin).
  *
- * <p>With both facts — plugin matches the anchor, and the anchor's CLI verdicts equal every captured
- * generation's — plugin/generation parity follows by transitivity, so the heavy platform harness is
- * deliberately NOT cloned per generation. Discovery is the durable part: a future {@code 1.8.0}
- * capture is covered with zero edits here, and any generation that tightens a verdict on the corpus
- * fails this test.
+ * <p><b>Default arm — subset-of-the-laxest-anchor.</b> Generations may legitimately RELAX a default
+ * verdict: 1.8 demoted the missing-SHALL rule to a non-failing warning, so more corpus items validate
+ * in default than under 1.6/1.7. The default invariant is therefore NOT map-equality but a subset
+ * relation — every captured generation's default valid-set is a subset of the laxest anchor's
+ * ({@code 1.8.0}). Because the plugin is proven to match the laxest anchor in
+ * {@link ValidatorVerdictParityTest}, "no generation is valid on an item the plugin rejects" ⇒ the
+ * plugin is never more restrictive than any captured generation, by transitivity — without cloning the
+ * heavy platform harness per generation. A future generation that relaxes FURTHER than the current
+ * anchor makes the anchor no longer the laxest and fails {@link ValidatorVerdictParityTest} first,
+ * prompting the anchor to be advanced (a deliberate human decision). The known 1.6→1.8 relaxation is
+ * pinned ({@link #DEMOTION_FLIPS}) so the subset check can never pass vacuously.
  *
- * <p>Pre-1.6 generations are intentionally absent from the equality set — their CLI validation rules
- * predate this corpus dialect and legitimately verdict it differently (fence-aware scenario counting
- * arrived at 1.4; multi-line requirement-body keyword reading at 1.6), so a frozen "identical map
- * across 1.3–1.7" is impossible, not merely costly. Their {@code validate --json} shape is covered
- * separately by their own era-appropriate fixtures (e.g. {@code fixtures/cli/1.3.0/validate.json}).
+ * <p><b>Strict arm — map-equality (unchanged).</b> Under {@code --strict} every captured generation's
+ * map equals the {@code 1.6.0} default map — 1.8 re-promotes the demoted warning under strict,
+ * reproducing the 1.6 anchor — a stable cross-generation invariant.
  *
- * <p>The same discovery covers the strict twin {@code validate-parity-corpus-strict.json}: each strict
- * map must also equal the non-strict anchor (on this corpus no item is valid-with-only-a-CLI-warning,
- * so strict == default), extending the durable invariant to {@code --strict}.
+ * <p>Discovery is the durable part: a future {@code 1.9.0} capture is picked up with zero edits, and a
+ * relaxation past 1.8 surfaces via the parity test. Pre-1.6 generations are intentionally absent from
+ * these sets — their CLI validation rules predate this corpus dialect and legitimately verdict it
+ * differently (fence-aware scenario counting arrived at 1.4; multi-line requirement-body keyword
+ * reading at 1.6) — their shape is covered by their own era-appropriate fixtures (e.g.
+ * {@code fixtures/cli/1.3.0/validate.json}).
  */
 class ValidatorVerdictVersionStabilityTest {
 
     private static final String CLI_DIR = "/fixtures/cli";
-    private static final String ANCHOR = "1.6.0";
+    /** Strict-arm anchor: {@code --strict} reproduces this generation's default map on every generation. */
+    private static final String STRICT_ANCHOR = "1.6.0";
+    /** Default-arm anchor: the laxest captured generation, which the plugin's fallback matches exactly. */
+    private static final String DEFAULT_ANCHOR = "1.8.0";
     private static final String NON_STRICT = "validate-parity-corpus.json";
     private static final String STRICT = "validate-parity-corpus-strict.json";
     private static final int CORPUS_SIZE = 13;
-    /** Vacuity floor — these two corpora must always be present, or discovery has silently broken. */
-    private static final Set<String> FLOOR = Set.of("1.6.0", "1.7.0");
+    /** Vacuity floor — these corpora must always be present, or discovery has silently broken. */
+    private static final Set<String> FLOOR = Set.of("1.6.0", "1.7.0", "1.8.0");
+    /**
+     * The exact, known relaxation between the {@link #STRICT_ANCHOR} default map and the
+     * {@link #DEFAULT_ANCHOR} default map: 1.8 demoted the missing-SHALL rule to a default WARNING, so
+     * these three body-carrying-but-keywordless corpus items flip false→true. Pinned so the subset
+     * check below can never pass vacuously — a silent collapse of the divergence fails loudly.
+     */
+    private static final Set<String> DEMOTION_FLIPS = Set.of("fenced-keyword", "header-only-keyword", "should-only");
 
     /** id → valid map parsed from a captured {@code validate --all [--strict] --json} fixture. */
     private static Map<String, Boolean> verdicts(String resourcePath) {
@@ -70,6 +87,15 @@ class ValidatorVerdictVersionStabilityTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+    }
+
+    /** The ids reported {@code valid:true} in a verdict map (sorted for stable messages/set algebra). */
+    private static Set<String> validIds(Map<String, Boolean> map) {
+        Set<String> valid = new TreeSet<>();
+        map.forEach((id, ok) -> {
+            if (ok) valid.add(id);
+        });
+        return valid;
     }
 
     /**
@@ -96,29 +122,47 @@ class ValidatorVerdictVersionStabilityTest {
     }
 
     @Test
-    void cliVerdictsAreStableAcrossAllCapturedGenerations() throws Exception {
+    void cliDefaultVerdictsAreNeverStricterThanTheLaxestGeneration() throws Exception {
         Map<String, String> corpora = discover(NON_STRICT);
 
         // Vacuity guards — the invariant must never pass on nothing.
-        assertTrue(corpora.containsKey(ANCHOR), "anchor generation " + ANCHOR + " must have a corpus");
+        assertTrue(corpora.containsKey(DEFAULT_ANCHOR),
+                "laxest default anchor " + DEFAULT_ANCHOR + " must have a corpus");
         assertTrue(corpora.keySet().containsAll(FLOOR),
                 "expected at least the " + FLOOR + " corpora — found " + corpora.keySet());
         assertTrue(corpora.size() >= 2, "need >= 2 captured generations to compare; found " + corpora.keySet());
 
-        Map<String, Boolean> anchor = verdicts(corpora.get(ANCHOR));
-        assertEquals(CORPUS_SIZE, anchor.size(), "the anchor parity corpus must have " + CORPUS_SIZE + " items");
+        Map<String, Boolean> laxest = verdicts(corpora.get(DEFAULT_ANCHOR));
+        assertEquals(CORPUS_SIZE, laxest.size(), "the anchor parity corpus must have " + CORPUS_SIZE + " items");
+        Set<String> laxestValid = validIds(laxest);
 
         for (Map.Entry<String, String> e : corpora.entrySet()) {
-            if (e.getKey().equals(ANCHOR)) continue;
             Map<String, Boolean> gen = verdicts(e.getValue());
-            assertEquals(anchor.keySet(), gen.keySet(),
+            assertEquals(laxest.keySet(), gen.keySet(),
                     "generation " + e.getKey() + " parity corpus has a different item-id set than the "
-                            + ANCHOR + " anchor — a corpus drifted; re-capture, don't edit the fixture");
-            assertEquals(anchor, gen,
-                    "CLI verdicts drifted " + ANCHOR + " -> " + e.getKey() + " over the identical corpus — a "
-                            + "tightened verdict would leave the plugin more restrictive than one generation "
-                            + "while matching another; investigate the CLI change before shipping");
+                            + DEFAULT_ANCHOR + " anchor — a corpus drifted; re-capture, don't edit the fixture");
+            // Subset-of-laxest: no generation may be valid on an item the plugin (== laxest anchor)
+            // rejects, or the plugin would be MORE restrictive than that generation.
+            Set<String> genValid = validIds(gen);
+            Set<String> stricterThanPlugin = new TreeSet<>(genValid);
+            stricterThanPlugin.removeAll(laxestValid);
+            assertTrue(stricterThanPlugin.isEmpty(),
+                    "generation " + e.getKey() + " reports items valid that the laxest anchor " + DEFAULT_ANCHOR
+                            + " rejects: " + stricterThanPlugin + " — the plugin (matching the laxest anchor) would "
+                            + "be MORE restrictive than " + e.getKey() + "; investigate the CLI change and advance "
+                            + "the default anchor before shipping");
         }
+
+        // Anti-vacuity pin: lock the known 1.6→1.8 relaxation so the subset check can't pass on a
+        // silently collapsed divergence. The laxest (1.8) default valid-set must equal the strict-anchor
+        // (1.6) default valid-set PLUS exactly the missing-SHALL demotion flips.
+        Set<String> anchor16Valid = validIds(verdicts(CLI_DIR + "/" + STRICT_ANCHOR + "/" + NON_STRICT));
+        Set<String> expectedLaxestValid = new TreeSet<>(anchor16Valid);
+        expectedLaxestValid.addAll(DEMOTION_FLIPS);
+        assertEquals(expectedLaxestValid, laxestValid,
+                "the " + DEFAULT_ANCHOR + " default valid-set must equal the " + STRICT_ANCHOR + " default valid-set "
+                        + "plus exactly the missing-SHALL demotion flips " + DEMOTION_FLIPS + " — if this diverges, "
+                        + "the demotion's scope changed; re-verify against the real CLI, don't edit the fixture");
     }
 
     @Test
@@ -126,26 +170,25 @@ class ValidatorVerdictVersionStabilityTest {
         Map<String, String> strictCorpora = discover(STRICT);
         assertFalse(strictCorpora.isEmpty(), "expected at least one captured strict corpus (" + STRICT + ")");
 
-        // Symmetric coverage guard: every non-anchor generation with a non-strict corpus must also
-        // carry a strict twin (the capture recipe produces both), so the strict dimension can't
-        // silently lag when a new generation is added. The anchor (1.6.0) has no strict fixture — its
-        // CLI is gone — and serves as the non-strict reference below, so it is excluded.
+        // Symmetric coverage guard: every generation with a non-strict corpus (except the strict anchor,
+        // whose CLI is gone and which has no strict fixture) must also carry a strict twin — the capture
+        // recipe produces both, so the strict dimension can't silently lag when a generation is added.
         Set<String> nonStrictNonAnchor = new TreeSet<>(discover(NON_STRICT).keySet());
-        nonStrictNonAnchor.remove(ANCHOR);
+        nonStrictNonAnchor.remove(STRICT_ANCHOR);
         assertEquals(nonStrictNonAnchor, strictCorpora.keySet(),
-                "every non-anchor generation with a non-strict parity corpus must also have a strict twin ("
-                        + STRICT + ") — capture both per the fixtures README");
+                "every generation with a non-strict parity corpus (other than the strict anchor " + STRICT_ANCHOR
+                        + ") must also have a strict twin (" + STRICT + ") — capture both per the fixtures README");
 
-        // On this corpus no item is valid-with-only-a-CLI-warning, so a generation's strict map must
-        // equal the non-strict anchor's default map — extending the durable invariant to --strict.
-        Map<String, Boolean> anchor = verdicts(CLI_DIR + "/" + ANCHOR + "/" + NON_STRICT);
+        // Under --strict every generation reproduces the 1.6.0 default map: a demoted warning re-promotes
+        // and nothing else on this corpus is valid-with-only-a-CLI-warning. Map-equality holds.
+        Map<String, Boolean> strictAnchor = verdicts(CLI_DIR + "/" + STRICT_ANCHOR + "/" + NON_STRICT);
         for (Map.Entry<String, String> e : strictCorpora.entrySet()) {
             Map<String, Boolean> strict = verdicts(e.getValue());
-            assertEquals(anchor.keySet(), strict.keySet(),
-                    "strict corpus " + e.getKey() + " has a different item-id set than the " + ANCHOR + " anchor");
-            assertEquals(anchor, strict,
-                    "strict CLI verdicts for " + e.getKey() + " differ from the " + ANCHOR + " default verdicts — "
-                            + "an item became valid-with-only-a-CLI-warning (strict-flips) or a verdict drifted; "
+            assertEquals(strictAnchor.keySet(), strict.keySet(),
+                    "strict corpus " + e.getKey() + " has a different item-id set than the " + STRICT_ANCHOR + " anchor");
+            assertEquals(strictAnchor, strict,
+                    "strict CLI verdicts for " + e.getKey() + " differ from the " + STRICT_ANCHOR + " default verdicts — "
+                            + "an item became valid-with-only-a-CLI-warning under strict, or a verdict drifted; "
                             + "investigate before shipping");
         }
     }
