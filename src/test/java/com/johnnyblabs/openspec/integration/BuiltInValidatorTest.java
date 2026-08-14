@@ -124,6 +124,60 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                         i.filePath().contains("nobody-kw")));
     }
 
+    public void testDuplicateRequirementNameFailsVerdictInDefaultAndStrict() {
+        // 1.8 (upstream #1484): a main spec that declares the same requirement name twice is an ERROR.
+        // Both requirements are otherwise clean (SHALL body + scenario) so the duplicate is the SOLE
+        // failure cause — the strict assertion then means "a hard ERROR fails in both modes", not that
+        // strict promoted anything (applyStrictFallbackVerdict is a no-op on an existing ERROR).
+        myFixture.addFileToProject("openspec/specs/dup-req/spec.md",
+                "# Dup Spec\n\n## Requirements\n\n"
+                        + "### Requirement: Works\nThe system SHALL work first.\n\n"
+                        + "#### Scenario: A\n- **WHEN** x\n- **THEN** y\n\n"
+                        + "### Requirement: Works\nThe system SHALL work second.\n\n"
+                        + "#### Scenario: B\n- **WHEN** a\n- **THEN** b\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateSpecs();
+        assertTrue("duplicate requirement name must ERROR",
+                result.issues().stream().anyMatch(i ->
+                        "spec-duplicate-requirement".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.ERROR &&
+                        i.filePath().contains("dup-req")));
+        assertEquals("the duplicate ERROR is the only ERROR on the file", 1L,
+                result.issues().stream().filter(i ->
+                        i.filePath().contains("dup-req")
+                                && i.severity() == ValidationIssue.Severity.ERROR).count());
+        assertFalse("the duplicate ERROR fails the default verdict", result.passed());
+        assertFalse("a hard ERROR still fails under strict",
+                com.johnnyblabs.openspec.actions.OpenSpecValidateAction
+                        .applyStrictFallbackVerdict(result, true).passed());
+    }
+
+    public void testDuplicateRequirementCoexistsWithMissingKeywordOnBothOccurrences() {
+        // The duplicate rule is independent of the missing-keyword rule: a duplicated requirement that
+        // also lacks SHALL/MUST emits ONE duplicate ERROR plus a missing-keyword issue for EACH
+        // occurrence. Asserting the keyword-warning COUNT is 2 (not merely "any") is what catches a
+        // loop-skip that would swallow the second occurrence's checks.
+        myFixture.addFileToProject("openspec/specs/dup-nokw/spec.md",
+                "# Dup NoKw Spec\n\n## Requirements\n\n"
+                        + "### Requirement: Twin\nThe system will do the twin thing.\n\n"
+                        + "#### Scenario: A\n- **WHEN** x\n- **THEN** y\n\n"
+                        + "### Requirement: Twin\nThe system will do the twin thing again.\n\n"
+                        + "#### Scenario: B\n- **WHEN** a\n- **THEN** b\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateSpecs();
+        assertEquals("exactly one duplicate ERROR (on the second occurrence)", 1L,
+                result.issues().stream().filter(i ->
+                        "spec-duplicate-requirement".equals(i.rule())
+                                && i.filePath().contains("dup-nokw")).count());
+        assertEquals("the missing-keyword WARNING fires on BOTH occurrences — dedup must not skip the second",
+                2L, result.issues().stream().filter(i ->
+                        "spec-rfc-keywords".equals(i.rule())
+                                && i.severity() == ValidationIssue.Severity.WARNING
+                                && i.filePath().contains("dup-nokw")).count());
+    }
+
     public void testEmptyScenarioClausesAreInfoAndPass() {
         // The CLI performs no WHEN/THEN clause validation (a scenario need only be non-empty), so a
         // missing-clause scenario is an INFO hint that does not fail the verdict.

@@ -18,7 +18,9 @@ import com.johnnyblabs.openspec.version.VersionSupport;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -112,12 +114,46 @@ public final class BuiltInValidator {
                     "Spec file must have at least one '### Requirement:' section", "spec-requirement-required"));
         }
 
+        // CLI 1.8 parity (upstream #1484): a main spec that declares the same `### Requirement:` name
+        // more than once is an ERROR — a collision lets delta reconciliation silently discard one block
+        // while updating another. The CLI dedups only headers INSIDE the `## Requirements` section
+        // (headers elsewhere are routed to a different diagnostic and never deduped), matches names
+        // exactly (case- and interior-whitespace-sensitive, exterior trimmed), and flags each later
+        // occurrence of a repeated name against the first (N occurrences → N−1 errors). Detection is
+        // scoped to that section here so the fallback is not more restrictive than the CLI; the match
+        // runs on the fence-masked content, so a `### Requirement:` inside a code fence does not count.
+        int reqSectionStart = -1;
+        int reqSectionEnd = content.length();
+        Matcher reqSection = Pattern.compile("(?im)^##\\s+Requirements\\s*$").matcher(content);
+        if (reqSection.find()) {
+            reqSectionStart = reqSection.end();
+            Matcher nextTopHeader = Pattern.compile("(?m)^##(?!#)").matcher(content);
+            if (nextTopHeader.find(reqSectionStart)) {
+                reqSectionEnd = nextTopHeader.start();
+            }
+        }
+        Map<String, Integer> firstRequirementLine = new HashMap<>();
+
         // Check each requirement section for RFC 2119 keywords, scenarios, and clause structure
         Matcher reqMatcher = REQUIREMENT_PATTERN.matcher(content);
         while (reqMatcher.find()) {
             int reqStart = reqMatcher.start();
             int reqLine = lineNumberAt(content, reqStart);
             String reqHeader = reqMatcher.group(1).trim();
+
+            // Duplicate-requirement-name detection (main-spec path only), scoped to `## Requirements`.
+            if (reqSectionStart >= 0 && reqStart >= reqSectionStart && reqStart < reqSectionEnd) {
+                Integer firstLine = firstRequirementLine.get(reqHeader);
+                if (firstLine != null) {
+                    issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
+                            "Requirement header \"### Requirement: " + reqHeader + "\" duplicates the "
+                                    + "requirement declared on line " + firstLine + ". Requirement names must be "
+                                    + "unique so spec updates cannot discard one block while updating another.",
+                            "spec-duplicate-requirement"));
+                } else {
+                    firstRequirementLine.put(reqHeader, reqLine);
+                }
+            }
             // Find the content between this requirement and the next requirement or end
             int nextReq = findNextRequirement(content, reqMatcher.end());
             String reqContent = content.substring(reqMatcher.end(), nextReq);

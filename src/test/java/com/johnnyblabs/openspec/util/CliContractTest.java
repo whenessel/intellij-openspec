@@ -913,10 +913,11 @@ class CliContractTest {
     /**
      * OpenSpec 1.8 demoted the missing-SHALL/MUST rule: a body-carrying requirement without the keyword
      * is now a WARNING with a reworded "should contain…" message, valid in default and valid:false only
-     * under {@code --strict}; a body-less requirement still ERRORs with "must contain…". These lock that
-     * shape against the real 1.8.0 captures. (Warnings on valid items are dropped by
-     * {@code parseJsonOutput}, so the demotion is asserted from the raw JSON; the body-less ERROR rides a
-     * valid:false item and is asserted through {@code parseJsonOutput}.)
+     * under {@code --strict}; a body-less requirement still ERRORs with "must contain…". 1.8 also added a
+     * main-spec duplicate-requirement ERROR (upstream #1484). These lock those shapes against the real
+     * 1.8.0 captures. (Warnings on valid items are dropped by {@code parseJsonOutput}, so the demotion is
+     * asserted from the raw JSON; the body-less and duplicate ERRORs ride valid:false items and are
+     * asserted through {@code parseJsonOutput} as well as the raw shape.)
      */
     @Nested
     class ValidateContractV18 {
@@ -962,6 +963,58 @@ class CliContractTest {
                             i.severity() == ValidationIssue.Severity.ERROR
                                     && i.message().contains("must contain SHALL or MUST")),
                     "1.8 still ERRORs on a requirement with no body prose");
+        }
+
+        @Test
+        void duplicateRequirementNameIsAnErrorWithCliShape() {
+            // 1.8 (upstream #1484): a main spec that declares the same `### Requirement:` name twice is
+            // an ERROR. Lock the exact captured shape — path is the literal string "file" (not the spec
+            // path), the issue is anchored on the SECOND occurrence's line (15), and the message names
+            // the FIRST occurrence's line (8). The CLI carries no machine rule-id for it (freeform
+            // message only), so the plugin's parser and fallback key off level + path + message content.
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-spec-duplicate-requirement.json", "dup-req");
+            assertFalse(item.get("valid").getAsBoolean(),
+                    "1.8: a spec with a duplicate requirement name is invalid");
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("ERROR", issue.get("level").getAsString());
+            assertEquals("file", issue.get("path").getAsString(),
+                    "the duplicate issue path is the literal string \"file\", not the spec path");
+            assertEquals(15, issue.get("line").getAsInt(),
+                    "the issue is anchored on the second (duplicate) occurrence's line");
+            assertTrue(issue.get("message").getAsString().contains("duplicates the requirement declared on line 8"),
+                    "the message names the first occurrence's line");
+            assertFalse(issue.has("id") || issue.has("code") || issue.has("ruleId"),
+                    "the CLI carries no machine rule-id for the duplicate-requirement rule");
+
+            // Through the parser, the verdict fails on the ERROR.
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture18("validate-single-spec-duplicate-requirement.json"));
+            assertFalse(result.passed(), "the duplicate-requirement ERROR fails the item's verdict");
+            assertTrue(result.issues().stream().anyMatch(i ->
+                            i.severity() == ValidationIssue.Severity.ERROR
+                                    && i.message().contains("duplicates the requirement declared on line")),
+                    "the parser surfaces the duplicate-requirement ERROR");
+        }
+
+        @Test
+        void requirementOutsideTheRequirementsSectionIsNotFlaggedAsADuplicate() {
+            // Section-scoping guard, captured from the REAL CLI (not inferred from source): a name that
+            // appears once inside `## Requirements` and once outside it is NOT a duplicate — the CLI
+            // routes the out-of-section occurrence to a separate `requirement-outside-requirements`
+            // diagnostic and never dedups it. This locks the premise the fallback's `## Requirements`
+            // section-scoping relies on, guarding the one direction the fallback could become MORE
+            // restrictive than the CLI (emitting a duplicate the CLI does not).
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-spec-requirement-outside-section.json", "boundary");
+            assertFalse(item.get("valid").getAsBoolean());
+            for (com.google.gson.JsonElement el : item.getAsJsonArray("issues")) {
+                assertFalse(el.getAsJsonObject().get("message").getAsString().contains("duplicates the requirement"),
+                        "an out-of-section occurrence must NOT be reported as a duplicate by the CLI");
+            }
+            assertTrue(item.getAsJsonArray("issues").get(0).getAsJsonObject().get("message").getAsString()
+                            .contains("appears outside the main ## Requirements section"),
+                    "the CLI's signal here is the outside-section rule, a different (non-duplicate) diagnostic");
         }
     }
 }

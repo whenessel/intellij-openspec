@@ -8,6 +8,7 @@
 
 - **OpenSpec CLI 1.8.x is now a supported line.** 1.8 support is additive over 1.5–1.7 — the store/workset coordination model and all coordination JSON shapes are unchanged, so nothing is re-gated. The plugin tolerates 1.8's new optional surfaces without complaint: the `.openspec.yaml` `retire_capabilities` key and the `config.yaml` `githubCopilot` block are ignored, and `status --json`'s new `isPlanningComplete` field is read alongside the retained `isComplete`. Verified against captured real 1.8.0 CLI output. The minimum supported CLI remains 1.3.0.
 - **Built-in validation flags a requirement that has no body as an error on the missing `SHALL`/`MUST` keyword**, matching OpenSpec 1.8 (which still errors on a body-less requirement).
+- **Built-in validation flags a spec that declares the same requirement name twice as an error**, matching OpenSpec 1.8's new main-spec duplicate-requirement check. When the OpenSpec CLI isn't installed, the built-in fallback previously stayed silent where the CLI reports an error; it now reports the duplicate (scoped to a main spec's requirements section, so change deltas that legitimately reuse a name across sections are unaffected).
 
 ### Changed
 
