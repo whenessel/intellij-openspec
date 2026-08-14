@@ -85,9 +85,18 @@ public final class BuiltInValidator {
     private void validateSpecFile(VirtualFile file, List<ValidationIssue> issues) {
         String raw = readFile(file);
         if (raw == null) return;
+        validateSpecContent(raw, file.getPath(), issues);
+    }
+
+    /**
+     * Content-level main-spec validation, extracted so {@code BuiltInValidatorRulesTest} can drive the
+     * REAL rules on a raw string instead of a re-implemented mirror (which would test its own copy, not
+     * production). Fence-masks internally; {@code path} is used only for issue locations. Static +
+     * package-visible because the logic is stateless.
+     */
+    static void validateSpecContent(String rawContent, String path, List<ValidationIssue> issues) {
         // All structural matching runs on the fence-masked form (offsets preserved).
-        String content = maskFences(raw);
-        String path = file.getPath();
+        String content = maskFences(rawContent);
 
         // Should have a title — WARNING, not ERROR. The CLI requires no `# Title` H1 (it derives
         // the spec name from the directory; its structural gate is `## Purpose`/`## Requirements`),
@@ -114,15 +123,30 @@ public final class BuiltInValidator {
             String reqContent = content.substring(reqMatcher.end(), nextReq);
 
             if (!RFC_KEYWORD_PATTERN.matcher(reqContent).find()) {
-                // CLI 1.4+ parity: a keyword that appears only in the header gets the CLI's
-                // targeted remediation instead of the generic missing-keyword error.
-                if (RFC_KEYWORD_PATTERN.matcher(reqMatcher.group()).find()) {
+                // CLI 1.8 parity: the missing-keyword rule is severity-conditional on the requirement
+                // having a body. 1.8 demoted "must contain SHALL/MUST" to a non-failing WARNING in
+                // default mode for a body-carrying requirement (reporting it valid in default and
+                // valid:false only under --strict, re-promoted via CLI_MIRRORING_STRICT_WARNINGS), but
+                // a requirement with NO body prose at all still ERRORs ("must contain…"). "Body" is the
+                // prose before the first `#### Scenario:` header (content is already fence-masked);
+                // scenarios are not body prose.
+                Matcher firstScen = SCENARIO_PATTERN.matcher(reqContent);
+                String reqBody = firstScen.find() ? reqContent.substring(0, firstScen.start()) : reqContent;
+                if (reqBody.trim().isEmpty()) {
+                    // No body prose — 1.8 still errors on a body-less requirement.
                     issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
+                            "Requirement '" + reqHeader + "' must contain SHALL or MUST", "spec-rfc-keywords"));
+                } else if (RFC_KEYWORD_PATTERN.matcher(reqMatcher.group()).find()) {
+                    // Keyword present only in the header: targeted remediation, demoted to a WARNING
+                    // (body present) to match 1.8's default verdict; --strict re-promotes it.
+                    issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, reqLine,
                             "Requirement '" + reqHeader + "' has its RFC 2119 keyword only in the header — "
                                     + "move the keyword onto the requirement body line", "spec-rfc-keyword-in-header"));
                 } else {
-                    issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, path, reqLine,
-                            "Requirement '" + reqHeader + "' must contain SHALL or MUST", "spec-rfc-keywords"));
+                    // Body present but no SHALL/MUST — non-failing WARNING in default, matching 1.8.
+                    issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, path, reqLine,
+                            "Requirement '" + reqHeader + "' should contain SHALL or MUST "
+                                    + "(RFC 2119 best practice for English specs)", "spec-rfc-keywords"));
                 }
             }
 
@@ -448,7 +472,7 @@ public final class BuiltInValidator {
         return out.toString();
     }
 
-    private int lineNumberAt(String content, int offset) {
+    private static int lineNumberAt(String content, int offset) {
         int line = 1;
         for (int i = 0; i < offset && i < content.length(); i++) {
             if (content.charAt(i) == '\n') line++;
@@ -465,7 +489,7 @@ public final class BuiltInValidator {
         return content.length();
     }
 
-    private int findNextRequirement(String content, int from) {
+    private static int findNextRequirement(String content, int from) {
         Matcher m = REQUIREMENT_PATTERN.matcher(content);
         if (m.find(from)) {
             return m.start();
@@ -473,7 +497,7 @@ public final class BuiltInValidator {
         return content.length();
     }
 
-    private int findNextScenarioOrEnd(String content, int from) {
+    private static int findNextScenarioOrEnd(String content, int from) {
         Matcher m = SCENARIO_PATTERN.matcher(content);
         if (m.find(from)) {
             return m.start();

@@ -111,13 +111,18 @@ class OpenSpecValidateStrictTest {
     }
 
     @Test
-    void cliMirroringStrictWarningSet_isEmptyToday() {
-        // Guards the allow-list's intent: no built-in WARNING currently mirrors a CLI strict-warning,
-        // so the set is empty. A future addition must be source-verified against the real CLI first —
-        // this assertion is the tripwire that forces that justification.
-        assertTrue(OpenSpecValidateAction.CLI_MIRRORING_STRICT_WARNINGS.isEmpty(),
-                "the CLI-mirroring strict-warning set must stay empty until a real CLI-mirrored "
-                        + "WARNING is source-verified and ported");
+    void cliMirroringStrictWarningSet_containsMissingKeywordRules() {
+        // Guards the allow-list's intent: only WARNINGs that mirror a CLI strict-warning may flip a
+        // strict fallback. 1.8 demoted the missing-SHALL/MUST rule to a warning the CLI itself fails on
+        // under --strict (a body-carrying requirement is valid in default, valid:false under strict), so
+        // it is the sole member. A future addition must still be source-verified against the real CLI —
+        // this exact-set assertion is the tripwire that forces that justification.
+        Set<String> set = OpenSpecValidateAction.CLI_MIRRORING_STRICT_WARNINGS;
+        assertEquals(Set.of("spec-rfc-keywords", "spec-rfc-keyword-in-header"), set,
+                "the strict-warning set is exactly the missing-keyword rules 1.8 fails on under --strict");
+        // Plugin-invented lints the CLI never emits must stay OUT (never more restrictive than the CLI).
+        assertFalse(set.contains("spec-title-required"), "plugin-invented lints must not flip strict");
+        assertFalse(set.contains("change-artifact-missing"), "plugin-invented lints must not flip strict");
     }
 
     @Test

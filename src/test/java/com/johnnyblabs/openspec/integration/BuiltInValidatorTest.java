@@ -87,17 +87,41 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                         i.filePath().contains("bad-req")));
     }
 
-    public void testMissingKeywordTriggersError() {
+    public void testMissingKeywordBodyPresentIsWarningNotError() {
         myFixture.addFileToProject("openspec/specs/bad-kw/spec.md",
                 "# Keywords Spec\n\n### Requirement: No Keywords\n\nThis has no RFC 2119 keywords at all.\n\n#### Scenario: Test\n- **WHEN** triggered\n- **THEN** nothing\n");
         refreshVfs();
 
         ValidationResult result = validator.validateSpecs();
-        assertTrue("Should have spec-rfc-keywords ERROR issue",
+        // 1.8: a body-carrying requirement without SHALL/MUST is a non-failing WARNING in default mode.
+        assertTrue("body-carrying missing-keyword must be a WARNING",
+                result.issues().stream().anyMatch(i ->
+                        "spec-rfc-keywords".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.WARNING &&
+                        i.filePath().contains("bad-kw")));
+        assertFalse("must not ERROR when the requirement has a body",
                 result.issues().stream().anyMatch(i ->
                         "spec-rfc-keywords".equals(i.rule()) &&
                         i.severity() == ValidationIssue.Severity.ERROR &&
                         i.filePath().contains("bad-kw")));
+        // Default verdict passes on a warning-only spec; --strict re-promotes the missing-keyword warning.
+        assertTrue("default verdict passes on a warning-only spec", result.passed());
+        assertFalse("strict re-promotes the missing-keyword warning to a failing verdict",
+                com.johnnyblabs.openspec.actions.OpenSpecValidateAction
+                        .applyStrictFallbackVerdict(result, true).passed());
+    }
+
+    public void testMissingKeywordNoBodyTriggersError() {
+        myFixture.addFileToProject("openspec/specs/nobody-kw/spec.md",
+                "# No Body Spec\n\n### Requirement: Empty\n\n#### Scenario: Test\n- **WHEN** triggered\n- **THEN** nothing\n");
+        refreshVfs();
+
+        // 1.8: a requirement with no body prose at all still ERRORs on the missing keyword.
+        assertTrue("body-less requirement must ERROR on the missing keyword",
+                validator.validateSpecs().issues().stream().anyMatch(i ->
+                        "spec-rfc-keywords".equals(i.rule()) &&
+                        i.severity() == ValidationIssue.Severity.ERROR &&
+                        i.filePath().contains("nobody-kw")));
     }
 
     public void testEmptyScenarioClausesAreInfoAndPass() {
@@ -440,25 +464,29 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
     // CLI 1.6 parity semantics (fence masking, SHALL/MUST-only, INFO tier)
     // ---------------------------------------------------------------
 
-    public void testShouldOnlyRequirementTriggersError() {
-        // SHOULD/MAY never satisfied `openspec validate` on any generation.
+    public void testShouldOnlyRequirementIsWarning() {
+        // SHOULD/MAY never satisfy the keyword rule; 1.8 makes a body-carrying miss a WARNING, not ERROR.
         myFixture.addFileToProject("openspec/specs/should-kw/spec.md",
                 "# Should Spec\n\n### Requirement: Soft wording\n\nThe system SHOULD work and MAY retry.\n\n#### Scenario: T\n- **WHEN** x\n- **THEN** y\n");
         refreshVfs();
 
-        assertTrue("SHOULD-only requirement must be flagged (CLI accepts only SHALL/MUST)",
+        assertTrue("SHOULD-only body-carrying requirement is a missing-keyword WARNING",
                 validator.validateSpecs().issues().stream().anyMatch(i ->
-                        "spec-rfc-keywords".equals(i.rule()) && i.filePath().contains("should-kw")));
+                        "spec-rfc-keywords".equals(i.rule())
+                                && i.severity() == ValidationIssue.Severity.WARNING
+                                && i.filePath().contains("should-kw")));
     }
 
-    public void testKeywordOnlyInsideFenceTriggersError() {
+    public void testKeywordOnlyInsideFenceIsWarning() {
         myFixture.addFileToProject("openspec/specs/fenced-kw/spec.md",
                 "# Fenced Spec\n\n### Requirement: Fenced keyword\n\nBody without the magic word.\n\n```\nThe system SHALL work.\n```\n\n#### Scenario: T\n- **WHEN** x\n- **THEN** y\n");
         refreshVfs();
 
-        assertTrue("keyword only inside a code fence must not satisfy the check (1.6 fence masking)",
+        assertTrue("keyword only inside a code fence does not satisfy the check (1.6 masking); 1.8 → WARNING",
                 validator.validateSpecs().issues().stream().anyMatch(i ->
-                        "spec-rfc-keywords".equals(i.rule()) && i.filePath().contains("fenced-kw")));
+                        "spec-rfc-keywords".equals(i.rule())
+                                && i.severity() == ValidationIssue.Severity.WARNING
+                                && i.filePath().contains("fenced-kw")));
     }
 
     public void testScenarioOnlyInsideFenceTriggersError() {

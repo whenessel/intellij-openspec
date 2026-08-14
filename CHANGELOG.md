@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+### Added
+
+- **OpenSpec CLI 1.8.x is now a supported line.** 1.8 support is additive over 1.5–1.7 — the store/workset coordination model and all coordination JSON shapes are unchanged, so nothing is re-gated. The plugin tolerates 1.8's new optional surfaces without complaint: the `.openspec.yaml` `retire_capabilities` key and the `config.yaml` `githubCopilot` block are ignored, and `status --json`'s new `isPlanningComplete` field is read alongside the retained `isComplete`. Verified against captured real 1.8.0 CLI output. The minimum supported CLI remains 1.3.0.
+- **Built-in validation flags a requirement that has no body as an error on the missing `SHALL`/`MUST` keyword**, matching OpenSpec 1.8 (which still errors on a body-less requirement).
+
+### Changed
+
+- **When the OpenSpec CLI isn't installed, built-in validation now treats a requirement that has a body but lacks `SHALL`/`MUST` as a warning rather than an error in default mode** — matching OpenSpec 1.8's own default behavior. Strict validation (Validate (Strict)) still counts it as a failure. This keeps the built-in fallback from being stricter than the CLI it stands in for; when the CLI is installed, its verdict is authoritative as before.
+
 ## v0.7.0
 
 ### Added

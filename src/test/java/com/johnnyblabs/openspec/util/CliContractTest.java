@@ -48,6 +48,10 @@ class CliContractTest {
         return loadFixture("1.7.0/" + name);
     }
 
+    private static String fixture18(String name) {
+        return loadFixture("1.8.0/" + name);
+    }
+
     /** Look an artifact up by id — 1.7 reorders {@code artifacts[]} to schema order, so index-based
      * status assertions would be fragile; keying by id makes the reorder inert. */
     private static ArtifactInfo byId(ChangeArtifactDag dag, String id) {
@@ -903,6 +907,61 @@ class CliContractTest {
             assertNotNull(result);
             assertTrue(result.passed());
             assertTrue(result.issues().isEmpty());
+        }
+    }
+
+    /**
+     * OpenSpec 1.8 demoted the missing-SHALL/MUST rule: a body-carrying requirement without the keyword
+     * is now a WARNING with a reworded "should contain…" message, valid in default and valid:false only
+     * under {@code --strict}; a body-less requirement still ERRORs with "must contain…". These lock that
+     * shape against the real 1.8.0 captures. (Warnings on valid items are dropped by
+     * {@code parseJsonOutput}, so the demotion is asserted from the raw JSON; the body-less ERROR rides a
+     * valid:false item and is asserted through {@code parseJsonOutput}.)
+     */
+    @Nested
+    class ValidateContractV18 {
+
+        private com.google.gson.JsonObject itemById(String fixtureName, String id) {
+            com.google.gson.JsonObject root = com.google.gson.JsonParser
+                    .parseString(fixture18(fixtureName)).getAsJsonObject();
+            for (com.google.gson.JsonElement el : root.getAsJsonArray("items")) {
+                com.google.gson.JsonObject item = el.getAsJsonObject();
+                if (id.equals(item.get("id").getAsString())) return item;
+            }
+            throw new IllegalStateException("no item '" + id + "' in " + fixtureName);
+        }
+
+        @Test
+        void bodyCarryingMissingKeywordIsDemotedToWarningAndValidInDefault() {
+            com.google.gson.JsonObject item = itemById("validate-parity-corpus.json", "should-only");
+            assertTrue(item.get("valid").getAsBoolean(),
+                    "1.8: a body-carrying requirement without SHALL/MUST is valid in default mode");
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("WARNING", issue.get("level").getAsString(),
+                    "1.8: the missing-keyword issue is a WARNING, not an ERROR");
+            assertTrue(issue.get("message").getAsString().contains("should contain SHALL or MUST"),
+                    "1.8 reworded the missing-keyword message to the RFC-2119 best-practice phrasing");
+        }
+
+        @Test
+        void missingKeywordWarningRePromotesUnderStrict() {
+            com.google.gson.JsonObject item = itemById("validate-parity-corpus-strict.json", "should-only");
+            assertFalse(item.get("valid").getAsBoolean(),
+                    "--strict counts the missing-keyword warning as a failure");
+            assertEquals("WARNING",
+                    item.getAsJsonArray("issues").get(0).getAsJsonObject().get("level").getAsString(),
+                    "the level stays WARNING under strict; only the verdict flips");
+        }
+
+        @Test
+        void bodyLessRequirementStaysError() {
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture18("validate-single-spec-no-body.json"));
+            assertFalse(result.passed(), "a body-less requirement is invalid in default mode");
+            assertTrue(result.issues().stream().anyMatch(i ->
+                            i.severity() == ValidationIssue.Severity.ERROR
+                                    && i.message().contains("must contain SHALL or MUST")),
+                    "1.8 still ERRORs on a requirement with no body prose");
         }
     }
 }
