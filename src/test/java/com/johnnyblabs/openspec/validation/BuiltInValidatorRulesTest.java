@@ -67,6 +67,257 @@ class BuiltInValidatorRulesTest {
                 "1.8: a requirement with no body prose still ERRORs on the missing keyword");
     }
 
+    // --- 1.8: main-spec duplicate-requirement-name rule (upstream #1484) ---
+
+    private static List<ValidationIssue> dupErrors(List<ValidationIssue> issues) {
+        List<ValidationIssue> out = new ArrayList<>();
+        for (ValidationIssue i : issues) {
+            if (i.severity() == ValidationIssue.Severity.ERROR && i.rule().equals("spec-duplicate-requirement")) {
+                out.add(i);
+            }
+        }
+        return out;
+    }
+
+    /** 1-based line of the {@code occurrence}-th (1-based) line whose trimmed text equals {@code header}. */
+    private static int lineOfHeader(String content, int occurrence, String header) {
+        String[] lines = content.split("\n", -1);
+        int seen = 0;
+        for (int i = 0; i < lines.length; i++) {
+            if (lines[i].trim().equals(header)) {
+                if (++seen == occurrence) return i + 1;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * A minimal well-formed main spec with two named requirements, each with a SHALL body and a
+     * scenario, under a single {@code ## Requirements} section. Built by concatenation (not a text
+     * block) so trailing whitespace in a name survives — text blocks strip it, which would defeat the
+     * exterior-whitespace discriminator.
+     */
+    private static String twoReqSpec(String name1, String name2) {
+        return "# Test Spec\n\n## Requirements\n\n"
+                + "### Requirement: " + name1 + "\nThe system SHALL work.\n\n"
+                + "#### Scenario: A\n- **WHEN** x\n- **THEN** y\n\n"
+                + "### Requirement: " + name2 + "\nThe system SHALL work again.\n\n"
+                + "#### Scenario: B\n- **WHEN** a\n- **THEN** b\n";
+    }
+
+    @Test
+    void duplicateRequirementName_isErrorAnchoredOnSecondReferencingFirst() {
+        String content = """
+                # Test Spec
+
+                ## Requirements
+
+                ### Requirement: Works
+                The system SHALL work first.
+
+                #### Scenario: A
+                - **WHEN** x
+                - **THEN** y
+
+                ### Requirement: Works
+                The system SHALL work second.
+
+                #### Scenario: B
+                - **WHEN** a
+                - **THEN** b
+                """;
+        List<ValidationIssue> dups = dupErrors(validateSpec(content));
+        assertEquals(1, dups.size(), "a name declared twice yields exactly one duplicate ERROR");
+        int firstLine = lineOfHeader(content, 1, "### Requirement: Works");
+        int secondLine = lineOfHeader(content, 2, "### Requirement: Works");
+        assertEquals(secondLine, dups.get(0).line(),
+                "the duplicate ERROR is anchored on the second occurrence's line");
+        assertTrue(dups.get(0).message().contains("duplicates the requirement declared on line " + firstLine),
+                "the message references the first occurrence's line");
+    }
+
+    @Test
+    void duplicateRequirementName_tripleFlagsTheLaterTwoAgainstTheFirst() {
+        String content = """
+                # Test Spec
+
+                ## Requirements
+
+                ### Requirement: Alpha
+                The system SHALL alpha once.
+
+                #### Scenario: A
+                - **WHEN** x
+                - **THEN** y
+
+                ### Requirement: Alpha
+                The system SHALL alpha twice.
+
+                #### Scenario: B
+                - **WHEN** x
+                - **THEN** y
+
+                ### Requirement: Alpha
+                The system SHALL alpha thrice.
+
+                #### Scenario: C
+                - **WHEN** x
+                - **THEN** y
+                """;
+        List<ValidationIssue> dups = dupErrors(validateSpec(content));
+        assertEquals(2, dups.size(), "three occurrences of one name yield exactly two duplicate ERRORs (N−1)");
+        int firstLine = lineOfHeader(content, 1, "### Requirement: Alpha");
+        int secondLine = lineOfHeader(content, 2, "### Requirement: Alpha");
+        int thirdLine = lineOfHeader(content, 3, "### Requirement: Alpha");
+        // The two ERRORs are anchored on the second and third occurrences (never the first).
+        java.util.Set<Integer> errorLines = new java.util.HashSet<>();
+        for (ValidationIssue d : dups) errorLines.add(d.line());
+        assertEquals(java.util.Set.of(secondLine, thirdLine), errorLines,
+                "the duplicate ERRORs are anchored on the 2nd and 3rd occurrences, not the 1st");
+        // Each references the FIRST occurrence's line — an adjacent-pair implementation would make the
+        // third reference the second, so reject that explicitly.
+        assertTrue(dups.stream().allMatch(d ->
+                        d.message().contains("duplicates the requirement declared on line " + firstLine)),
+                "each duplicate references the first occurrence's line");
+        ValidationIssue thirdErr = dups.stream().filter(d -> d.line() == thirdLine).findFirst().orElseThrow();
+        assertFalse(thirdErr.message().contains("declared on line " + secondLine),
+                "the third occurrence references the first line, not the second (not an adjacent pair)");
+    }
+
+    @Test
+    void duplicateRequirementName_matchKeyIsExactTrimmedNameCaseAndInteriorSensitive() {
+        // Positive control first: two IDENTICAL names fire exactly one duplicate ERROR. This proves
+        // twoReqSpec builds a structure the validator recognizes, so the negatives below are
+        // scope-specific (the key discriminates), not vacuous (requirements unrecognized).
+        assertEquals(1, dupErrors(validateSpec(twoReqSpec("Works", "Works"))).size(),
+                "control: two identical requirement names are a duplicate");
+        // Case-sensitive: 'Works' vs 'works' are distinct (the CLI does not case-fold the name).
+        assertTrue(dupErrors(validateSpec(twoReqSpec("Works", "works"))).isEmpty(),
+                "the 1.8 duplicate match is case-sensitive");
+        // Interior whitespace significant: a whitespace-collapsing key would wrongly merge these.
+        assertTrue(dupErrors(validateSpec(twoReqSpec("Process Refund", "Process  Refund"))).isEmpty(),
+                "interior whitespace is significant — the key is group(1).trim(), not a collapsed form");
+        // Exterior whitespace insignificant: a trailing-space-only difference IS the same requirement.
+        assertEquals(1, dupErrors(validateSpec(twoReqSpec("Foo ", "Foo"))).size(),
+                "exterior whitespace is trimmed — a trailing-space-only difference is still a duplicate");
+    }
+
+    @Test
+    void duplicateRequirementName_headerTokenCaseDiffersButNameIdenticalIsADuplicate() {
+        // The `### requirement:` token is matched case-insensitively (upstream #1154), but dedup keys off
+        // the captured NAME — so `### requirement: Works` and `### Requirement: Works` are the same
+        // requirement and collide. Locks that the key is the name, never the raw header line.
+        String content = "# Test Spec\n\n## Requirements\n\n"
+                + "### requirement: Works\nThe system SHALL work.\n\n"
+                + "#### Scenario: A\n- **WHEN** x\n- **THEN** y\n\n"
+                + "### Requirement: Works\nThe system SHALL work again.\n\n"
+                + "#### Scenario: B\n- **WHEN** a\n- **THEN** b\n";
+        assertEquals(1, dupErrors(validateSpec(content)).size(),
+                "dedup keys off the requirement name — a header-token case difference still collides");
+    }
+
+    @Test
+    void duplicateRequirementName_insideACodeFenceIsNotCounted() {
+        String content = """
+                # Test Spec
+
+                ## Requirements
+
+                ### Requirement: Works
+                The system SHALL work.
+
+                #### Scenario: A
+                - **WHEN** x
+                - **THEN** y
+
+                ```
+                ### Requirement: Works
+                this is documentation, not a real requirement
+                ```
+                """;
+        assertTrue(dupErrors(validateSpec(content)).isEmpty(),
+                "a `### Requirement:` inside a fenced code block does not count (fence-masked), matching the CLI");
+        // Positive control: strip the fence markers and the same name becomes a real duplicate — proving
+        // the fence (not some other defect) is what suppresses the error above.
+        assertEquals(1, dupErrors(validateSpec(content.replace("```\n", ""))).size(),
+                "control: the same name unfenced fires the duplicate rule");
+    }
+
+    @Test
+    void duplicateRequirementName_outsideTheRequirementsSectionIsNotDeduped() {
+        // The second `Works` sits under a later top-level `## Appendix` section, so the CLI routes it
+        // outside `## Requirements` (a different `requirement-outside-requirements` diagnostic) and never
+        // dedups it — see the captured contract fixture. The fallback must match (no over-reporting).
+        String content = """
+                # Test Spec
+
+                ## Requirements
+
+                ### Requirement: Works
+                The system SHALL work.
+
+                #### Scenario: A
+                - **WHEN** x
+                - **THEN** y
+
+                ## Appendix
+
+                ### Requirement: Works
+                A note that reuses the name outside the requirements section.
+                """;
+        assertTrue(dupErrors(validateSpec(content)).isEmpty(),
+                "a requirement outside the `## Requirements` section is not deduped, matching the CLI");
+        // Positive control: drop the intervening `## Appendix` header so the second `Works` falls inside
+        // `## Requirements`, and it fires — proving the section boundary (not some defect) suppresses it.
+        assertEquals(1, dupErrors(validateSpec(content.replace("## Appendix\n\n", ""))).size(),
+                "control: with the second occurrence in-section the duplicate fires");
+    }
+
+    @Test
+    void duplicateRequirementName_nameReusedInASecondRequirementsSectionIsNotDeduped() {
+        // Pathological: two `## Requirements` sections. The rule is scoped to the FIRST section — the
+        // choice that cannot over-report, since the CLI's two-section behavior is unpinned — so a name
+        // reused in a second `## Requirements` section is not flagged. Documents the deliberate scoping.
+        String content = "# Test Spec\n\n## Requirements\n\n"
+                + "### Requirement: Works\nThe system SHALL work.\n\n"
+                + "#### Scenario: A\n- **WHEN** x\n- **THEN** y\n\n"
+                + "## Requirements\n\n"
+                + "### Requirement: Works\nThe system SHALL work again.\n\n"
+                + "#### Scenario: B\n- **WHEN** a\n- **THEN** b\n";
+        assertTrue(dupErrors(validateSpec(content)).isEmpty(),
+                "first-section-scoped: a name reused in a second `## Requirements` section is not deduped");
+    }
+
+    @Test
+    void duplicateRequirementName_deltaSectionsAreNotDeduped() {
+        // Delta specs use `## ADDED`/`## MODIFIED Requirements` (not `## Requirements`) and legitimately
+        // repeat a name across sections, governed by the CLI's separate delta-consistency rules. The
+        // main-spec dedup is scoped to `## Requirements`, so delta-shaped content is never deduped here —
+        // and in production delta specs go through a wholly separate path. Guards the fallback against
+        // becoming more restrictive than the CLI on delta specs.
+        String content = """
+                ## ADDED Requirements
+
+                ### Requirement: New Thing
+                The system SHALL do the new thing.
+
+                #### Scenario: A
+                - **WHEN** x
+                - **THEN** y
+
+                ## MODIFIED Requirements
+
+                ### Requirement: New Thing
+                The system SHALL do the new thing differently.
+
+                #### Scenario: B
+                - **WHEN** a
+                - **THEN** b
+                """;
+        assertTrue(dupErrors(validateSpec(content)).isEmpty(),
+                "delta-style repeated names across ADDED/MODIFIED are not deduped by the main-spec rule");
+    }
+
     @Test
     void rfc2119_withShall_passes() {
         String content = """

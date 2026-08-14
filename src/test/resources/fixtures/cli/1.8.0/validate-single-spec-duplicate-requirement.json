@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "dup-req",
+      "type": "spec",
+      "valid": false,
+      "issues": [
+        {
+          "level": "ERROR",
+          "path": "file",
+          "line": 15,
+          "message": "Requirement header \"### Requirement: Works\" duplicates the requirement declared on line 8. Requirement names must be unique so spec updates cannot discard one block while updating another."
+        }
+      ],
+      "durationMs": 1
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "byType": {
+      "spec": {
+        "items": 1,
+        "passed": 0,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "/fixture",
+    "source": "nearest"
+  }
+}

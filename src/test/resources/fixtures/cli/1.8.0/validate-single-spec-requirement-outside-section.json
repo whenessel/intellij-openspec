@@ -1,0 +1,37 @@
+{
+  "items": [
+    {
+      "id": "boundary",
+      "type": "spec",
+      "valid": false,
+      "issues": [
+        {
+          "level": "ERROR",
+          "path": "file",
+          "line": 17,
+          "message": "Requirement header \"### Requirement: Works\" appears outside the main ## Requirements section. Main specs only parse requirements inside that section, so this requirement is currently invisible to validate, list, and archive."
+        }
+      ],
+      "durationMs": 2
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "byType": {
+      "spec": {
+        "items": 1,
+        "passed": 0,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "/fixture",
+    "source": "nearest"
+  }
+}

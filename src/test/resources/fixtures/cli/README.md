@@ -284,3 +284,40 @@ stricter than the CLI). No code change was needed — captured to *lock* the no-
   `config list --json` returns once a default store is set. `defaultStore` is out-of-model
   (machine-level store routing); `WorkflowProfileServiceTest` asserts `parseSnapshot` ignores it
   (reads only `profile`/`workflows`). Paths sanitized to `/fixture`.
+
+## `1.8.0/` — missing-SHALL demotion + duplicate-requirement parity
+
+Real CLI **1.8.0** captures. 1.8 demoted the missing-`SHALL`/`MUST` rule from ERROR to a default
+WARNING for a body-carrying requirement (strict re-promotes) and added a main-spec
+duplicate-requirement ERROR. These fixtures lock both against the real CLI. Recipes: isolated
+`HOME`/`XDG_*`, telemetry off, `root.path` sanitized to `/fixture`.
+
+- `validate-parity-corpus.json` / `validate-parity-corpus-strict.json` — real `validate --all --json`
+  (default and `--strict`) over the **existing `1.6.0/parity-corpus` markdown**, re-run through 1.8.0.
+  Default = 12 valid / 13, strict = 9 valid / 13 (= the 1.6.0 default anchor). The three items that
+  flip valid under 1.8's default (fenced-keyword, header-only-keyword, should-only) are the demotion
+  in action. Consumed by `ValidatorVerdictParityTest` (default oracle re-anchored 1.6→1.8) and
+  `ValidatorVerdictVersionStabilityTest` (subset-of-laxest default arm, anchor 1.8.0).
+- `validate-single-spec-no-body.json` — a requirement with a scenario but **no body prose** stays an
+  `ERROR` (`path: requirements[0]`, message "must contain SHALL or MUST"): 1.8's demotion is
+  body-conditional. Consumed by `CliContractTest.ValidateContractV18`.
+- `validate-single-spec-duplicate-requirement.json` — a main spec that declares `### Requirement:
+  Works` **twice**. 1.8's new main-spec duplicate rule (upstream #1484) → one `ERROR`, `path:"file"`
+  (a literal string, not the spec path), `line` = the **second** occurrence (15), message naming the
+  **first** occurrence's line (8): *Requirement header "### Requirement: Works" duplicates the
+  requirement declared on line 8…*. The duplicate emission carries **no machine rule-id** (freeform
+  message only), so the parser keys off `level`+`path`+message content. Consumed by
+  `CliContractTest.ValidateContractV18`; the CLI-absent fallback mirrors it as rule
+  `spec-duplicate-requirement`. Match is case-sensitive and scoped to `## Requirements`; N occurrences
+  yield N−1 errors (verified against the real CLI). Delta specs use a **different** CLI rule
+  (`Duplicate requirement in ADDED: "…"`, `path: <cap>/spec.md`, no line) that the fallback does not
+  reimplement — so the fallback never over-reports on deltas.
+- `validate-single-spec-requirement-outside-section.json` — the section-scoping negative, captured to
+  lock (against real output, not inference) that a name appearing **once inside `## Requirements` and
+  once outside it is NOT a duplicate**: the CLI routes the out-of-section occurrence to a separate
+  `requirement-outside-requirements` ERROR (*"…appears outside the main ## Requirements section…"*) and
+  never dedups it. Guards the one direction the fallback could over-report; consumed by
+  `CliContractTest.ValidateContractV18`.
+- `version.txt` — real `openspec --version` (bare `1.8.0`).
+- `config-validation/github-copilot.{config.yaml,validate.json}` — 1.8's optional `githubCopilot`
+  config block the tolerant reader ignores; `validate` exits 0 on it.

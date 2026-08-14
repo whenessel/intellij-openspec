@@ -174,6 +174,12 @@ tasks.jacocoTestReport {
 // applyScaffoldingOverrides (was a hand-copy). All new coverage is pure/deterministic (no added
 // CLI-integration lines), so the wobble profile is unchanged. Measured 0.3943/0.3734/0.3707; floors
 // set ~0.006 below (LINE kept a touch lower for the documented CLI-integration line wobble).
+// RAISED 2026-08-14 (builtin-validator-duplicate-requirement-parity): 0.388/0.366/0.364 →
+// 0.390/0.368/0.366. The 1.8 main-spec duplicate-requirement rule added a branch-heavy cluster to
+// validateSpecContent (## Requirements section-bounds detection + a name→first-line dedup map +
+// N−1 emission), all deterministically covered by BuiltInValidatorRulesTest / BuiltInValidatorTest.
+// Measured 0.3959/0.3751/0.3732; INSTRUCTION nudged to ~0.006 below measured, LINE/BRANCH kept a
+// touch lower (BRANCH the volatile counter keeps the most wobble headroom).
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     // Match the report: instrumented classes + the test JVM's execution data.
@@ -188,21 +194,21 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "INSTRUCTION"
                 value = "COVEREDRATIO"
-                minimum = "0.388".toBigDecimal()
+                minimum = "0.390".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.366".toBigDecimal()
+                minimum = "0.368".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "BRANCH"
                 value = "COVEREDRATIO"
-                minimum = "0.364".toBigDecimal()
+                minimum = "0.366".toBigDecimal()
             }
         }
     }
