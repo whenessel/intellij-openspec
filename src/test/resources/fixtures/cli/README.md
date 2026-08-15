@@ -321,3 +321,20 @@ duplicate-requirement ERROR. These fixtures lock both against the real CLI. Reci
 - `version.txt` — real `openspec --version` (bare `1.8.0`).
 - `config-validation/github-copilot.{config.yaml,validate.json}` — 1.8's optional `githubCopilot`
   config block the tolerant reader ignores; `validate` exits 0 on it.
+- `validate-single-change-{misplaced-delta,no-deltas,skip-specs,nested-delta}.json` — the
+  change-delta **discovery** shapes (the misplaced-delta rule shipped in 1.7.0 #1392/#1385; 1.8 only
+  reworded its message). Captured to lock the CLI-absent fallback's discovery parity:
+  `misplaced-delta` = a regular file at the change's `specs/` root → ERROR `path:"spec.md"` (*"Delta
+  spec found at specs/spec.md…must live under a capability path…"*); `no-deltas` = a change with no
+  delta `spec.md` → ERROR `path:"file"` (*"Change must have at least one delta…"*); `skip-specs` = a
+  `skip_specs: true` change with no deltas is **valid** with an INFO (not a no-deltas ERROR) — the
+  gate the fallback must honor; `nested-delta` = `specs/<area>/<capability>/spec.md` is **valid**
+  (a `spec.md` at any depth ≥ 1 is a delta), so the fallback must recurse and must not flag it
+  misplaced. Consumed by `CliContractTest`; no machine rule-id on any (freeform, keyed by
+  level+path+message). Two boundary locks accompany them:
+  `validate-single-change-misplaced-plus-valid.json` (a misplaced root `spec.md` coexisting with a
+  valid capability delta → the **sole** misplaced ERROR, never a no-deltas co-fire — "misplaced counts
+  as found") and `validate-single-change-misplaced-valid-content.json` (a root `spec.md` whose content
+  is a valid delta → still misplaced, proving detection is path-based, not content-based). The
+  no-deltas shape is a 1.8 parity twin of the older `1.7.0/validate-single-change-invalid.json`, not a
+  novel shape.

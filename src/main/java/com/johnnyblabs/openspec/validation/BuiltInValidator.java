@@ -290,12 +290,43 @@ public final class BuiltInValidator {
             }
         }
 
-        validateDeltaSpecs(changePath, issues);
+        int deltaCount = validateDeltaSpecs(changePath, issues);
+        // No-deltas ERROR (mirrors the CLI): a change whose schema requires specs and does not declare
+        // skip_specs must have at least one delta spec. `deltaCount` counts the spec.md files found under
+        // specs/ — a misplaced root spec.md counts as found, so a misplaced-only change gets the
+        // misplaced ERROR alone, matching the CLI. A negative count means the change dir could not be
+        // resolved on disk, so we do not guess (no false positive). skip_specs suppresses it exactly as
+        // the CLI does (which reports a skip_specs change with no deltas valid, with an INFO note).
+        boolean skipSpecs = change.getMetadata() != null && change.getMetadata().isSkipSpecs();
+        // `required.contains("specs")` is defensive future-proofing: the single V1_2 baseline always
+        // requires specs, so this arm is constant-true today (the CLI likewise errors regardless of the
+        // declared schema). It is retained so a future config-format baseline that drops the specs
+        // artifact would suppress the ERROR (a safe under-report) without a code change.
+        if (deltaCount == 0 && required.contains("specs") && !skipSpecs) {
+            issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, changePath, 1,
+                    "Change '" + change.getName() + "' must have at least one delta. No delta specs found "
+                            + "under specs/. Add a delta at specs/<capability-path>/spec.md, or set "
+                            + "skip_specs: true in .openspec.yaml if this change intentionally modifies no specs.",
+                    "delta-none-found"));
+        }
         boolean passed = issues.stream().noneMatch(i -> i.severity() == ValidationIssue.Severity.ERROR);
         return new ValidationResult(passed, issues, "built-in");
     }
 
-    private void validateDeltaSpecs(String changePath, List<ValidationIssue> issues) {
+    /**
+     * Discover and validate a change's delta spec files, mirroring the CLI's discovery rules. Returns
+     * the number of {@code spec.md} files found under the change's {@code specs/} directory — a misplaced
+     * root {@code spec.md} counts as found — or {@code -1} when the change directory could not be
+     * resolved on disk (so the caller does not fire the no-deltas ERROR on a resolution failure).
+     *
+     * <p>CLI 1.7 parity (upstream #1392/#1385): a regular file named exactly {@code spec.md} directly at
+     * the {@code specs/} root is a misplaced delta — the apply/archive merge only reads capability
+     * folders, so a root-level file is silently dropped. Detection is path-based and content-independent.
+     * A {@code spec.md} at any depth of at least one directory below {@code specs/} (including
+     * multi-segment capability paths) is a valid delta and is structurally validated, matching the CLI's
+     * recursive discovery.
+     */
+    private int validateDeltaSpecs(String changePath, List<ValidationIssue> issues) {
         // Resolve through the project's changes dir first (works on any VFS, including
         // the test fixture's temp filesystem); fall back to a local-path lookup.
         VirtualFile changeDir = null;
@@ -307,28 +338,60 @@ public final class BuiltInValidator {
         if (changeDir == null) {
             changeDir = com.intellij.openapi.vfs.LocalFileSystem.getInstance().findFileByPath(changePath);
         }
-        if (changeDir == null) return;
+        if (changeDir == null) return -1;
         VirtualFile specsDir = changeDir.findChild("specs");
-        if (specsDir == null || !specsDir.exists()) return;
+        if (specsDir == null || !specsDir.exists()) return 0;
 
-        for (VirtualFile domainDir : specsDir.getChildren()) {
-            if (!domainDir.isDirectory()) continue;
-            VirtualFile specFile = domainDir.findChild("spec.md");
-            if (specFile == null) continue;
-            String raw = readFile(specFile);
-            if (raw == null) continue;
-            // All structural matching runs on the fence-masked form (offsets preserved).
-            String content = maskFences(raw);
+        int found = 0;
 
-            // Skip full specs (## Requirements / ## Purpose) — only delta specs need ADDED/MODIFIED/REMOVED/RENAMED
-            if (!DELTA_SECTION_PATTERN.matcher(content).find() && !FULL_SPEC_PATTERN.matcher(content).find()) {
-                issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, specFile.getPath(), 1,
-                        "Delta spec should have ADDED, MODIFIED, REMOVED, or RENAMED sections", "delta-spec-sections"));
-            }
-
-            // Structural validation of delta spec requirement blocks
-            validateDeltaSpecStructure(content, specFile.getPath(), issues);
+        // Misplaced-delta ERROR: a regular file named exactly `spec.md` directly at the specs/ root.
+        // Path-based and content-independent, exactly matching the CLI boundary (only the root, never a
+        // spec.md at depth >= 1). A *directory* named spec.md is not misplaced — it is walked below as an
+        // ordinary capability folder.
+        VirtualFile rootSpec = specsDir.findChild("spec.md");
+        if (rootSpec != null && !rootSpec.isDirectory()) {
+            issues.add(new ValidationIssue(ValidationIssue.Severity.ERROR, rootSpec.getPath(), 1,
+                    "Delta spec found at specs/spec.md. Delta specs must live under a capability path "
+                            + "(e.g. specs/<capability-path>/spec.md) — a file at the specs/ root is ignored "
+                            + "when the change is applied or archived.", "delta-spec-misplaced"));
+            found++;
         }
+
+        // Valid deltas: a spec.md at any depth >= 1 under specs/. Recurse so multi-segment capability
+        // paths (specs/<area>/<capability>/spec.md) are discovered and validated too.
+        for (VirtualFile child : specsDir.getChildren()) {
+            if (child.isDirectory()) {
+                found += validateDeltaSpecsUnder(child, issues);
+            }
+        }
+        return found;
+    }
+
+    /** Recursively validate every {@code spec.md} at or below {@code dir} (a capability directory). */
+    private int validateDeltaSpecsUnder(VirtualFile dir, List<ValidationIssue> issues) {
+        int found = 0;
+        VirtualFile specFile = dir.findChild("spec.md");
+        if (specFile != null && !specFile.isDirectory()) {
+            String raw = readFile(specFile);
+            if (raw != null) {
+                // All structural matching runs on the fence-masked form (offsets preserved).
+                String content = maskFences(raw);
+                // Skip full specs (## Requirements / ## Purpose) — only delta specs need
+                // ADDED/MODIFIED/REMOVED/RENAMED.
+                if (!DELTA_SECTION_PATTERN.matcher(content).find() && !FULL_SPEC_PATTERN.matcher(content).find()) {
+                    issues.add(new ValidationIssue(ValidationIssue.Severity.WARNING, specFile.getPath(), 1,
+                            "Delta spec should have ADDED, MODIFIED, REMOVED, or RENAMED sections", "delta-spec-sections"));
+                }
+                validateDeltaSpecStructure(content, specFile.getPath(), issues);
+            }
+            found++;
+        }
+        for (VirtualFile child : dir.getChildren()) {
+            if (child.isDirectory()) {
+                found += validateDeltaSpecsUnder(child, issues);
+            }
+        }
+        return found;
     }
 
     public ValidationResult validateConfig() {
