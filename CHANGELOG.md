@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v0.8.0
+
 ### Added
 
 - **OpenSpec CLI 1.8.x is now a supported line.** 1.8 support is additive over 1.5–1.7 — the store/workset coordination model and all coordination JSON shapes are unchanged, so nothing is re-gated. The plugin tolerates 1.8's new optional surfaces without complaint: the `.openspec.yaml` `retire_capabilities` key and the `config.yaml` `githubCopilot` block are ignored, and `status --json`'s new `isPlanningComplete` field is read alongside the retained `isComplete`. Verified against captured real 1.8.0 CLI output. The minimum supported CLI remains 1.3.0.
