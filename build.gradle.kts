@@ -180,6 +180,12 @@ tasks.jacocoTestReport {
 // N−1 emission), all deterministically covered by BuiltInValidatorRulesTest / BuiltInValidatorTest.
 // Measured 0.3959/0.3751/0.3732; INSTRUCTION nudged to ~0.006 below measured, LINE/BRANCH kept a
 // touch lower (BRANCH the volatile counter keeps the most wobble headroom).
+// RAISED 2026-08-14 (builtin-validator-delta-discovery-parity): 0.390/0.368/0.366 → 0.391/0.369/0.368.
+// The recursive change-delta walk + misplaced-delta ERROR + the skip_specs-aware no-deltas gate added a
+// branch cluster to validateDeltaSpecs/validateSingleChange, all deterministically covered by the new
+// BuiltInValidatorTest cases. Measured 0.3977/0.3764/0.3762; INSTRUCTION ~0.006 below, LINE/BRANCH keep
+// extra headroom. (Note: the `required.contains("specs")` arm of the no-deltas gate is constant-true —
+// the single V1_2 baseline always requires specs — so its false branch is intentionally uncovered.)
 tasks.jacocoTestCoverageVerification {
     dependsOn(tasks.test)
     // Match the report: instrumented classes + the test JVM's execution data.
@@ -194,21 +200,21 @@ tasks.jacocoTestCoverageVerification {
             limit {
                 counter = "INSTRUCTION"
                 value = "COVEREDRATIO"
-                minimum = "0.390".toBigDecimal()
+                minimum = "0.391".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "LINE"
                 value = "COVEREDRATIO"
-                minimum = "0.368".toBigDecimal()
+                minimum = "0.369".toBigDecimal()
             }
         }
         rule {
             limit {
                 counter = "BRANCH"
                 value = "COVEREDRATIO"
-                minimum = "0.366".toBigDecimal()
+                minimum = "0.368".toBigDecimal()
             }
         }
     }

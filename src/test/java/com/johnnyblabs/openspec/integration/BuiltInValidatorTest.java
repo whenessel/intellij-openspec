@@ -386,6 +386,9 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                 "schema: spec-driven\n");
         myFixture.addFileToProject("openspec/changes/bad-change/design.md",
                 "## Design\n\nSome design.\n");
+        // A valid delta so the ONLY notable condition is the missing proposal — otherwise the change
+        // would also carry a delta-none-found ERROR (no deltas), muddying this single-variable test.
+        myFixture.addFileToProject("openspec/changes/bad-change/specs/reporting/spec.md", VALID_DELTA);
         refreshVfs();
 
         ValidationResult result = validator.validateChanges();
@@ -421,6 +424,135 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                         i.severity() == ValidationIssue.Severity.WARNING));
         assertFalse("no ERROR-severity issue on a proposal-less-but-valid change",
                 result.issues().stream().anyMatch(i -> i.severity() == ValidationIssue.Severity.ERROR));
+    }
+
+    // --- CLI parity: change-delta discovery (misplaced delta + no-deltas), skip_specs-aware ---
+
+    private static final String VALID_DELTA =
+            "## ADDED Requirements\n\n### Requirement: Root\nThe system SHALL do it.\n\n"
+                    + "#### Scenario: A\n- **WHEN** x\n- **THEN** y\n";
+
+    public void testMisplacedDeltaAtSpecsRootIsError() {
+        // A regular file at the change's specs/ root is a misplaced delta (dropped on apply/archive),
+        // matching the CLI 1.7 rule. The fallback previously skipped it entirely (false green). The
+        // content is PLAIN PROSE (no delta headers): this is the anti-vacuity control — a naive impl that
+        // ran the root file through validateDeltaSpecStructure would emit a delta-spec-sections WARNING
+        // instead of the misplaced ERROR, so we assert the ERROR is present AND the sections-WARNING is
+        // absent (the root file is flagged, not structurally validated).
+        myFixture.addFileToProject("openspec/changes/misplaced-c/proposal.md", "# M\n\n## Why\ny\n\n## What Changes\n- x\n");
+        myFixture.addFileToProject("openspec/changes/misplaced-c/specs/spec.md",
+                "Just some prose describing the change, with no delta headers.\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("misplaced-c");
+        assertTrue("misplaced root delta must be a delta-spec-misplaced ERROR",
+                result.issues().stream().anyMatch(i ->
+                        "delta-spec-misplaced".equals(i.rule()) && i.severity() == ValidationIssue.Severity.ERROR));
+        assertFalse("the root file is flagged misplaced, NOT run through delta structural validation",
+                result.issues().stream().anyMatch(i -> "delta-spec-sections".equals(i.rule())));
+        assertFalse("a misplaced root spec.md counts as found — no-deltas must not also fire",
+                result.issues().stream().anyMatch(i -> "delta-none-found".equals(i.rule())));
+        assertFalse("the misplaced delta fails the verdict", result.passed());
+    }
+
+    public void testMisplacedRootDeltaWithValidContentStillErrors() {
+        // Content-independence: a root spec.md whose content is a perfectly valid ADDED delta is still
+        // misplaced (it would be dropped on apply/archive), matching the CLI's path-based detection.
+        myFixture.addFileToProject("openspec/changes/mpvalid-c/proposal.md", "# MV\n\n## Why\ny\n\n## What Changes\n- x\n");
+        myFixture.addFileToProject("openspec/changes/mpvalid-c/specs/spec.md", VALID_DELTA);
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("mpvalid-c");
+        assertTrue("valid content does not excuse a root-level delta — still misplaced",
+                result.issues().stream().anyMatch(i ->
+                        "delta-spec-misplaced".equals(i.rule()) && i.severity() == ValidationIssue.Severity.ERROR));
+        assertFalse("the misplaced delta fails the verdict", result.passed());
+    }
+
+    public void testNestedMultiSegmentDeltaIsDiscoveredNotMisplaced() {
+        // Positive control that recursive discovery works: a spec.md at specs/<area>/<cap>/ (depth 2) is
+        // a valid delta — not misplaced, and not a no-deltas change. If discovery didn't reach it,
+        // delta-none-found would fire and the verdict would fail.
+        myFixture.addFileToProject("openspec/changes/nested-c/proposal.md", "# N\n\n## Why\ny\n\n## What Changes\n- x\n");
+        myFixture.addFileToProject("openspec/changes/nested-c/specs/identity/user-auth/spec.md", VALID_DELTA);
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("nested-c");
+        assertFalse("a nested multi-segment delta must NOT be flagged misplaced",
+                result.issues().stream().anyMatch(i -> "delta-spec-misplaced".equals(i.rule())));
+        assertFalse("a discovered nested delta is not a no-deltas change",
+                result.issues().stream().anyMatch(i -> "delta-none-found".equals(i.rule())));
+        assertTrue("a valid nested delta passes the verdict", result.passed());
+    }
+
+    public void testNestedDeltaIsStructurallyValidated() {
+        // Recursion doesn't just DISCOVER deep deltas, it validates them: an ADDED requirement with no
+        // scenario in a nested delta still fires delta-requirement-scenario (the one-level scan never
+        // reached it before — a fixed under-report).
+        myFixture.addFileToProject("openspec/changes/deepval-c/proposal.md", "# DV\n\n## Why\ny\n\n## What Changes\n- x\n");
+        myFixture.addFileToProject("openspec/changes/deepval-c/specs/area/cap/spec.md",
+                "## ADDED Requirements\n\n### Requirement: No Scenario\nThe system SHALL x.\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("deepval-c");
+        assertTrue("a nested delta's structural rules run (missing scenario -> ERROR)",
+                result.issues().stream().anyMatch(i ->
+                        "delta-requirement-scenario".equals(i.rule()) && i.severity() == ValidationIssue.Severity.ERROR));
+    }
+
+    public void testChangeWithNoDeltasIsError() {
+        myFixture.addFileToProject("openspec/changes/nodelta-c/proposal.md", "# ND\n\n## Why\ny\n\n## What Changes\n- x\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("nodelta-c");
+        assertTrue("a spec-requiring change with no deltas must be a delta-none-found ERROR",
+                result.issues().stream().anyMatch(i ->
+                        "delta-none-found".equals(i.rule()) && i.severity() == ValidationIssue.Severity.ERROR));
+        assertFalse("no-deltas fails the verdict", result.passed());
+    }
+
+    public void testSkipSpecsChangeWithNoDeltasIsNotError() {
+        // The load-bearing gate: a skip_specs change with no deltas is valid — the CLI suppresses the
+        // no-deltas error (emitting an INFO note). The fallback must honor skip_specs the same way.
+        // Positive control: testChangeWithNoDeltasIsError (identical structure sans skip_specs) DOES
+        // fire delta-none-found — so this "no error" assertion is non-vacuous.
+        myFixture.addFileToProject("openspec/changes/skip-c/proposal.md", "# SS\n\n## Why\ny\n\n## What Changes\n- tooling only\n");
+        myFixture.addFileToProject("openspec/changes/skip-c/.openspec.yaml", "schema: spec-driven\nskip_specs: true\n");
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("skip-c");
+        assertFalse("a skip_specs change with no deltas must NOT trigger delta-none-found",
+                result.issues().stream().anyMatch(i -> "delta-none-found".equals(i.rule())));
+        assertTrue("a skip_specs no-delta change passes the verdict", result.passed());
+    }
+
+    public void testMisplacedOnlyDoesNotAlsoTriggerNoDeltas() {
+        // A misplaced root spec.md counts as a delta "found", so a misplaced-only change gets the
+        // misplaced ERROR alone — never also a spurious no-deltas ERROR (matching the CLI). Positive
+        // control: testChangeWithNoDeltasIsError shows delta-none-found DOES fire when nothing is found.
+        myFixture.addFileToProject("openspec/changes/mp-only/proposal.md", "# MP\n\n## Why\ny\n\n## What Changes\n- x\n");
+        myFixture.addFileToProject("openspec/changes/mp-only/specs/spec.md", VALID_DELTA);
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("mp-only");
+        assertTrue("misplaced ERROR present",
+                result.issues().stream().anyMatch(i -> "delta-spec-misplaced".equals(i.rule())));
+        assertFalse("a misplaced root spec.md counts as found — no-deltas must NOT also fire",
+                result.issues().stream().anyMatch(i -> "delta-none-found".equals(i.rule())));
+    }
+
+    public void testDirectoryNamedSpecMdAtRootIsNotMisplaced() {
+        // A *directory* named spec.md is walked as an ordinary capability folder (id "spec.md"), not
+        // flagged misplaced — matching the CLI. The spec.md inside it is the actual delta.
+        myFixture.addFileToProject("openspec/changes/dir-c/proposal.md", "# D\n\n## Why\ny\n\n## What Changes\n- x\n");
+        myFixture.addFileToProject("openspec/changes/dir-c/specs/spec.md/spec.md", VALID_DELTA);
+        refreshVfs();
+
+        ValidationResult result = validator.validateChange("dir-c");
+        assertFalse("a directory named spec.md is not a misplaced delta",
+                result.issues().stream().anyMatch(i -> "delta-spec-misplaced".equals(i.rule())));
+        assertFalse("the delta inside the spec.md directory is discovered — not a no-deltas change",
+                result.issues().stream().anyMatch(i -> "delta-none-found".equals(i.rule())));
     }
 
     public void testMissingArtifactTriggersWarning() {
@@ -498,19 +630,26 @@ public class BuiltInValidatorTest extends OpenSpecIntegrationTestBase {
                 result.issues().stream().noneMatch(i -> "change-schema-incompatible".equals(i.rule())));
     }
 
-    public void testDeltaSpecWithoutSectionsTriggersWarning() {
-        // Delta spec validation uses LocalFileSystem which doesn't work in temp VFS.
-        // This test verifies the validator handles it gracefully (no crash).
-        // The actual delta spec validation is covered by the regex pattern test below.
+    public void testChangeWithNoSpecsDirErrorsViaValidateChanges() {
+        // (Formerly testDeltaSpecWithoutSectionsTriggersWarning — renamed; its old comment claimed
+        // "LocalFileSystem doesn't work in temp VFS", which is stale: validateDeltaSpecs resolves via the
+        // VFS changes dir first and reads deltas at any depth.) A change that requires specs but has no
+        // specs/ directory at all is a no-deltas ERROR, surfaced through the all-changes validateChanges()
+        // path (the single-change path is covered by testChangeWithNoDeltasIsError). Its `.openspec.yaml`
+        // exercises the metadata-present-but-not-skip_specs gate arm.
         myFixture.addFileToProject("openspec/changes/delta-test/.openspec.yaml",
                 "schema: spec-driven\nstatus: proposed\n");
         myFixture.addFileToProject("openspec/changes/delta-test/proposal.md",
                 "## Why\n\nTest\n");
         refreshVfs();
 
-        // Should not throw — gracefully handles missing LocalFileSystem paths
         ValidationResult result = validator.validateChanges();
         assertNotNull(result);
+        assertTrue("a change with no specs/ dir gets a delta-none-found ERROR via validateChanges()",
+                result.issues().stream().anyMatch(i ->
+                        "delta-none-found".equals(i.rule())
+                                && i.severity() == ValidationIssue.Severity.ERROR
+                                && i.filePath().contains("delta-test")));
     }
 
     // ---------------------------------------------------------------

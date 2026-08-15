@@ -1017,4 +1017,112 @@ class CliContractTest {
                     "the CLI's signal here is the outside-section rule, a different (non-duplicate) diagnostic");
         }
     }
+
+    /**
+     * Change-delta <b>discovery</b> shapes the CLI-absent fallback mirrors: a misplaced delta at a
+     * change's {@code specs/} root (1.7.0 #1392/#1385; 1.8 reworded the message), a change with no
+     * deltas, and the {@code skip_specs} suppression. Path is asserted at the raw-JSON level because
+     * {@code parseJsonOutput} discards it; there is no machine rule-id (freeform message, keyed by
+     * level + path + content).
+     */
+    @Nested
+    class ChangeDeltaDiscoveryContractV18 {
+
+        private com.google.gson.JsonObject itemById(String fixtureName, String id) {
+            com.google.gson.JsonObject root = com.google.gson.JsonParser
+                    .parseString(fixture18(fixtureName)).getAsJsonObject();
+            for (com.google.gson.JsonElement el : root.getAsJsonArray("items")) {
+                com.google.gson.JsonObject item = el.getAsJsonObject();
+                if (id.equals(item.get("id").getAsString())) return item;
+            }
+            throw new IllegalStateException("no item '" + id + "' in " + fixtureName);
+        }
+
+        @Test
+        void misplacedRootDeltaIsErrorWithSpecMdPath() {
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-change-misplaced-delta.json", "misplaced");
+            assertFalse(item.get("valid").getAsBoolean(), "a misplaced root delta is invalid");
+            assertEquals(1, item.getAsJsonArray("issues").size(),
+                    "the misplaced delta is the sole issue — the CLI does not co-fire the no-deltas rule");
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("ERROR", issue.get("level").getAsString());
+            assertEquals("spec.md", issue.get("path").getAsString(),
+                    "the misplaced-delta issue path is the literal string \"spec.md\"");
+            assertFalse(issue.has("line"), "the misplaced-delta issue carries no line");
+            assertTrue(issue.get("message").getAsString().contains("must live under a capability path"),
+                    "the message tells the author to move the delta under a capability path");
+            assertFalse(issue.has("id") || issue.has("code") || issue.has("ruleId"),
+                    "the CLI carries no machine rule-id for the misplaced-delta rule");
+
+            // Through the parser, the verdict fails on the ERROR.
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture18("validate-single-change-misplaced-delta.json"));
+            assertFalse(result.passed(), "the misplaced-delta ERROR fails the item's verdict");
+        }
+
+        @Test
+        void misplacedCoexistingWithAValidDeltaIsStillTheSoleMisplacedError() {
+            // Boundary lock: a misplaced root spec.md that coexists with a valid capability delta yields
+            // ONLY the misplaced ERROR — the valid delta means the change is "found", so no-deltas never
+            // co-fires, and the misplaced file is still flagged rather than excused.
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-change-misplaced-plus-valid.json", "mpplus");
+            assertFalse(item.get("valid").getAsBoolean());
+            assertEquals(1, item.getAsJsonArray("issues").size(), "only the misplaced ERROR is reported");
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("spec.md", issue.get("path").getAsString());
+            assertFalse(issue.get("message").getAsString().contains("at least one delta"),
+                    "no no-deltas error when a valid delta exists alongside the misplaced one");
+        }
+
+        @Test
+        void misplacedRootDeltaWithValidContentIsStillFlagged() {
+            // Boundary lock: detection is path-based / content-independent. A root spec.md whose content
+            // is a perfectly valid ADDED delta is still misplaced (it would be dropped on apply/archive).
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-change-misplaced-valid-content.json", "mpvalid");
+            assertFalse(item.get("valid").getAsBoolean());
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("ERROR", issue.get("level").getAsString());
+            assertEquals("spec.md", issue.get("path").getAsString());
+            assertTrue(issue.get("message").getAsString().contains("must live under a capability path"),
+                    "valid content does not excuse a root-level delta — detection is path-based");
+        }
+
+        @Test
+        void changeWithNoDeltasIsErrorWithFilePath() {
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-change-no-deltas.json", "nodelta");
+            assertFalse(item.get("valid").getAsBoolean(), "a change with no deltas is invalid");
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("ERROR", issue.get("level").getAsString());
+            assertEquals("file", issue.get("path").getAsString(),
+                    "the no-deltas issue path is the literal string \"file\", not \"spec.md\"");
+            assertTrue(issue.get("message").getAsString().contains("must have at least one delta"),
+                    "the message is the no-deltas error");
+        }
+
+        @Test
+        void skipSpecsChangeWithNoDeltasIsValidWithInfoNotError() {
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-change-skip-specs.json", "skipspecs");
+            assertTrue(item.get("valid").getAsBoolean(),
+                    "a skip_specs change with no deltas is valid — the no-deltas rule is suppressed");
+            for (com.google.gson.JsonElement el : item.getAsJsonArray("issues")) {
+                assertNotEquals("ERROR", el.getAsJsonObject().get("level").getAsString(),
+                        "a skip_specs change with no deltas has no ERROR (the CLI emits only an INFO note)");
+            }
+        }
+
+        @Test
+        void nestedMultiSegmentDeltaIsValid() {
+            com.google.gson.JsonObject item =
+                    itemById("validate-single-change-nested-delta.json", "nested");
+            assertTrue(item.get("valid").getAsBoolean(),
+                    "a spec.md nested at specs/<area>/<capability>/ is a valid delta — any depth >= 1 counts");
+            assertTrue(item.getAsJsonArray("issues").isEmpty(),
+                    "the nested delta is discovered and validated clean, never flagged misplaced");
+        }
+    }
 }
