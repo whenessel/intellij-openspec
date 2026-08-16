@@ -3,6 +3,7 @@ package com.johnnyblabs.openspec.dialogs;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.TextBrowseFolderListener;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.components.JBLabel;
@@ -32,11 +33,11 @@ public final class NewStoreDialog extends DialogWrapper {
     public NewStoreDialog(@Nullable Project project) {
         super(project, false);
         setTitle("New Store");
-        pathField.addBrowseFolderListener(
-                "Store Folder",
-                "Choose the folder where the store should live",
-                project,
-                FileChooserDescriptorFactory.createSingleFolderDescriptor());
+        pathField.addBrowseFolderListener(new TextBrowseFolderListener(
+                FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                        .withTitle("Store Folder")
+                        .withDescription("Choose the folder where the store should live"),
+                project));
         init();
     }
 

@@ -4,6 +4,7 @@ import com.intellij.icons.AllIcons;
 import com.intellij.openapi.fileChooser.FileChooserDescriptorFactory;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.intellij.openapi.ui.TextBrowseFolderListener;
 import com.intellij.openapi.ui.TextFieldWithBrowseButton;
 import com.intellij.openapi.ui.ValidationInfo;
 import com.intellij.ui.components.JBLabel;
@@ -141,11 +142,11 @@ public final class NewWorksetDialog extends DialogWrapper {
         final JButton removeButton = new JButton(AllIcons.General.Remove);
 
         MemberRow(@Nullable Project project) {
-            pathField.addBrowseFolderListener(
-                    "Member Folder",
-                    "Choose a member folder",
-                    project,
-                    FileChooserDescriptorFactory.createSingleFolderDescriptor());
+            pathField.addBrowseFolderListener(new TextBrowseFolderListener(
+                    FileChooserDescriptorFactory.createSingleFolderDescriptor()
+                            .withTitle("Member Folder")
+                            .withDescription("Choose a member folder"),
+                    project));
             GridBagConstraints gbc = new GridBagConstraints();
             gbc.insets = JBUI.insets(0, 0, 0, JBUI.scale(4));
             gbc.fill = GridBagConstraints.HORIZONTAL;

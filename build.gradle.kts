@@ -1,5 +1,7 @@
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
+import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask.FailureLevel
 
 plugins {
     id("java")
@@ -367,6 +369,54 @@ intellijPlatform {
     pluginVerification {
         ides {
             recommended()
+        }
+        // Verifier severity gate — pinned replica of the IPGP 2.18.1 DEFAULT failure set (do NOT
+        // shorten: dropping INTERNAL_API_USAGES / OVERRIDE_ONLY_API_USAGES would silently regress
+        // coverage; pinning also protects us if a future IPGP weakens its default). DEPRECATED_API_USAGES
+        // is deliberately EXCLUDED — we knowingly retain a few plain-@Deprecated usages whose replacement
+        // doesn't exist at the 242 floor (ActionUtil.invokeAction→performAction needs 252;
+        // ReadAction.compute→computeBlocking; the Reworked Terminal API), tracked for the floor bump.
+        // NOTE: scheduled-for-removal usage is NOT (and cannot be) gated here — IPGP 2.18.1 folds
+        // forRemoval usages into the verifier's "Deprecated API usages" report section and names them
+        // "scheduled for removal" only on the verdict line its problem-collector skips, so
+        // FailureLevel.SCHEDULED_FOR_REMOVAL_API_USAGES is structurally inert (verified: it did not fail
+        // a build with a real forRemoval usage present). That canary is enforced instead by the
+        // verifyPlugin doLast below.
+        failureLevel = listOf(
+            FailureLevel.COMPATIBILITY_PROBLEMS,
+            FailureLevel.INTERNAL_API_USAGES,
+            FailureLevel.OVERRIDE_ONLY_API_USAGES,
+        )
+    }
+}
+
+// Scheduled-for-removal API canary. IPGP 2.18.1's failureLevel cannot gate scheduled-for-removal usage
+// without also failing plain-@Deprecated usage (the verifier folds forRemoval usages into its
+// "Deprecated API usages" section and only names them "scheduled for removal" on the verdict line the
+// IPGP problem-collector skips). So we enforce it directly off the verifier's own PLAIN report files,
+// keyed on wording the verifier emits ONLY for forRemoval usages: "... will be removed in ..." per usage
+// (in deprecated-usages.txt) and "N usages of scheduled for removal API" on the verdict
+// (verification-verdict.txt). Plain-@Deprecated usages (our deferred ActionUtil.invokeAction calls) emit
+// neither, so they stay green. The .html reports are skipped so a static legend can never false-trip it.
+// A call to a platform API the vendor will delete becomes a NoSuchMethodError-class break on a future
+// IDE (untilBuild is open-ended), so this fails the verify gate now rather than surfacing as a
+// Marketplace warning or a user crash.
+tasks.named<VerifyPluginTask>("verifyPlugin") {
+    val reportsDir = verificationReportsDirectory
+    doFirst { reportsDir.get().asFile.deleteRecursively() } // clean slate — never grep stale reports
+    doLast {
+        val dir = reportsDir.get().asFile
+        val needle = Regex("scheduled for removal|will be removed in", RegexOption.IGNORE_CASE)
+        val offenders = dir.walkTopDown()
+            .filter { it.isFile && !it.name.endsWith(".html", ignoreCase = true) && needle.containsMatchIn(it.readText()) }
+            .map { it.relativeTo(dir).path }
+            .toList()
+        if (offenders.isNotEmpty()) {
+            throw GradleException(
+                "verifyPlugin canary: scheduled-for-removal IntelliJ Platform API usage detected — " +
+                    "migrate it before it hard-breaks a future IDE. See report files:\n  " +
+                    offenders.joinToString("\n  ")
+            )
         }
     }
 }

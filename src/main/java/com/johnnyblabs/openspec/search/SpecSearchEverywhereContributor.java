@@ -16,6 +16,7 @@ import com.johnnyblabs.openspec.services.SpecParsingService;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.JList;
 import javax.swing.ListCellRenderer;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -101,13 +102,16 @@ public class SpecSearchEverywhereContributor
     @NotNull
     @Override
     public ListCellRenderer<? super SpecRequirementMatch> getElementsRenderer() {
-        return SimpleListCellRenderer.create(
-                (label, value, index) -> {
-                    if (value != null) {
-                        label.setText(value.presentableText());
-                        label.setToolTipText(value.locationText());
-                    }
-                });
+        return new SimpleListCellRenderer<SpecRequirementMatch>() {
+            @Override
+            public void customize(@NotNull JList<? extends SpecRequirementMatch> list,
+                                  SpecRequirementMatch value, int index, boolean selected, boolean hasFocus) {
+                if (value != null) {
+                    setText(value.presentableText());
+                    setToolTipText(value.locationText());
+                }
+            }
+        };
     }
 
     @Nullable
