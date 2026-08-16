@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+
+- **OpenSpec CLI 1.9.x is now a supported line.** 1.9 is a strict additive superset of 1.8 — verified by running the real 1.9.0 CLI over the shared parity corpus, its default and strict validation verdicts are byte-identical to 1.8, so nothing is re-gated and the built-in validator needs no change. The plugin declares 1.9.x supported (minimum CLI remains 1.3.0), with per-generation contract coverage against captured real 1.9.0 output. 1.9's client-side additions — a new `validate --archived` flag and a task-numbering warning — make the CLI stricter, so the built-in fallback stays never more restrictive without changes.
+
 ## v0.8.0
 
 ### Added

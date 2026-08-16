@@ -338,3 +338,26 @@ duplicate-requirement ERROR. These fixtures lock both against the real CLI. Reci
   is a valid delta → still misplaced, proving detection is path-based, not content-based). The
   no-deltas shape is a 1.8 parity twin of the older `1.7.0/validate-single-change-invalid.json`, not a
   novel shape.
+
+## `1.9.0/` — parity corpus (strict additive superset of 1.8)
+
+Real CLI **1.9.0** captures. Verified empirically (run the corpus, don't diff the dist): 1.9 is a
+**strict additive superset of 1.8** — `validate --all --json` default (12/13 valid) and `--strict`
+(9/13 valid) over the shared `1.6.0/parity-corpus` markdown are **byte-identical** (modulo per-run
+`durationMs`) to the `1.8.0` twins. Committed as a forward tripwire the version-stability guard
+auto-discovers; `1.9.0` is in `ValidatorVerdictVersionStabilityTest.FLOOR`, so a dropped future
+capture fails the vacuity guard loudly. The default verdict-parity anchor stays `1.8.0` (1.9 is not
+laxer).
+
+- `validate-parity-corpus.json` / `validate-parity-corpus-strict.json` — real `validate --all --json`
+  (default and `--strict`) over the existing `1.6.0/parity-corpus` markdown, re-run through 1.9.0.
+  Consumed by `ValidatorVerdictVersionStabilityTest` (both arms).
+- `version.txt` — real `openspec --version` (bare `1.9.0`).
+
+**Deliberately not captured** (1.9's real changes are either CLI-stricter-only or not reachable
+through the plugin, and are not adopted this cycle): the new `validate --archived` flag and the
+task-numbering WARNING (both make the CLI stricter → the lenient fallback stays safe by being laxer),
+and the `no_openspec_root` error envelope returned when `validate`/`list --json` run outside a root
+(the plugin gates CLI invocation on the on-disk `openspec/` root). Optional fixture locks for these are
+a separate follow-up. Re-capture recipe: the generic "Durable next-generation capture" block above,
+with `<gen>` = `1.9.0`.
