@@ -162,6 +162,20 @@ class OpenSpecUiSmokeTest {
     /** Journey 2 — Update cleanup: the legacy-seeded project raises the review notice. */
     @Test
     fun updateActionRaisesCleanupNotice() {
+        // The plugin's legacy-file cleanup notice mirrors `openspec update`'s "legacy files pending"
+        // block, which older CLIs emitted for orphaned tool command/skill files. OpenSpec 1.8's
+        // `openspec update` DROPPED that block entirely — it updates tool files in place and reports no
+        // pending cleanup (verified against the real 1.8.0 CLI: the update output is "Updated <tool>",
+        // no cleanup block, and the files remain) — so the notice can never fire on a 1.8+ host. Skip on
+        // 1.8+; the feature stays exercised on the older CLIs the plugin still supports.
+        // Follow-up: assess whether the legacy-cleanup feature + this journey should be retired now that
+        // the CLI no longer surfaces the block.
+        val cliVersion = hostCliVersion()
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+            cliVersion != null && Regex("""^(\d+)\.(\d+)""").find(cliVersion)?.destructured
+                ?.let { (maj, min) -> maj.toInt() == 1 && min.toInt() < 8 } == true
+        ) { "update-cleanup journey needs a CLI that still emits the legacy-cleanup block (< 1.8); found: $cliVersion" }
+
         newContext(freshDemoProject()).runIdeWithDriver().useDriverAndCloseIde {
             waitForIndicators(5.minutes)
 
@@ -461,13 +475,16 @@ class OpenSpecUiSmokeTest {
         ) { "validate-results journey needs OpenSpec CLI 1.6+ on the host (found: $cliVersion)" }
 
         val projectPath = freshDemoProject()
-        // Seed a spec whose requirement lacks SHALL/MUST: on 1.6 the CLI reports it at
-        // the bracketed path (requirements[0]) — the shape that used to truncate the parse.
+        // Seed a spec whose requirement is missing SHALL/MUST *and has no body prose*: OpenSpec 1.8
+        // demoted a body-CARRYING missing-keyword requirement to a non-failing WARNING (valid in
+        // default), but a body-LESS one still ERRORs ("must contain SHALL or MUST", at the bracketed
+        // path requirements[0]) — the error the CLI-present path renders in the console. (A
+        // body-carrying seed would validate clean under 1.8 and this journey would find no error line.)
         Files.createDirectories(projectPath.resolve("openspec/specs/missing-shall"))
         Files.writeString(
             projectPath.resolve("openspec/specs/missing-shall/spec.md"),
             "# Missing Shall\n\n## Purpose\nExercises the CLI-reported missing-keyword error end to end.\n\n" +
-                "## Requirements\n\n### Requirement: Records are kept\nRecords are kept somewhere safe.\n\n" +
+                "## Requirements\n\n### Requirement: Records are kept\n\n" +
                 "#### Scenario: Persist\n- **WHEN** a record is created\n- **THEN** it can be read back later\n",
         )
         newContext(projectPath).runIdeWithDriver().useDriverAndCloseIde {
@@ -634,13 +651,16 @@ class OpenSpecUiSmokeTest {
     @Test
     fun validateResultsRenderGroupedFormattedReport() {
         val projectPath = freshDemoProject()
-        // A spec whose requirement lacks SHALL/MUST — reported as an ERROR (by the CLI when present,
-        // else the built-in), so the whole-project result fails and the console renders a grouped report.
+        // A spec whose requirement is missing SHALL/MUST *and has no body prose* — a body-LESS
+        // requirement still ERRORs (by the CLI when present, else the built-in), so the whole-project
+        // result fails and the console renders a grouped, per-severity report. (Under 1.8 a
+        // body-carrying missing-keyword requirement is only a non-failing WARNING, which would not fail
+        // the verdict; body-less keeps this journey's failing-report premise valid.)
         Files.createDirectories(projectPath.resolve("openspec/specs/formatting-demo"))
         Files.writeString(
             projectPath.resolve("openspec/specs/formatting-demo/spec.md"),
             "# Formatting Demo\n\n## Purpose\nExercises the grouped validation console report.\n\n" +
-                "## Requirements\n\n### Requirement: Records are kept\nRecords are kept somewhere safe.\n\n" +
+                "## Requirements\n\n### Requirement: Records are kept\n\n" +
                 "#### Scenario: Persist\n- **WHEN** a record is created\n- **THEN** it can be read back later\n",
         )
         // A schemaless config.yaml — the built-in validator (which owns config in both CLI modes)
