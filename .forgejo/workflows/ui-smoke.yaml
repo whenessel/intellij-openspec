@@ -33,7 +33,11 @@ jobs:
       - name: Verify display + CLI prerequisites
         run: |
           command -v Xvfb || echo "WARNING: Xvfb missing — Starter cannot create a virtual display"
-          command -v npm && npm i -g @fission-ai/openspec@1.6.0 \
+          # Install the plugin's top-supported OpenSpec CLI, read from the single source of truth in
+          # gradle.properties (never a hardcoded pin here — TargetVersionSingleSourceTest enforces it),
+          # so the smoke journeys always run against the version the plugin actually targets.
+          OSV=$(grep -E '^openspecTargetVersion=' gradle.properties | cut -d= -f2)
+          command -v npm && npm i -g @fission-ai/openspec@"$OSV" \
             || echo "WARNING: npm missing — the OpenSpec CLI is needed for the Update and CLI-authoritative validate journeys"
           command -v openspec && openspec --version || true
 
