@@ -107,6 +107,27 @@ Therefore, parallel to documentation fidelity: **any change that touches CLI-ver
 - The contract lives in the `coordination-surfaces` spec (*CLI-version behavior contract* requirement) and is mirrored, user-facing, in `docs/openspec-support.md` (the single source of truth for per-version behavior).
 - The enforcing tests are the per-version matrix in `CoordinationServiceWindowTest` — assert, for each supported line (1.3.x / 1.4.x / 1.5.x), exactly which read surface, tier, and write path is enabled, so that adding, removing, or re-gating a version-gated capability fails the build. No vacuous asserts: each row must fail if that version's behavior regresses.
 
+### CLI version targeting & local development
+
+The plugin supports a **range** of OpenSpec CLI versions, but your machine has **one** installed. Keep these two axes straight — they are bridged by captured fixtures, which is what lets the build stay version-agnostic:
+
+- **Declared support is a range, carried in-repo by fixtures.** The floor is CLI 1.3.0 and there is no ceiling. Support for a generation is *proven*, not asserted, by a committed corpus of real CLI output under `src/test/resources/fixtures/cli/<version>/` plus per-generation contract tests. Because the tests parse those captured fixtures rather than shelling out to a CLI, `./gradlew build` needs **no** OpenSpec CLI on `PATH` and produces the same result on any machine.
+- **The installed CLI is one version.** It matters only for things that actually shell out: the manual test-drive, the UI-smoke journeys, and re-capturing fixtures.
+- **The top of the supported range is single-sourced.** `openspecTargetVersion` in `gradle.properties` is the sole declaration of the top-supported CLI version. The UI-smoke workflow installs exactly that version (it reads the property; it never hardcodes a pin), and `TargetVersionSingleSourceTest` fails the build if the property drifts from its captured fixtures or if the workflow reintroduces a literal pin. The durable *floor* — the older generations whose corpora must be retained — is a separate, hand-maintained list in `ValidatorVerdictVersionStabilityTest.FLOOR` and `CliVersionAtLeastTest`; it is deliberately **not** derived from `openspecTargetVersion` (a floor that derived itself from the target could never catch the target being wrong).
+
+Local-development disciplines:
+
+- **Capture fixtures in an isolated sandbox.** When you re-capture CLI output, run the CLI with an isolated `HOME` / `XDG_*` (and telemetry off) so your real global OpenSpec state is untouched, then **sanitize machine-specific paths** (rewrite absolute paths to `/fixture/...`) before committing under `src/test/resources/fixtures/cli/<version>/`.
+- **Drive an off-target generation without downgrading your global CLI.** To reproduce behavior against an older or newer line, use `npx --yes @fission-ai/openspec@<version> <args>` rather than reinstalling the global — your everyday CLI stays put.
+- **`openspec update` is adopt-sync only.** It rewrites the tracked skills and commands to match your *installed* CLI, so run it deliberately (as part of adopting a new CLI generation), not as a routine step — and never to "target" a version other than the one you have installed.
+
+**Bumping the top-supported CLI version** (a deliberate, ordered checklist — each step gates the next):
+
+1. Install the new CLI generation locally and capture its fixtures **first**: `src/test/resources/fixtures/cli/<new>/version.txt`, `validate-parity-corpus.json`, and `validate-parity-corpus-strict.json` (sanitized, from an isolated sandbox as above).
+2. Bump `openspecTargetVersion` in `gradle.properties` to `<new>`.
+3. Append `<new>` to `ValidatorVerdictVersionStabilityTest.FLOOR` and to `CliVersionAtLeastTest`'s supported-versions value list (these are additive — do not remove older entries).
+4. Run `./gradlew build`. `TargetVersionSingleSourceTest` will red if step 1 was skipped (no corpus for the target) — that is the guard working.
+
 ## Pull Requests
 
 1. Fork the repo and create a branch from `main`
