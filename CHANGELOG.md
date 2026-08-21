@@ -4,6 +4,8 @@
 
 ## Unreleased
 
+## v0.10.0
+
 ### Added
 
 - **OpenSpec CLI 1.10.x is now a supported line.** 1.10 is a strict additive superset of 1.9 — its validation engine is byte-identical to 1.9, and verified by running the real 1.10.0 CLI over the shared parity corpus, its default and strict validation verdicts are unchanged, so nothing is re-gated and the built-in validator needs no change. The plugin declares 1.10.x supported (minimum CLI remains 1.3.0), with per-generation contract coverage against captured real 1.10.0 output. 1.10's client-side additions — an `init --language` flag, a Zed editor target, and the first-run completion tip moved to stderr — are off-model or inert to the plugin. 1.10 is also the first two-digit minor version, so the plugin's version comparison is numeric and correctly orders 1.10.0 above 1.9.0.
