@@ -361,3 +361,35 @@ and the `no_openspec_root` error envelope returned when `validate`/`list --json`
 (the plugin gates CLI invocation on the on-disk `openspec/` root). Optional fixture locks for these are
 a separate follow-up. Re-capture recipe: the generic "Durable next-generation capture" block above,
 with `<gen>` = `1.9.0`.
+
+## `1.10.0/` — parity corpus (strict additive superset of 1.9)
+
+Real CLI **1.10.0** captures. Verified empirically (run the corpus, don't diff the release notes) and
+corroborated by a source diff of the validation engine (byte-identical 1.9→1.10): 1.10 is a **strict
+additive superset of 1.9** — `validate --all --json` default (12/13 valid) and `--strict` (9/13 valid)
+over the shared `1.6.0/parity-corpus` markdown are **content-identical** (only per-item `durationMs`
+timing differs) to the `1.9.0` (and `1.8.0`) twins. Committed as a forward tripwire the version-stability
+guard auto-discovers; `1.10.0` is in `ValidatorVerdictVersionStabilityTest.FLOOR`, so a dropped future
+capture fails the vacuity guard loudly. The default verdict-parity anchor stays `1.8.0` and the strict
+anchor stays `1.6.0` (1.10 is not laxer).
+
+- `validate-parity-corpus.json` / `validate-parity-corpus-strict.json` — real `validate --all --json`
+  (default and `--strict`) over the existing `1.6.0/parity-corpus` markdown, re-run through 1.10.0.
+  Consumed by `ValidatorVerdictVersionStabilityTest` (both arms). Capture-time discipline: after
+  sanitizing, diff each twin against its `1.9.0` counterpart with
+  `del(.durationMs, .items[].durationMs)` and confirm the only differences are timing — anything else is
+  a real 1.10 behavior change (stop; do not edit the fixture to force a guard green).
+- `version.txt` — real `openspec --version` (bare `1.10.0`). Also asserted by `TargetVersionSingleSource
+  Test` (must equal `openspecTargetVersion` in `gradle.properties`).
+
+**1.10 is also the first two-digit minor version.** A lexical version compare would misorder `1.10.0`
+below `1.9.0`; the plugin's `CliVersion.compare` is numeric (segment-wise), and
+`CliVersionTest.twoDigitMinor_ordersNumericallyNotLexically` pins the `1.9`/`1.10` boundary so a
+regression to lexical comparison fails loudly.
+
+**Deliberately not captured / not adopted** (1.10's client-side additions are off-model or inert to the
+plugin): the new `init --language` flag and Zed adapter target (`--tools zed`) — off-model AI-tool /
+scaffold surfaces; the first-run completion tip relocated to stderr (deferred on `--json` and non-TTY
+runs, so it never enters parsed stdout); and the runtime-only `completionTipSeen` global-config field
+(the tolerant reader ignores it). Re-capture recipe: the generic "Durable next-generation capture" block
+above, with `<gen>` = `1.10.0`.

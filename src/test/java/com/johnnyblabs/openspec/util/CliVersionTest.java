@@ -49,4 +49,23 @@ class CliVersionTest {
         assertFalse(CliVersion.inRange(null, "1.4.0", "1.5.0"));
         assertFalse(CliVersion.inRange("", "1.4.0", "1.5.0"));
     }
+
+    // ---- two-digit minor ordering (1.10 is the first two-digit minor) --------
+
+    @Test
+    void twoDigitMinor_ordersNumericallyNotLexically() {
+        // 1.10 is the first minor version whose numeral is two digits. A lexical string compare would
+        // misplace "1.10.0" BELOW "1.9.0" ('1' < '9' at index 2). CliVersion.compare is segment-wise
+        // numeric, so 1.10 sorts above 1.9. Every assertion below flips-and-fails under a lexical
+        // regression, so this can't pass vacuously; it enforces the plugin-core spec's SHALL that the
+        // version comparison order 1.10.0 above 1.9.0.
+        assertTrue(CliVersion.compare("1.10.0", "1.9.0") > 0, "1.10.0 must sort above 1.9.0");
+        assertTrue(CliVersion.compare("1.9.0", "1.10.0") < 0, "1.9.0 must sort below 1.10.0");
+        assertTrue(CliVersion.atLeast("1.10.0", "1.9.0"), "1.10.0 is at least 1.9.0");
+        assertFalse(CliVersion.atLeast("1.9.0", "1.10.0"), "1.9.0 is not at least 1.10.0");
+        assertTrue(CliVersion.below("1.9.0", "1.10.0"), "1.9.0 is below 1.10.0");
+        assertFalse(CliVersion.below("1.10.0", "1.9.0"), "1.10.0 is not below 1.9.0");
+        // same numeric-vs-lexical property on a two-digit PATCH segment:
+        assertTrue(CliVersion.atLeast("1.9.10", "1.9.9"), "1.9.10 is at least 1.9.9");
+    }
 }

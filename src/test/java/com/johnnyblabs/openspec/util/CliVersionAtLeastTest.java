@@ -83,10 +83,12 @@ class CliVersionAtLeastTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"1.3.0", "1.3.1", "1.4.0", "1.4.1", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "2.0.0"})
+    @ValueSource(strings = {"1.3.0", "1.3.1", "1.4.0", "1.4.1", "1.5.0", "1.6.0", "1.7.0", "1.8.0", "1.9.0", "1.10.0", "2.0.0"})
     void allSupportedVersions_meetFloor(String version) {
-        // Every declared supported line (1.3.x–1.9.x) clears the 1.3.0 floor; 2.0.0 asserts the
-        // no-upper-cap property so a future line flows through without an allowlist edit.
+        // Every declared supported line (1.3.x–1.10.x) clears the 1.3.0 floor; 2.0.0 asserts the
+        // no-upper-cap property so a future line flows through without an allowlist edit. This is the
+        // supported-line ENUMERATION assertion; the two-digit 1.9-vs-1.10 ordering itself is pinned by
+        // CliVersionTest.twoDigitMinor_ordersNumericallyNotLexically.
         assertTrue(CliVersion.atLeast(version, "1.3.0"),
                 version + " should meet 1.3.0 floor");
     }
