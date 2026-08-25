@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **"Register Existing Store" no longer dead-ends on a healthy OpenSpec root that isn't yet a store.** Registering such a root requires confirming creation of its store-identity metadata; the action previously surfaced that confirmation as an un-actionable error dialog, leaving no way to proceed. It now shows a Yes/Cancel prompt (carrying the CLI's own message), registers the root on confirmation, and leaves it untouched on cancel. Roots that are already stores, and refusals, are unaffected.
+
 ## v0.10.0
 
 ### Added

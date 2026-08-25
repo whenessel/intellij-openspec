@@ -685,6 +685,28 @@ public final class CoordinationService {
             diagnostics = diagnostics != null ? List.copyOf(diagnostics) : List.of();
         }
 
+        /**
+         * The CLI diagnostic code the {@code store register} probe raises when a healthy OpenSpec root
+         * is not yet a store and creating its {@code .openspec-store/store.yaml} identity metadata
+         * needs confirmation. Kept in the coordination layer (alongside the other {@code store_register_*}
+         * codes) so the panel never has to know the string.
+         */
+        public static final String IDENTITY_CONFIRMATION_REQUIRED_CODE =
+                "store_register_identity_confirmation_required";
+
+        /**
+         * True iff any retained diagnostic carries {@link #IDENTITY_CONFIRMATION_REQUIRED_CODE} — the
+         * gate the no-{@code --yes} register probe raises for a healthy root that is not yet a store.
+         * Keys on the specific code, not merely "has an error", so a different {@code store_register_*}
+         * refusal (an invalid/declared pointer) does not read as a confirmation gate.
+         */
+        public boolean identityConfirmationRequired() {
+            for (Diagnostic d : diagnostics) {
+                if (IDENTITY_CONFIRMATION_REQUIRED_CODE.equals(d.code())) return true;
+            }
+            return false;
+        }
+
         /** A below-the-bar guidance failure — no command was run. */
         public static WriteResult gated() {
             return new WriteResult(false, STORE_WRITE_GUIDANCE, null, null, false, List.of(), List.of());
@@ -711,10 +733,36 @@ public final class CoordinationService {
                 "store", "setup", id, "--path", path, "--json");
     }
 
-    /** Registers an existing store root: {@code store register <path> --json}. Off-EDT. */
+    /**
+     * Registers an existing store root without confirming store-identity creation: the probe
+     * {@code store register <path> --json} (no {@code --yes}). Off-EDT. Delegates to
+     * {@link #registerStore(String, boolean)} with {@code confirmIdentity=false} so existing callers
+     * stay source-compatible and a healthy not-yet-a-store root returns the CLI's
+     * {@code store_register_identity_confirmation_required} gate rather than silently writing
+     * {@code .openspec-store/store.yaml}.
+     */
     public WriteResult registerStore(String path) {
-        return runStoreWrite(false, "Registered store.",
-                "store", "register", path, "--json");
+        return registerStore(path, false);
+    }
+
+    /**
+     * Registers an existing store root. When {@code confirmIdentity} is true the invocation adds
+     * {@code --yes} — {@code store register <path> --yes --json} — which authorizes the CLI to create
+     * store-identity metadata ({@code .openspec-store/store.yaml}) for a healthy OpenSpec root
+     * non-interactively; when false it is the no-{@code --yes} probe. The {@code --yes} option has
+     * been accepted on {@code store register} since CLI 1.5.0, so the retry is safe across the whole
+     * supported range and never trips an unknown-option error. Off-EDT.
+     *
+     * <p>The caller MUST have obtained explicit user confirmation before passing
+     * {@code confirmIdentity=true} — mirroring the confirm-plus-{@code --yes} idiom the destructive
+     * removals already use, adapted to this non-destructive metadata creation.
+     */
+    public WriteResult registerStore(String path, boolean confirmIdentity) {
+        return confirmIdentity
+                ? runStoreWrite(false, "Registered store.",
+                        "store", "register", path, "--yes", "--json")
+                : runStoreWrite(false, "Registered store.",
+                        "store", "register", path, "--json");
     }
 
     /**
@@ -823,8 +871,8 @@ public final class CoordinationService {
      * created store root and {@code created_files} when present, and derives the failure message and
      * {@code fix} solely from the parsed {@code status[]} array — never from stderr.
      */
-    static WriteResult parseWriteEnvelope(boolean success, @Nullable String json,
-                                          String successMessage, boolean destructive) {
+    public static WriteResult parseWriteEnvelope(boolean success, @Nullable String json,
+                                                 String successMessage, boolean destructive) {
         JsonObject root = null;
         try {
             root = GSON.fromJson(CliJson.extractJsonPayload(json), JsonObject.class);

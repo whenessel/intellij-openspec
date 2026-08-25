@@ -53,10 +53,11 @@ class OpenSpecUiSmokeTest {
         fun getNotifications(project: Project?): List<NotificationRef>
     }
 
-    /** JMX stub to flip the register-store UI-smoke seam property between journey stops. */
+    /** JMX stub to flip the register-store UI-smoke seam properties between journey stops. */
     @Remote("java.lang.System")
     interface SystemRef {
         fun setProperty(key: String, value: String): String?
+        fun clearProperty(key: String): String?
     }
 
     // Programmatic tool-window content selection: robot clicks on ContentTabLabel are
@@ -332,12 +333,21 @@ class OpenSpecUiSmokeTest {
     }
 
     /**
-     * Journey 6 — store health follows CLI 1.6 semantics (change adapt-store-health-to-1-6).
+     * Journey 6 — store health follows CLI 1.6 semantics, and Register Existing Store is actionable
+     * on the CLI's identity-confirmation gate (change fix-store-register-identity-confirmation).
      * The IDE (and every CLI child process it spawns) runs against an ISOLATED registry via
      * XDG_DATA_HOME, so the journey never touches the user's real OpenSpec data dir — that's
      * what keeps this register-exercising journey inside the no-durable-state-mutation rule.
-     * The register action's file chooser is bypassed through the
-     * `openspec.uismoke.register.store.root` seam, flipped per stop via remote System.setProperty.
+     *
+     * Two UI-smoke seams are flipped per stop via remote System.setProperty/clearProperty (the remote
+     * Driver can drive neither the platform file chooser nor a modal Yes/No dialog by clicking):
+     *  - `openspec.uismoke.register.store.root` bypasses the file chooser (preselects the folder);
+     *  - `openspec.uismoke.register.confirm` (`yes`/`no`) auto-answers the identity confirmation in
+     *    place of the modal dialog — the Driver can only *dispose* a dialog, which cancels = NO.
+     *
+     * Stop C is the intentional break vs. the prior journey: registering a healthy not-yet-a-store
+     * root used to dead-end at the confirmation *failure dialog*; now it confirms (seam = `yes`) and
+     * the `--yes` retry creates the store identity, so the row registers healthy.
      * Requires a 1.6+ host CLI (skipped otherwise).
      */
     @Test
@@ -362,6 +372,8 @@ class OpenSpecUiSmokeTest {
         val healthyRoot = seedStoreRoot(base, "healthy-empty-store", "schema: spec-driven\n", withIdentity = true)
         val pointerRoot = seedStoreRoot(base, "pointer-store", "store: some-external-store\n", withIdentity = false)
         val brandNewRoot = seedStoreRoot(base, "brand-new-store", "schema: spec-driven\n", withIdentity = false)
+        // A second never-a-store root for the silent-abort (confirm=NO) micro-stop.
+        val declinedRoot = seedStoreRoot(base, "declined-store", "schema: spec-driven\n", withIdentity = false)
 
         val context = newContext(freshDemoProject()).apply {
             applyVMOptionsPatch { withEnv("XDG_DATA_HOME", xdg.toString()) }
@@ -422,7 +434,10 @@ class OpenSpecUiSmokeTest {
             }
 
             // Stop B (refusal wiring): a store:-pointer root is refused with the CLI's
-            // message + fix — surfaced in the write-failure dialog, never raw stderr.
+            // message + fix — surfaced in the write-failure dialog, never raw stderr. The confirm
+            // seam is cleared so this refusal is proven NOT to route through the identity confirmation
+            // (a pointer-declared refusal is a different code, not the confirmation gate).
+            sys.clearProperty("openspec.uismoke.register.confirm")
             sys.setProperty("openspec.uismoke.register.store.root", pointerRoot.toString())
             fireRegisterAction()
             expectFailureDialog(
@@ -430,26 +445,56 @@ class OpenSpecUiSmokeTest {
                 "refusal dialog does not carry the CLI's pointer-declared message"
             )
 
-            // Stop C (confirmation wiring): a never-a-store root gets 1.6's identity
-            // confirmation envelope, surfaced with its --yes fix text; the plugin never
-            // auto-confirms.
+            // Stop C (INTENTIONAL BREAK — confirm then succeed): a healthy never-a-store root raises
+            // the identity-confirmation gate on the no-`--yes` probe; with the confirm seam = `yes` the
+            // plugin retries `store register <root> --yes --json`, which creates the store identity, so
+            // the new row registers healthy (no unhealthy marker). This replaces the old dead-end that
+            // asserted the confirmation *failure dialog*.
+            sys.setProperty("openspec.uismoke.register.confirm", "yes")
             sys.setProperty("openspec.uismoke.register.store.root", brandNewRoot.toString())
             fireRegisterAction()
-            expectFailureDialog(
-                "identity-confirmation dialog", "--yes",
-                "confirmation envelope's fix text not surfaced"
-            )
+            ideFrame {
+                waitUntil("confirmed brand-new store row renders", timeout = 2.minutes) {
+                    hasText("brand-new-store")
+                }
+                check(!hasSubtext("unhealthy openspec-root")) {
+                    "confirmed register did not create the store identity via --yes"
+                }
+            }
 
-            // Stop A (register wiring): registering a fresh root WITH identity succeeds on
-            // 1.6 (1.5 refused it) and the new row lists healthy — no error marker.
+            // Stop A (no-confirmation branch): a root that ALREADY carries store identity metadata
+            // registers straight through the probe — no gate, no dialog — and lists healthy.
+            sys.clearProperty("openspec.uismoke.register.confirm")
             sys.setProperty("openspec.uismoke.register.store.root", healthyRoot.toString())
             fireRegisterAction()
             ideFrame {
-                waitUntil("freshly registered healthy-empty store row renders", timeout = 2.minutes) {
+                waitUntil("already-identity healthy-empty store row renders", timeout = 2.minutes) {
                     hasText("healthy-empty-store")
                 }
                 check(!hasSubtext("unhealthy openspec-root")) {
-                    "freshly registered healthy-empty store rendered the unhealthy marker"
+                    "already-identity store rendered the unhealthy marker"
+                }
+            }
+            // No confirmation dialog nor failure dialog should have appeared on the no-gate branch.
+            check(ui.x { byTitle("Register Existing Store") }.notPresent()) {
+                "an already-identity register raised the confirmation dialog — the probe should not gate"
+            }
+            check(ui.x { byTitle("Coordination Action Failed") }.notPresent()) {
+                "an already-identity register surfaced a failure dialog"
+            }
+
+            // Stop NO-path (silent abort end-to-end): a second never-a-store root with confirm = `no`
+            // hits the gate, the plugin declines, and NOTHING happens — no --yes retry, no new row, no
+            // failure dialog.
+            sys.setProperty("openspec.uismoke.register.confirm", "no")
+            sys.setProperty("openspec.uismoke.register.store.root", declinedRoot.toString())
+            fireRegisterAction()
+            check(ui.x { byTitle("Coordination Action Failed") }.notPresent()) {
+                "declining the identity confirmation surfaced a failure dialog — abort must be silent"
+            }
+            ideFrame {
+                check(!hasText("declined-store")) {
+                    "declining the identity confirmation still registered the store"
                 }
             }
         }

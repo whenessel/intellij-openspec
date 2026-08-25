@@ -52,6 +52,10 @@ class StoreWorksetWriteContractTest {
         return fixtureAt("1.7.0", name);
     }
 
+    private static String fixture110(String name) {
+        return fixtureAt("1.10.0", name);
+    }
+
     private static String fixtureAt(String cliVersion, String name) {
         String path = "/fixtures/cli/" + cliVersion + "/" + name;
         try (InputStream is = StoreWorksetWriteContractTest.class.getResourceAsStream(path)) {
@@ -292,5 +296,59 @@ class StoreWorksetWriteContractTest {
         assertEquals("store_register_identity_confirmation_required", d.code());
         assertNotNull(r.fix());
         assertTrue(r.fix().contains("--yes"));
+    }
+
+    // ---- store register, 1.10 generation (the confirm-then-`--yes` flow) -----
+
+    @Test
+    void parsesReal110StoreRegisterIdentityConfirmationRequired() {
+        // The probe refusal on 1.10: `store register <root> --json` (no --yes) on a healthy
+        // not-yet-a-store root. Message + fix are the CLI's own, surfaced verbatim to the confirm dialog.
+        WriteResult r = CoordinationService.parseWriteEnvelope(
+                false, fixture110("store-register-confirmation-required.json"), "ok", false);
+        assertFalse(r.success());
+        Diagnostic d = r.diagnostics().get(0);
+        assertEquals("store_register_identity_confirmation_required", d.code());
+        assertEquals("store.metadata", d.target());
+        assertNotNull(r.fix());
+        assertTrue(r.fix().contains("--yes"), "the fix must carry the --yes remediation");
+        assertTrue(r.message().contains("into store"), "the message must be the parsed status[] message");
+    }
+
+    @Test
+    void parsesReal110StoreRegisterYesSuccessCreatesIdentity() {
+        // The `--yes` retry success on 1.10: creates .openspec-store/store.yaml and reports a clean
+        // status[] with the store root.
+        WriteResult r = CoordinationService.parseWriteEnvelope(
+                true, fixture110("store-register-yes-success.json"), "ok", false);
+        assertTrue(r.success());
+        assertEquals("/fixture/healthy-root", r.createdPath());
+        assertTrue(r.createdFiles().contains(".openspec-store/store.yaml"),
+                "the --yes retry creates the store-identity metadata");
+        assertTrue(r.diagnostics().isEmpty(), "a confirmed register is clean — no diagnostics");
+        assertNull(r.fix());
+    }
+
+    @Test
+    void identityConfirmationRequiredKeysOnTheSpecificCodeNotMerelyAnError() {
+        // TRUE only on the confirmation gate...
+        WriteResult gate = CoordinationService.parseWriteEnvelope(
+                false, fixture110("store-register-confirmation-required.json"), "ok", false);
+        assertTrue(gate.identityConfirmationRequired());
+
+        // ...FALSE on the yes-success envelope (a clean success — no diagnostics)...
+        WriteResult success = CoordinationService.parseWriteEnvelope(
+                true, fixture110("store-register-yes-success.json"), "ok", false);
+        assertFalse(success.identityConfirmationRequired());
+
+        // ...and FALSE on a DIFFERENT-code refusal (also an error), proving the accessor keys on the
+        // specific code rather than merely "has an error" — a pointer-declared refusal must not route
+        // through the confirm dialog.
+        WriteResult pointerDeclared = CoordinationService.parseWriteEnvelope(
+                false, fixture16("store-register-pointer-declared.json"), "ok", false);
+        assertFalse(pointerDeclared.success());
+        assertEquals("store_root_pointer_declared", pointerDeclared.diagnostics().get(0).code());
+        assertFalse(pointerDeclared.identityConfirmationRequired(),
+                "a different store_register_* refusal must not read as the identity gate");
     }
 }
