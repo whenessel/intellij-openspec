@@ -61,7 +61,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * Tool-window tab presenting the OpenSpec coordination collections. On the OpenSpec 1.5 store model
@@ -454,12 +456,27 @@ public final class CoordinationPanel extends JPanel {
         runWrite(service -> service.setupStore(id, path));
     }
 
+    /**
+     * Register Existing Store: probe {@code store register <path> --json} (no {@code --yes}); on the
+     * CLI's {@code store_register_identity_confirmation_required} gate, present an actionable Yes/Cancel
+     * confirmation carrying the CLI's own {@code message}/{@code fix}; on confirmation, retry with
+     * {@code --yes}; on cancel, abort quietly. The probe→confirm→retry policy lives in the panel-free
+     * static {@link #orchestrateRegister}, so it is unit-testable without constructing a panel.
+     *
+     * <p>Two UI-smoke seams (the remote Driver SDK cannot drive the platform file chooser, nor click a
+     * modal Yes/No dialog):
+     * <ul>
+     *   <li>{@code openspec.uismoke.register.store.root} — preselects the folder the file chooser would
+     *       otherwise return (set per journey stop).</li>
+     *   <li>{@code openspec.uismoke.register.confirm} — auto-answers the identity confirmation
+     *       ({@code "yes"}/{@code "no"}); honored by {@link #confirmIdentityOnEdt} in place of the modal
+     *       dialog, since the Driver can only <em>dispose</em> a dialog (which cancels = NO).</li>
+     * </ul>
+     */
     private void onRegisterStore() {
-        // UI-smoke seam: the platform file chooser cannot be driven over the remote Driver SDK,
-        // so the smoke journey preselects the folder via this property (set per journey stop).
         String preset = System.getProperty("openspec.uismoke.register.store.root");
         if (preset != null && !preset.isBlank()) {
-            runWrite(service -> service.registerStore(preset));
+            registerStoreAt(preset);
             return;
         }
         VirtualFile chosen = FileChooser.chooseFile(
@@ -468,8 +485,61 @@ public final class CoordinationPanel extends JPanel {
                         .withDescription("Choose an existing store's root folder"),
                 project, null);
         if (chosen == null) return;
-        String path = chosen.getPath();
-        runWrite(service -> service.registerStore(path));
+        registerStoreAt(chosen.getPath());
+    }
+
+    /** Off-EDT: run the probe→confirm→retry register orchestration for {@code path}. */
+    private void registerStoreAt(String path) {
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            CoordinationService service = project.getService(CoordinationService.class);
+            if (service == null) {
+                completeWrite(CoordinationService.WriteResult.fail("Coordination service unavailable."));
+                return;
+            }
+            orchestrateRegister(service, path, this::confirmIdentityOnEdt, this::completeWrite);
+        });
+    }
+
+    /**
+     * The probe→confirm→retry register policy, panel-free (mirrors {@link #storeHealthMarkers}) so the
+     * whole branch matrix is unit-testable without constructing a {@link CoordinationPanel}. Probes with
+     * the no-{@code --yes} {@code registerStore(path)}; on the identity-confirmation gate it asks
+     * {@code confirm} (NO → silent abort: no retry, no completion; YES → retry the {@code --yes} overload
+     * and complete with that result); any other probe outcome flows straight to {@code complete}.
+     *
+     * @param confirm  supplies the EDT Yes/No decision from the probe {@link CoordinationService.WriteResult}
+     * @param complete supplies the shared write completion (VFS refresh + reload / failure dialog)
+     */
+    static void orchestrateRegister(CoordinationService svc, String path,
+                                    Predicate<CoordinationService.WriteResult> confirm,
+                                    Consumer<CoordinationService.WriteResult> complete) {
+        CoordinationService.WriteResult probe = svc.registerStore(path);
+        if (probe.identityConfirmationRequired()) {
+            if (!confirm.test(probe)) return;
+            complete.accept(svc.registerStore(path, true));
+            return;
+        }
+        complete.accept(probe);
+    }
+
+    /**
+     * Answers the store-identity confirmation on the EDT using the probe's own parsed {@code message}
+     * and {@code fix} — never hand-written, never raw stderr. Honors the
+     * {@code openspec.uismoke.register.confirm} seam ({@code "yes"}/{@code "no"}) first so the smoke
+     * Driver can drive the branch (it cannot click a modal dialog).
+     */
+    private boolean confirmIdentityOnEdt(CoordinationService.WriteResult probe) {
+        String seam = System.getProperty("openspec.uismoke.register.confirm");
+        if (seam != null && !seam.isBlank()) {
+            return "yes".equalsIgnoreCase(seam.trim());
+        }
+        String base = probe.message() != null ? probe.message() : "Turn this OpenSpec root into a store?";
+        String prompt = (probe.fix() != null && !probe.fix().isBlank()) ? base + "\n\n" + probe.fix() : base;
+        int[] answer = new int[1];
+        ApplicationManager.getApplication().invokeAndWait(() ->
+                answer[0] = Messages.showYesNoDialog(project, prompt, "Register Existing Store",
+                        "Create Store", "Cancel", Messages.getQuestionIcon()));
+        return answer[0] == Messages.YES;
     }
 
     private void onStoreDoctor(StoreEntry store) {
@@ -591,17 +661,26 @@ public final class CoordinationPanel extends JPanel {
             CoordinationService.WriteResult result = service != null
                     ? action.apply(service)
                     : CoordinationService.WriteResult.fail("Coordination service unavailable.");
-            // Refresh VFS for a newly created store root off the EDT so it appears immediately.
-            if (result.success() && result.createdPath() != null) {
-                LocalFileSystem.getInstance().refreshAndFindFileByNioFile(Path.of(result.createdPath()));
+            completeWrite(result);
+        });
+    }
+
+    /**
+     * Shared write completion, called off the EDT: refreshes VFS for a newly created store root so it
+     * appears immediately, then on the EDT reloads the surface on success or surfaces the parsed
+     * failure. Used by both {@link #runWrite} and the register orchestration ({@link #orchestrateRegister}).
+     */
+    private void completeWrite(CoordinationService.WriteResult result) {
+        // Refresh VFS for a newly created store root off the EDT so it appears immediately.
+        if (result.success() && result.createdPath() != null) {
+            LocalFileSystem.getInstance().refreshAndFindFileByNioFile(Path.of(result.createdPath()));
+        }
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (result.success()) {
+                reload();
+            } else {
+                showWriteFailure(result);
             }
-            ApplicationManager.getApplication().invokeLater(() -> {
-                if (result.success()) {
-                    reload();
-                } else {
-                    showWriteFailure(result);
-                }
-            });
         });
     }
 

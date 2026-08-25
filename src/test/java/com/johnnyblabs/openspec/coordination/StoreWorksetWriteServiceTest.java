@@ -3,18 +3,26 @@ package com.johnnyblabs.openspec.coordination;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.coordination.CoordinationService.WriteResult;
 import com.johnnyblabs.openspec.services.CliDetectionService;
+import com.johnnyblabs.openspec.util.CliRunner;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 
@@ -123,5 +131,104 @@ class StoreWorksetWriteServiceTest {
                 true, "{\"store\":{\"id\":\"s\",\"root\":\"/fixture/s\"},\"status\":[]}",
                 "Unregistered store.", false);
         assertFalse(unregister.destructive());
+    }
+
+    // ---- register probe/retry argv guards (CLI 1.10, confirm-then-`--yes`) ---
+    //
+    // These are the regression backstops for the dead-end this change fixes: the probe MUST NOT carry
+    // `--yes` (else a healthy not-yet-a-store root is silently registered without confirmation) and the
+    // retry MUST carry it (else the confirmed register never creates identity metadata). Real 1.10.0
+    // captures back the parse assertions so the guards are not vacuous.
+
+    private static String fixture110(String name) {
+        String path = "/fixtures/cli/1.10.0/" + name;
+        try (InputStream is = StoreWorksetWriteServiceTest.class.getResourceAsStream(path)) {
+            if (is == null) throw new IllegalStateException("Fixture not found: " + path);
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to read fixture: " + path, e);
+        }
+    }
+
+    @Test
+    void registerStoreProbeInvokesNoYesArgvAndReportsConfirmationGate() {
+        CoordinationService service = serviceWith("1.10.0", true);
+        String path = "/fixture/healthy-root";
+        // A refusal exit (non-zero) carrying the confirmation-required envelope on stdout.
+        CliRunner.CliResult probeResult = new CliRunner.CliResult(
+                1, fixture110("store-register-confirmation-required.json"), "");
+
+        // Benign default for ANY unmatched CliRunner.run(...) so a wrong argv (e.g. a probe that
+        // gains `--yes`, or a retry that loses it) surfaces as a clean verify/assertion failure
+        // rather than an NPE on a null result dereferenced before the verify runs.
+        try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class,
+                invocation -> new CliRunner.CliResult(1, "{\"status\":[]}", ""))) {
+            cli.when(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path), eq("--json")))
+                    .thenReturn(probeResult);
+
+            WriteResult r = service.registerStore(path);
+
+            // The probe reaches the CLI with the exact no-`--yes` argv...
+            cli.verify(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path), eq("--json")));
+            // ...and NEVER the `--yes` variant.
+            cli.verify(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path),
+                    eq("--yes"), eq("--json")), never());
+            // The parsed confirmation gate is surfaced (drives the panel's confirm dialog).
+            assertFalse(r.success());
+            assertTrue(r.identityConfirmationRequired(),
+                    "the no-`--yes` probe on a healthy not-yet-a-store root reports the identity gate");
+        }
+    }
+
+    @Test
+    void registerStoreConfirmRetryInvokesYesArgvAndCreatesIdentity() {
+        CoordinationService service = serviceWith("1.10.0", true);
+        String path = "/fixture/healthy-root";
+        CliRunner.CliResult yesResult = new CliRunner.CliResult(
+                0, fixture110("store-register-yes-success.json"), "");
+
+        // Benign default for ANY unmatched CliRunner.run(...) so a wrong argv (e.g. a probe that
+        // gains `--yes`, or a retry that loses it) surfaces as a clean verify/assertion failure
+        // rather than an NPE on a null result dereferenced before the verify runs.
+        try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class,
+                invocation -> new CliRunner.CliResult(1, "{\"status\":[]}", ""))) {
+            cli.when(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path),
+                    eq("--yes"), eq("--json"))).thenReturn(yesResult);
+
+            WriteResult r = service.registerStore(path, true);
+
+            cli.verify(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path),
+                    eq("--yes"), eq("--json")));
+            assertTrue(r.success(), "the `--yes` retry registers the root");
+            assertTrue(r.createdFiles().contains(".openspec-store/store.yaml"),
+                    "the `--yes` retry creates the store-identity metadata");
+        }
+    }
+
+    @Test
+    void registerStoreFalseOverloadProducesIdenticalNoYesArgvAsProbe() {
+        // Delegation guard: registerStore(path) and registerStore(path, false) must issue the SAME
+        // no-`--yes` argv, and neither the `--yes` variant.
+        CoordinationService service = serviceWith("1.10.0", true);
+        String path = "/fixture/healthy-root";
+        CliRunner.CliResult probeResult = new CliRunner.CliResult(
+                1, fixture110("store-register-confirmation-required.json"), "");
+
+        // Benign default for ANY unmatched CliRunner.run(...) so a wrong argv (e.g. a probe that
+        // gains `--yes`, or a retry that loses it) surfaces as a clean verify/assertion failure
+        // rather than an NPE on a null result dereferenced before the verify runs.
+        try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class,
+                invocation -> new CliRunner.CliResult(1, "{\"status\":[]}", ""))) {
+            cli.when(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path), eq("--json")))
+                    .thenReturn(probeResult);
+
+            service.registerStore(path);
+            service.registerStore(path, false);
+
+            cli.verify(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path), eq("--json")),
+                    times(2));
+            cli.verify(() -> CliRunner.run(eq(project), eq("store"), eq("register"), eq(path),
+                    eq("--yes"), eq("--json")), never());
+        }
     }
 }

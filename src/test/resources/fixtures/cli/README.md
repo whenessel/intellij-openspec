@@ -387,6 +387,34 @@ below `1.9.0`; the plugin's `CliVersion.compare` is numeric (segment-wise), and
 `CliVersionTest.twoDigitMinor_ordersNumericallyNotLexically` pins the `1.9`/`1.10` boundary so a
 regression to lexical comparison fails loudly.
 
+### `1.10.0/` — store register confirmation-gate captures
+
+Two real `store register` envelopes that pin the confirm-then-`--yes` register flow (the identity
+confirmation gate the CLI raises when turning a healthy OpenSpec root into a store). Consumed by
+`StoreWorksetWriteContractTest` (parser twins + `identityConfirmationRequired()` coverage) and
+`CoordinationPanelRegisterFlowTest` (the probe→confirm→retry orchestration). The prior register
+fixtures (`1.6.0`/`1.7.0`) exercised the *parser* but no test asserted the register *argv*, so a
+missing `--yes` on the retry — the dead-end this change fixes — slipped past CI; these two lock the
+outcome shapes for both phases against the real 1.10.0 CLI.
+
+- `store-register-confirmation-required.json` — the **probe** refusal: `store register <root> --json`
+  (no `--yes`) on a healthy OpenSpec root that does not yet carry `.openspec-store/store.yaml`.
+  `status[0].code == "store_register_identity_confirmation_required"`, `store`/`registry`/`git` all
+  null, `created_files: []`, and a `fix` mentioning `--yes`. The probe leaves the root store-less.
+- `store-register-yes-success.json` — the **retry** success: `store register <root> --yes --json` on
+  the same class of root. `status: []`, `store.root` set, `registry.already_registered: false`, and
+  `created_files` containing `.openspec-store/store.yaml` (the identity metadata the `--yes` retry
+  creates).
+
+Capture recipe (isolated env, per the discipline above): under a fresh `HOME`/`XDG_DATA_HOME` with
+`OPENSPEC_TELEMETRY=0`, `git init` + `openspec init --tools none` a throwaway root, run
+`store register <root> --json` (no `--yes`) FIRST — it reports the confirmation gate and does **not**
+write store identity — then `store register <root> --yes --json` on an equivalently fresh root for the
+success twin. Sanitize every machine-absolute path: the store root → `/fixture/healthy-root`, the XDG
+registry path → `/fixture/registry/openspec/stores/registry.yaml`, and the store id (derived from the
+temp folder name) → `healthy-root`. Grep the results for `/Users`, `/var/folders`, `/home/`, and the
+temp base before committing — zero machine paths may remain.
+
 **Deliberately not captured / not adopted** (1.10's client-side additions are off-model or inert to the
 plugin): the new `init --language` flag and Zed adapter target (`--tools zed`) — off-model AI-tool /
 scaffold surfaces; the first-run completion tip relocated to stderr (deferred on `--json` and non-TTY
