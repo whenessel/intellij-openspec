@@ -38,5 +38,5 @@
 - [x] 6.1 Confirm the `store-workset-actions` delta (MODIFIED "Store registration outcome semantics") matches the implemented behavior: probe without `--yes`, actionable confirmation on the gate, `--yes` retry on confirm, silent abort on cancel.
 - [x] 6.2 `openspec validate fix-store-register-identity-confirmation --strict` clean.
 - [x] 6.3 `./gradlew build` green — full suite + JaCoCo floor. Re-run `jacocoTestCoverageVerification`; only ratchet a counter if its measured value rises by >~0.005 (unlikely). No new `com.intellij.*` API is introduced (`Messages.showYesNoDialog` already used), so `verifyPlugin` is not implicated — but run the pre-push gate normally.
-- [ ] 6.4 uiSmoke (`caffeinate -dimsu ./gradlew uiSmoke` locally — the authoritative gate; CI ui-smoke is a known false-red) green for Journey 6.
+- [x] 6.4 uiSmoke (`caffeinate -dimsu ./gradlew uiSmoke` locally — the authoritative gate; CI ui-smoke is a known false-red) green for Journey 6.
 - [x] 6.5 Run the standard staged-file leak-grep for local-infrastructure identifiers before commit; keep any tracker IDs in the gitignored sidecar, never in tracked files.
