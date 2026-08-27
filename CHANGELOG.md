@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+### Added
+
+- **OpenSpec CLI 1.11.x is now a supported line.** 1.11 is an additive, safe-direction superset of 1.10 — verified by running the real 1.11.0 CLI over the shared parity corpus, its default and strict validation verdicts are unchanged, so nothing is re-gated and the built-in validator needs no change. 1.11 adds one new validation rule — a spec whose `## Purpose` is still a placeholder (a `TBD`/`TODO` marker, or the sentence archiving writes for a new capability) is now flagged with a warning (a failure under strict) — which only makes the CLI stricter, so the built-in fallback stays never more restrictive. The plugin declares 1.11.x supported (minimum CLI remains 1.3.0), with per-generation contract coverage against captured real 1.11.0 output including a positive-control lock on the new rule.
+
 ### Fixed
 
 - **"Register Existing Store" no longer dead-ends on a healthy OpenSpec root that isn't yet a store.** Registering such a root requires confirming creation of its store-identity metadata; the action previously surfaced that confirmation as an un-actionable error dialog, leaving no way to proceed. It now shows a Yes/Cancel prompt (carrying the CLI's own message), registers the root on confirmation, and leaves it untouched on cancel. Roots that are already stores, and refusals, are unaffected.

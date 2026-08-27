@@ -52,6 +52,10 @@ class CliContractTest {
         return loadFixture("1.8.0/" + name);
     }
 
+    private static String fixture111(String name) {
+        return loadFixture("1.11.0/" + name);
+    }
+
     /** Look an artifact up by id — 1.7 reorders {@code artifacts[]} to schema order, so index-based
      * status assertions would be fragile; keying by id makes the reorder inert. */
     private static ArtifactInfo byId(ChangeArtifactDag dag, String id) {
@@ -1123,6 +1127,79 @@ class CliContractTest {
                     "a spec.md nested at specs/<area>/<capability>/ is a valid delta — any depth >= 1 counts");
             assertTrue(item.getAsJsonArray("issues").isEmpty(),
                     "the nested delta is discovered and validated clean, never flagged misplaced");
+        }
+    }
+
+    /**
+     * 1.11 added the {@code PURPOSE_IS_PLACEHOLDER} rule: a main spec whose {@code ## Purpose} opens
+     * with a {@code TBD}/{@code TODO} marker or still carries the sentence {@code openspec archive}
+     * writes for a new capability now emits a WARNING on {@code overview} — non-failing in default,
+     * failing under {@code --strict}. This is the ONLY new validation behavior in 1.11 (the CLI got
+     * stricter, so the CLI-absent fallback — which has no placeholder rule — stays never-more-restrictive).
+     * Locked against the real 1.11.0 captures. The WARNING rides a {@code valid:true} item in default,
+     * which {@code parseJsonOutput} drops, so the level/path are asserted from the raw JSON (as in
+     * {@link ValidateContractV18}); the verdict flip is asserted through {@code parseJsonOutput} too.
+     */
+    @Nested
+    class ValidatePurposePlaceholderContractV1_11 {
+
+        private com.google.gson.JsonObject firstItem(String fixtureName) {
+            com.google.gson.JsonObject root = com.google.gson.JsonParser
+                    .parseString(fixture111(fixtureName)).getAsJsonObject();
+            return root.getAsJsonArray("items").get(0).getAsJsonObject();
+        }
+
+        @Test
+        void placeholderPurposeIsAWarningOnOverviewAndValidInDefault() {
+            com.google.gson.JsonObject item = firstItem("validate-purpose-placeholder.json");
+            assertTrue(item.get("valid").getAsBoolean(),
+                    "1.11: a placeholder ## Purpose is a non-failing WARNING in default mode");
+            assertEquals(1, item.getAsJsonArray("issues").size(),
+                    "exactly one issue — the placeholder WARNING; the 'Purpose too brief' rule does not co-fire");
+            com.google.gson.JsonObject issue = item.getAsJsonArray("issues").get(0).getAsJsonObject();
+            assertEquals("WARNING", issue.get("level").getAsString(),
+                    "the placeholder-purpose issue is a WARNING, not an ERROR");
+            assertEquals("overview", issue.get("path").getAsString(),
+                    "the placeholder-purpose issue is anchored on the spec overview");
+            assertTrue(issue.get("message").getAsString().contains("placeholder"),
+                    "the message names the placeholder condition");
+        }
+
+        @Test
+        void placeholderPurposeRePromotesToFailingUnderStrict() {
+            com.google.gson.JsonObject item = firstItem("validate-purpose-placeholder-strict.json");
+            assertFalse(item.get("valid").getAsBoolean(),
+                    "--strict counts the placeholder-purpose warning as a failure");
+            assertEquals("WARNING",
+                    item.getAsJsonArray("issues").get(0).getAsJsonObject().get("level").getAsString(),
+                    "the level stays WARNING under strict; only the verdict flips");
+        }
+
+        @Test
+        void parserDropsThePlaceholderWarningOnTheValidDefaultItem() {
+            // The WARNING rides a valid:true item, and parseJsonOutput extracts issues only from
+            // valid:false items — so through the production parser the default verdict is clean.
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture111("validate-purpose-placeholder.json"));
+            assertTrue(result.passed(), "default: the placeholder-purpose item is valid");
+            assertTrue(result.issues().isEmpty(),
+                    "the WARNING on a valid item is dropped by parseJsonOutput (as for every default WARNING)");
+            assertEquals(0, result.warningCount());
+        }
+
+        @Test
+        void parserReadsTheStrictVerdictFromTheValidFieldNotTheSeverities() {
+            // Under --strict the item is valid:false with a lone WARNING; the parser must derive the
+            // failing verdict from the `valid` field (CLI-authoritative), not from issue severities —
+            // the same property a warning-only invalid item locks elsewhere.
+            ValidationResult result = CliOutputParser.parseJsonOutput(
+                    fixture111("validate-purpose-placeholder-strict.json"));
+            assertFalse(result.passed(),
+                    "strict: a warning-only valid:false item is read as failing from the `valid` field");
+            assertEquals(1, result.warningCount(), "the lone placeholder WARNING is surfaced under strict");
+            assertEquals(0, result.errorCount(), "no ERROR — the placeholder rule is a WARNING");
+            assertTrue(result.issues().stream().allMatch(i -> i.severity() == ValidationIssue.Severity.WARNING),
+                    "the surfaced issue is the placeholder WARNING");
         }
     }
 }
