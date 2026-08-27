@@ -421,3 +421,45 @@ scaffold surfaces; the first-run completion tip relocated to stderr (deferred on
 runs, so it never enters parsed stdout); and the runtime-only `completionTipSeen` global-config field
 (the tolerant reader ignores it). Re-capture recipe: the generic "Durable next-generation capture" block
 above, with `<gen>` = `1.10.0`.
+
+## `1.11.0/` — parity corpus (safe-direction superset of 1.10) + placeholder-rule positive control
+
+Real CLI **1.11.0** captures. Verified empirically (run the corpus, don't diff the release notes) and
+corroborated by a source diff of the validation engine: 1.11 is an **additive, safe-direction superset of
+1.10** — `validate --all --json` default (12/13 valid) and `--strict` (9/13 valid) over the shared
+`1.6.0/parity-corpus` markdown are **content-identical** (only per-item `durationMs` timing differs) to the
+`1.10.0` (and `1.8.0`) twins. Unlike 1.9/1.10 the validation-engine source is **not** byte-identical (1.11
+added a `PURPOSE_IS_PLACEHOLDER` rule via a new `purpose-placeholder.js`), but the one functional change
+makes the CLI *stricter*, so the default verdict-parity anchor stays `1.8.0` and the strict anchor stays
+`1.6.0` (1.11 is not laxer). `1.11.0` is in `ValidatorVerdictVersionStabilityTest.FLOOR`, so a dropped
+future capture fails the vacuity guard loudly.
+
+- `validate-parity-corpus.json` / `validate-parity-corpus-strict.json` — real `validate --all --json`
+  (default and `--strict`) over the existing `1.6.0/parity-corpus` markdown, re-run through 1.11.0.
+  Consumed by `ValidatorVerdictVersionStabilityTest` (both arms). Capture-time discipline: after
+  sanitizing, diff each twin against its `1.10.0` counterpart with `del(.durationMs, .items[].durationMs)`
+  and confirm the only differences are timing — anything else is a real 1.11 behavior change (stop; do not
+  edit the fixture to force a guard green).
+- `version.txt` — real `openspec --version` (bare `1.11.0`). Also asserted by
+  `TargetVersionSingleSourceTest` (must equal `openspecTargetVersion` in `gradle.properties`).
+- `validate-purpose-placeholder.json` / `validate-purpose-placeholder-strict.json` — **positive control
+  for the new `PURPOSE_IS_PLACEHOLDER` rule** (the only new 1.11 validation behavior). Real
+  `openspec validate <spec> --type spec --json` (default and `--strict`) over a one-spec input whose
+  `## Purpose` is the sentence `openspec archive` writes for a new capability (`TBD - created by archiving
+  change …`). Default → `valid:true` with **one** `WARNING` on `overview` (the archive sentence is >50
+  chars, so the pre-existing "Purpose too brief" WARNING does not co-fire); strict → `valid:false`, level
+  stays `WARNING`. Consumed by `CliContractTest.ValidatePurposePlaceholderContractV1_11`: a raw-JSON arm
+  pins the captured level/path/valid (the parser drops warnings on valid items and overwrites the issue
+  path, so level/path are read from the raw JSON, as in `ValidateContractV18`), and a parser arm asserts
+  `parseJsonOutput` reports the default item clean and the strict item failing from the CLI-authoritative
+  `valid` field. Capture recipe: isolated `HOME`/`XDG_*`, `OPENSPEC_TELEMETRY=0`, `openspec init --tools
+  none`, write the spec under `openspec/specs/placeholder-purpose/spec.md`, then `validate
+  placeholder-purpose --type spec --json` (+ `--strict`); sanitize the project root to `/fixture`.
+
+**Deliberately not captured / not adopted** (1.11's other client-side additions are off-model or inert to
+the plugin): batch `status --all` (a batch of the existing per-change status shape) and `show <change>
+--diff` (a rendering of delta-vs-main data the model already holds) — on-model but inert, the plugin's
+single-change parse is untouched; the Antigravity adapter directory rename and shell-completion
+generation — AI-tool / CLI-UX surfaces; and the transactional `schema init` that now writes `schema:`
+(removing legacy `defaultSchema:`) — a config write path the plugin does not drive. Re-capture recipe for
+the parity twins: the generic "Durable next-generation capture" block above, with `<gen>` = `1.11.0`.

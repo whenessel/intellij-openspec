@@ -65,6 +65,12 @@ class CliVersionTest {
         assertFalse(CliVersion.atLeast("1.9.0", "1.10.0"), "1.9.0 is not at least 1.10.0");
         assertTrue(CliVersion.below("1.9.0", "1.10.0"), "1.9.0 is below 1.10.0");
         assertFalse(CliVersion.below("1.10.0", "1.9.0"), "1.10.0 is not below 1.9.0");
+        // 1.11 keeps ordering correctly across two-digit minors: enforces the plugin-core spec's SHALL
+        // that the version comparison order 1.11.0 above BOTH 1.10.0 (11 > 10, both two-digit) and 1.9.0
+        // (11 > 9, two-digit vs single). A lexical regression misplaces "1.11.0" below "1.9.0".
+        assertTrue(CliVersion.compare("1.11.0", "1.10.0") > 0, "1.11.0 must sort above 1.10.0");
+        assertTrue(CliVersion.compare("1.11.0", "1.9.0") > 0, "1.11.0 must sort above 1.9.0");
+        assertFalse(CliVersion.atLeast("1.10.0", "1.11.0"), "1.10.0 is not at least 1.11.0");
         // same numeric-vs-lexical property on a two-digit PATCH segment:
         assertTrue(CliVersion.atLeast("1.9.10", "1.9.9"), "1.9.10 is at least 1.9.9");
     }

@@ -1,7 +1,8 @@
 # cross-platform-verification Specification
 
 ## Purpose
-TBD - created by archiving change add-cross-platform-ci-matrix. Update Purpose after archive.
+
+Verify the plugin builds and passes its test suite on Windows and macOS in addition to Linux, via a vendor-neutral CI matrix on the public mirror, so platform-specific regressions are caught before a release ships.
 
 ## Requirements
 ### Requirement: Cross-platform CI matrix on the public mirror

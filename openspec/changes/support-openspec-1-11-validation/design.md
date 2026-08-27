@@ -1,0 +1,38 @@
+## Context
+
+See proposal.md — Why. The plugin's CLI-version support is fixture-based: each supported generation has real captured `--json` output under `src/test/resources/fixtures/cli/<gen>/`, and a durable `ValidatorVerdictVersionStabilityTest` auto-discovers every generation's parity corpus and enforces "never more restrictive than any captured generation." The top-supported CLI version is single-sourced as `openspecTargetVersion` in `gradle.properties`, consumed by the ui-smoke workflow's CLI install and coupled to the fixture corpus by `TargetVersionSingleSourceTest`. The only open question for 1.11 was which branch applies:
+
+- **Branch A** (additive): 1.11's verdicts match 1.10/1.8 → the stability guard picks up the new corpus with no anchor move and no fallback change.
+- **Branch B** (relaxation): 1.11 relaxes a default verdict further than 1.8 → the default anchor must advance, the parity oracle re-points, and the `BuiltInValidator` fallback needs a matching relaxation (the 1.7/1.8 pattern).
+
+The branch was resolved empirically, per this project's rule *"run the corpus, don't diff the release notes"*: the real 1.11.0 CLI was run in isolation over the committed `1.6.0` parity corpus, and the 1.11 validation-engine source was diffed against 1.10's published tarball. 1.11 is Branch A — but, unlike 1.9/1.10, its validation-engine source is *not* byte-identical: `validator.js`/`constants.js` changed and a new `purpose-placeholder.js` was added. The one functional effect is a new `PURPOSE_IS_PLACEHOLDER` WARNING, which makes the CLI stricter, so Branch A holds and the safe direction is preserved.
+
+## Goals / Non-Goals
+
+**Goals:**
+- Declare `1.11.x` a supported generation with per-generation contract coverage against captured real 1.11.0 output.
+- Lock the one new 1.11 validation behavior (`PURPOSE_IS_PLACEHOLDER`) with a positive-control fixture captured from the real CLI, parsed through the plugin's real validate-output parser.
+- Advance the single-sourced `openspecTargetVersion` to `1.11.0` so the ui-smoke gate and the fixture-coupling guard track the new top.
+- Preserve the never-more-restrictive-than-the-CLI invariant across the new generation.
+- Zero production-code change (this is capture-and-declare plus a contract lock).
+
+**Non-Goals:**
+- Adopting 1.11's new client surfaces into the plugin (batch `status --all`, `show <change> --diff`, the Antigravity adapter rename, shell-completion generation, the transactional `schema init`).
+- The `no_openspec_root` parser hardening (still deferred from 1.9).
+- Any change to the `VersionSupport` config-format axis (pinned `1.2.0`) or the version floor/ceiling math.
+
+## Decisions
+
+- **D1 — Branch A; anchors stay `1.8.0` default / `1.6.0` strict.** The captured 1.11.0 parity twins are byte-identical (modulo per-run `durationMs`) to the committed 1.10.0/1.9.0/1.8.0 twins in *both* default (12/13) and strict (9/13). The new `PURPOSE_IS_PLACEHOLDER` rule fires on none of the corpus specs, and it makes the CLI stricter, so no relaxation exists to anchor on. *Alternative rejected:* advancing the anchor to 1.11.0 — pointless work asserting the same map under a new name.
+- **D2 — No `validation` spec delta.** The validation behavior contract the plugin's fallback enforces (rules, severities, fallback, anchor) is unchanged. The new rule belongs to the CLI, not the plugin's fallback; declaring it in `validation` would be a no-op requirement edit — the "don't invent a requirement to satisfy validation" anti-pattern. The declaration lives solely in `plugin-core`'s supported-versions requirement, and the new rule is pinned by a fixture, exactly as the 1.9 task-numbering WARNING was. *Alternative rejected:* a validation delta restating the unchanged anchor.
+- **D3 — Lock the new rule with a positive-control fixture, not just a footnote.** 1.10 footnoted its additions because they were inert; 1.11's placeholder rule is real new validation behavior in external output, so the contract-test discipline applies. Capture `validate --json` on a placeholder-`## Purpose` spec (default: one `WARNING | overview`, `valid: true`; `--strict`: `valid: false`) and assert it through the plugin's real parser. This proves the plugin parses the new WARNING item correctly and records what 1.11 does, so a future upstream severity/path change surfaces as a fixture diff. *Alternative rejected:* footnote-only (the user chose lock-the-rule over pure-lean) — it would leave the only new 1.11 behavior uncaptured.
+- **D4 — Add `1.11.0` to `ValidatorVerdictVersionStabilityTest.FLOOR`.** The guard's vacuity floor makes a generation's corpus *mandatory* to discovery; adding 1.11.0 means a forgotten or dropped future 1.11 capture fails the guard loudly instead of silently reducing coverage. This is the anti-vacuity ratchet that makes the new fixtures load-bearing rather than decorative.
+- **D5 — The `openspecTargetVersion` bump is in-scope and atomically coupled to the fixture capture.** `TargetVersionSingleSourceTest.targetVersionHasACapturedFixtureCorpus()` fails if the property names a version with no committed corpus, so the property bump to `1.11.0` and the `fixtures/cli/1.11.0/` capture must land together. *Alternative rejected:* bumping the property in a later change — it would ship a red build in the interim.
+- **D6 — Two-digit-minor ordering is already tested; add the `1.11.0` at-least case, do not re-derive.** 1.11 is again a two-digit minor. `CliVersion.compare` splits on `.` and compares each segment numerically, so `1.11.0 > 1.10.0 > 1.9.0` holds, and `CliVersionTest.twoDigitMinor_ordersNumericallyNotLexically` already pins the numeric-not-lexical property. The change adds `1.11.0` to `CliVersionAtLeastTest`'s supported-versions cases (clears the `1.3.0` floor, exercises the two-digit segment against the neighboring `1.10.0`) and re-confirms no ad-hoc lexical version ordering was introduced. The stability guard is unaffected: it looks up anchors by explicit key and treats `FLOOR` as set-membership.
+- **D7 — Defer the off-model / inert 1.11 client surfaces.** Batch `status --all` (a batch of the existing per-change status shape) and `show <change> --diff` (a rendering of delta-vs-main data the model already holds) are on-model but introduce no new concept or persistent state the plugin reads; the Antigravity adapter directory rename and shell-completion generation are AI-tool / CLI-UX surfaces; the transactional `schema init` (which now writes `schema:` and removes legacy `defaultSchema:`) is a write path the plugin does not drive. All are footnoted, not built. The `schema:`-vs-`defaultSchema:` migration is noted for the separate write-surface audit.
+
+## Risks / Trade-offs
+
+- **The 1.11 parity fixtures look identical to 1.10's/1.9's/1.8's.** That is the *correct* Branch-A outcome, not redundancy: they are a committed forward tripwire. If a *future* 1.11.x patch (or the next generation captured against this corpus) ever diverges, the stability guard flags it — the value is the invariant, not novelty in the bytes.
+- **The source is not byte-identical this cycle.** Unlike 1.9/1.10, `validator.js`/`constants.js` changed and `purpose-placeholder.js` is new. This is why the positive-control fixture exists: the parity corpus alone would not exercise the new rule (it fires on no corpus spec), so a dedicated placeholder capture is the thing that actually proves the new branch is handled and safe-direction.
+- **The deferred `no_openspec_root` gap is still latent.** Exposure is low and unchanged by 1.11 (byte-identical on that shape); it remains a separate hardening follow-up so it isn't lost.

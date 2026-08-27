@@ -1,7 +1,8 @@
 # store-workset-actions Specification
 
 ## Purpose
-TBD - created by archiving change add-store-workset-write-actions. Update Purpose after archive.
+
+Define the IDE write actions for OpenSpec's 1.5.0+ store/workset model — creating, registering, opening, and removing stores and worksets — including how they are tier- and version-gated and kept off the EDT, so the plugin mutates coordination state by delegating to the CLI and never reimplements it.
 
 ## Requirements
 
