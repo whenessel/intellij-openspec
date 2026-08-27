@@ -1,7 +1,8 @@
 # store-workset-surface Specification
 
 ## Purpose
-TBD - created by archiving change add-store-workset-read-surface. Update Purpose after archive.
+
+Resolve and present OpenSpec's 1.5.0+ store/workset model in the IDE — locating the on-disk store registry and workset files under the global data directory and reading them with a CLI-backed path plus an on-disk fallback — so the Coordination tab reflects the model that replaced the 1.4 collections.
 
 ## Requirements
 ### Requirement: Store and workset path resolution

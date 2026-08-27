@@ -1,7 +1,9 @@
 # coordination-surfaces Specification
 
 ## Purpose
-TBD - created by archiving change phase-3-coordination-surfaces. Update Purpose after archive.
+
+Resolve and present OpenSpec's 1.4 coordination collections — workspaces, context stores, and initiatives — in the IDE, invoking the CLI only inside the `[1.4.0, 1.5.0)` window where those commands exist and otherwise reading the on-disk global data directory as read-only state.
+
 ## Requirements
 ### Requirement: Coordination collection resolution
 
