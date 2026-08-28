@@ -2,7 +2,7 @@
 
 A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code extensions.
 
-> **Maintenance: Snapshot** — reviewed per release, not per-change. This plugin's own row is kept current; the VS Code extension data (versions, install counts, features) is a point-in-time competitive survey and may lag reality. **Last reviewed: 2026-08-20** (plugin v0.10.0 — the OpenSpec 1.10.x-support release; 1.10.x is a strict additive superset of 1.9 with byte-identical validation verdicts, no competitive-feature change). For the version-by-version support matrix (what the plugin covers vs. the OpenSpec client), see [OpenSpec Client Coverage](openspec-support.md) instead.
+> **Maintenance: Snapshot** — reviewed per release, not per-change. This plugin's own row is kept current; the VS Code extension data (versions, install counts, features) is a point-in-time competitive survey and may lag reality. **Last reviewed: 2026-08-27** (plugin v0.11.0 — the OpenSpec 1.11.x-support release; 1.11.x is an additive, safe-direction superset of 1.10 — one new stricter placeholder-`## Purpose` warning, no competitive-feature change). For the version-by-version support matrix (what the plugin covers vs. the OpenSpec client), see [OpenSpec Client Coverage](openspec-support.md) instead.
 
 ---
 
