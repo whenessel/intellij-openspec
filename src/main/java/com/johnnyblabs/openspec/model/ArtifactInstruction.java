@@ -2,6 +2,7 @@ package com.johnnyblabs.openspec.model;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -69,14 +70,30 @@ public record ArtifactInstruction(
     }
 
     private static String readDependencyContent(String changeDir, String relativePath) {
+        // A glob-valued dependency path (e.g. the CLI's "specs/**/*.md") is not a single
+        // readable file on any OS. Resolving it to a Path throws on Windows (where '*' is an
+        // illegal path character) and matches nothing on POSIX, so short-circuit to the
+        // path-only reference here — identically on every platform, without relying on the OS
+        // to reject the glob. See GitHub #20.
+        if (isGlobPath(relativePath)) {
+            return null;
+        }
         try {
             Path filePath = Path.of(changeDir, relativePath);
             if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
                 return Files.readString(filePath);
             }
-        } catch (IOException ignored) {
-            // Fall back to path-only reference
+        } catch (IOException | InvalidPathException ignored) {
+            // Fall back to path-only reference — a dependency path that cannot be resolved to a
+            // filesystem path (InvalidPathException is a RuntimeException) must never abort
+            // prompt assembly.
         }
         return null;
+    }
+
+    /** True when the path contains a glob metacharacter, so it names a set of files, not one. */
+    private static boolean isGlobPath(String path) {
+        return path != null
+                && (path.indexOf('*') >= 0 || path.indexOf('?') >= 0 || path.indexOf('[') >= 0);
     }
 }

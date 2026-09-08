@@ -1,5 +1,6 @@
 package com.johnnyblabs.openspec.model;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -345,6 +346,50 @@ class ModelTest {
             // changeDir is null so even though dep is done, can't read file — falls through
             assertFalse(prompt.contains("```"));
             assertTrue(prompt.contains("Path: proposal.md (not yet completed)"));
+        }
+
+        // GitHub #20: a completed dependency whose declared path is a glob (the CLI emits
+        // "specs/**/*.md" for the specs dependency) must not be resolved to a filesystem path.
+
+        @Test
+        void buildPrompt_globDependencyPathIsSkippedNotReadAsLiteralFile(@TempDir Path tempDir) throws IOException {
+            Assumptions.assumeFalse(System.getProperty("os.name").toLowerCase().startsWith("win"),
+                    "glob-char filenames cannot be created on Windows; Windows is covered by the no-throw regression");
+            // Plant a REAL regular file at the literal glob path so buggy code (Path.of + read)
+            // would inline it on POSIX, while fixed code (glob-detect -> null) skips it. The
+            // literal "specs/**/*.md" is pinned as real CLI output by
+            // CliContractTest.InstructionContractV1_11.
+            Path planted = tempDir.resolve("specs").resolve("**").resolve("*.md");
+            Files.createDirectories(planted.getParent());
+            Files.writeString(planted, "SENTINEL-SHOULD-NOT-BE-INLINED");
+
+            ArtifactInstruction.Dependency dep = new ArtifactInstruction.Dependency(
+                    "specs", true, "specs/**/*.md", "Detailed specifications for the change");
+            ArtifactInstruction inst = new ArtifactInstruction("test-change", "tasks",
+                    tempDir.toString(), "tasks.md",
+                    "Write tasks", null, List.of(dep), null);
+
+            String prompt = assertDoesNotThrow(inst::buildPrompt);
+            assertFalse(prompt.contains("SENTINEL-SHOULD-NOT-BE-INLINED"),
+                    "a glob-style dependency path must never be read as a literal file, even when one exists");
+            assertTrue(prompt.contains("Path: specs/**/*.md"),
+                    "a glob path falls back to a path-only reference, matching POSIX behavior");
+        }
+
+        @Test
+        void buildPrompt_survivesAnInvalidPathThatIsNotAGlob(@TempDir Path tempDir) {
+            // An embedded NUL makes Path.of throw InvalidPathException on EVERY OS, and it is a
+            // RuntimeException — so the old catch (IOException) missed it and generation aborted.
+            ArtifactInstruction.Dependency dep = new ArtifactInstruction.Dependency(
+                    "proposal", true, "bad\u0000name.md", "The proposal");
+            ArtifactInstruction inst = new ArtifactInstruction("test-change", "design",
+                    tempDir.toString(), "design.md",
+                    "Write the design", null, List.of(dep), null);
+
+            String prompt = assertDoesNotThrow(inst::buildPrompt,
+                    "InvalidPathException (a RuntimeException) must be caught, not propagate past the IOException catch");
+            assertTrue(prompt.contains("Path: bad\u0000name.md"),
+                    "an unresolvable path falls back to a path-only reference");
         }
     }
 
