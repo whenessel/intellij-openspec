@@ -455,6 +455,17 @@ future capture fails the vacuity guard loudly.
   `valid` field. Capture recipe: isolated `HOME`/`XDG_*`, `OPENSPEC_TELEMETRY=0`, `openspec init --tools
   none`, write the spec under `openspec/specs/placeholder-purpose/spec.md`, then `validate
   placeholder-purpose --type spec --json` (+ `--strict`); sanitize the project root to `/fixture`.
+- `instructions-tasks-specs-done.json` — **regression anchor for GitHub #20** (Windows-only
+  `buildPrompt` crash). Real `openspec instructions tasks --change … --json` captured with the
+  `specs` dependency **completed** (`done:true`, path `specs/**/*.md`) — the crash trigger. The
+  shipped `instructions-tasks.json` only carries `done:false`, so it does not exercise the glob-read
+  path; this captures the real `done:true` shape rather than hand-flipping that field. Consumed by
+  `CliContractTest.InstructionContractV1_11` (anchors the glob `path`/`done` and a no-throw
+  `buildPrompt` regression that bites on the Windows CI leg); it also pins the literal
+  `specs/**/*.md` that `ModelTest.buildPrompt_globDependencyPathIsSkippedNotReadAsLiteralFile` plants.
+  Capture recipe: isolated `HOME`/`XDG_*`, `OPENSPEC_TELEMETRY=0`, `openspec init --tools none`,
+  `new change`, materialize `proposal.md`/`design.md` and a `specs/<cap>/spec.md`, then `instructions
+  tasks --change … --json`; sanitize the project root (incl. macOS `/private` prefix) to `/fixture`.
 
 **Deliberately not captured / not adopted** (1.11's other client-side additions are off-model or inert to
 the plugin): batch `status --all` (a batch of the existing per-change status shape) and `show <change>

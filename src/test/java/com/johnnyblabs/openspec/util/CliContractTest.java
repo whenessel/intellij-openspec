@@ -1202,4 +1202,39 @@ class CliContractTest {
                     "the surfaced issue is the placeholder WARNING");
         }
     }
+
+    /**
+     * GitHub #20: the CLI declares the {@code specs} dependency's path as the glob
+     * {@code specs/**}{@code /*.md}, and that glob PERSISTS on a completed ({@code done:true})
+     * dependency — the exact combination that crashed {@code buildPrompt} on Windows. The shipped
+     * {@code instructions-tasks.json} only captures {@code done:false}, so this anchors the real
+     * {@code done:true} shape and guards the fix against it.
+     */
+    @Nested
+    class InstructionContractV1_11 {
+
+        @Test
+        void tasksSpecsDependencyIsGlobPathAndDoneTrue() {
+            ArtifactInstruction inst = CliOutputParser.parseArtifactInstruction(
+                    fixture111("instructions-tasks-specs-done.json"));
+            ArtifactInstruction.Dependency specs = inst.dependencies().stream()
+                    .filter(d -> "specs".equals(d.id())).findFirst().orElseThrow();
+            assertTrue(specs.done(), "the crash trigger: a COMPLETED specs dependency");
+            assertEquals("specs/**/*.md", specs.path(),
+                    "the CLI emits a glob path for the specs dependency");
+        }
+
+        @Test
+        void buildPromptOnCapturedDoneGlobDoesNotThrow() {
+            // Faithful #20 regression from real captured output. On POSIX the sanitized changeDir
+            // (/fixture/...) doesn't exist, so glob-detection returns the path-only reference; on
+            // the GitHub Windows CI matrix leg the pre-fix Path.of(changeDir, "specs/**/*.md")
+            // threw InvalidPathException here — this is the assertion that bites there.
+            ArtifactInstruction inst = CliOutputParser.parseArtifactInstruction(
+                    fixture111("instructions-tasks-specs-done.json"));
+            String prompt = assertDoesNotThrow(inst::buildPrompt);
+            assertTrue(prompt.contains("Path: specs/**/*.md"),
+                    "a done glob dependency renders as a path-only reference, not inlined content");
+        }
+    }
 }

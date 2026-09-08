@@ -12,6 +12,7 @@
 
 ### Fixed
 
+- **Generating `tasks` no longer fails on Windows** with an "Illegal char" error. Specifications are declared as a file glob (`specs/**/*.md`) rather than a single file; once the specs step was complete, assembling the next artifact's prompt tried to resolve that glob to a filesystem path, which Windows rejects (the `*` is an illegal path character), aborting generation. Non-Windows platforms accept `*` in a path and degraded silently, so the defect was Windows-only. The plugin now treats a glob-valued prerequisite as a reference on every platform, so generation succeeds identically across operating systems.
 - **"Register Existing Store" no longer dead-ends on a healthy OpenSpec root that isn't yet a store.** Registering such a root requires confirming creation of its store-identity metadata; the action previously surfaced that confirmation as an un-actionable error dialog, leaving no way to proceed. It now shows a Yes/Cancel prompt (carrying the CLI's own message), registers the root on confirmation, and leaves it untouched on cancel. Roots that are already stores, and refusals, are unaffected.
 
 ## v0.10.0
