@@ -501,8 +501,8 @@ public class SetupWizardDialog extends DialogWrapper {
         apiTestLabel.setIcon(null);
         apiTestLabel.setForeground(JBColor.foreground());
 
-        // Store key temporarily so DirectApiService can use it
-        AiCredentialStore.storeApiKey(provider, key);
+        // The key is persisted off the EDT in the worker below (PasswordSafe.set is blocking), before
+        // testConnection() reads it back.
         OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
         String prevProvider = settings.getAiProvider();
         String prevModel = settings.getAiModel();
@@ -522,6 +522,7 @@ public class SetupWizardDialog extends DialogWrapper {
         new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
+                AiCredentialStore.storeApiKey(provider, key);
                 return apiService.testConnection();
             }
 

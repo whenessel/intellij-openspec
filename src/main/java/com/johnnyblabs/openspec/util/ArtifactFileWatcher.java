@@ -9,6 +9,7 @@ import com.intellij.openapi.vfs.newvfs.BulkFileListener;
 import com.intellij.openapi.vfs.newvfs.events.VFileContentChangeEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileCreateEvent;
 import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
+import com.intellij.util.messages.MessageBusConnection;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.*;
@@ -30,6 +31,7 @@ public class ArtifactFileWatcher implements Disposable {
     private final Runnable onTimeout;
 
     private volatile boolean disposed = false;
+    private volatile MessageBusConnection connection;
     private Timer refreshTimer;
     private Timer timeoutTimer;
 
@@ -43,9 +45,8 @@ public class ArtifactFileWatcher implements Disposable {
 
     public void start() {
         // Listen for VFS events
-        ApplicationManager.getApplication().getMessageBus()
-                .connect(this)
-                .subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener() {
+        connection = ApplicationManager.getApplication().getMessageBus().connect(this);
+        connection.subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener() {
                     @Override
                     public void after(@NotNull List<? extends VFileEvent> events) {
                         if (disposed) return;
@@ -94,6 +95,13 @@ public class ArtifactFileWatcher implements Disposable {
     @Override
     public void dispose() {
         disposed = true;
+        // Explicitly disconnect: this watcher is disposed directly (WorkflowActionPanel.disposeWatcher),
+        // not through the Disposer, so the connect(this) parent never fires — the subscription would
+        // otherwise leak on the app-wide VFS_CHANGES bus (one per generation).
+        if (connection != null) {
+            connection.disconnect();
+            connection = null;
+        }
         if (refreshTimer != null) {
             refreshTimer.stop();
             refreshTimer = null;

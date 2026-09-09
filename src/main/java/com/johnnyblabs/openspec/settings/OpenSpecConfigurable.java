@@ -1,5 +1,6 @@
 package com.johnnyblabs.openspec.settings;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.project.Project;
@@ -80,11 +81,14 @@ public class OpenSpecConfigurable implements Configurable {
         settings.setAiProvider(panel.getAiProvider());
         settings.setAiModel(panel.getAiModel());
         settings.setDefaultSchema(panel.getDefaultSchema());
-        // Store API key securely via PasswordSafe
+        // Store API key securely via PasswordSafe. set() is blocking (@RequiresBackgroundThread) and
+        // apply() runs on the EDT, so persist off the EDT; the has-key cache is updated inside storeApiKey.
         String apiKey = panel.getApiKey();
         AiProvider provider = AiProvider.fromString(panel.getAiProvider());
         if (apiKey != null && !apiKey.isBlank() && !apiKey.equals("\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022")) {
-            AiCredentialStore.storeApiKey(provider, apiKey);
+            AiCredentialStore.markHasApiKey(provider, true);
+            ApplicationManager.getApplication().executeOnPooledThread(
+                    () -> AiCredentialStore.storeApiKey(provider, apiKey));
         }
 
         // D3 fallback refresh: a Settings apply is a likely moment for the user's CLI

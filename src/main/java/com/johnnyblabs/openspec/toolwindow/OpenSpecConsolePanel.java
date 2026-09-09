@@ -4,7 +4,9 @@ import com.intellij.execution.filters.OpenFileHyperlinkInfo;
 import com.intellij.execution.filters.TextConsoleBuilderFactory;
 import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.openapi.Disposable;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.johnnyblabs.openspec.validation.ValidationIssue;
@@ -13,7 +15,7 @@ import org.jetbrains.annotations.Nullable;
 import javax.swing.*;
 import java.awt.*;
 
-public class OpenSpecConsolePanel extends JPanel {
+public class OpenSpecConsolePanel extends JPanel implements Disposable {
 
     private final ConsoleView consoleView;
 
@@ -24,6 +26,16 @@ public class OpenSpecConsolePanel extends JPanel {
         add(consoleView.getComponent(), BorderLayout.CENTER);
         consoleView.print("CLI output will appear here when commands are executed.\n",
                 ConsoleViewContentType.SYSTEM_OUTPUT);
+    }
+
+    /**
+     * Disposes the {@link ConsoleView} this panel owns. {@code ConsoleView} is a {@code Disposable}
+     * whose creator must dispose it; wired via {@code Content.setDisposer(this)} in
+     * {@link OpenSpecToolWindowFactory}, so it is released on tool-window teardown.
+     */
+    @Override
+    public void dispose() {
+        Disposer.dispose(consoleView);
     }
 
     public void printCommand(String command) {

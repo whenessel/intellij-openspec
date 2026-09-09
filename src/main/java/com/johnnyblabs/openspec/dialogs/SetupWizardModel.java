@@ -1,5 +1,6 @@
 package com.johnnyblabs.openspec.dialogs;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiCredentialStore;
 import com.johnnyblabs.openspec.ai.AiProvider;
@@ -73,7 +74,16 @@ public final class SetupWizardModel {
             settings.setAiProvider(aiProvider.name());
             settings.setAiModel(aiModel);
             if (!apiKey.isBlank()) {
-                AiCredentialStore.storeApiKey(aiProvider, apiKey);
+                // persist() runs on the EDT (wizard OK). PasswordSafe.set is blocking
+                // (@RequiresBackgroundThread), so persist the key off the EDT. Mark the has-key cache
+                // synchronously first (EDT-safe, in-memory) so the tool-window rebuild that fires right
+                // after the wizard closes sees Direct API as configured — the async keystore write and
+                // the read path (getApiKey) are both off-EDT.
+                final AiProvider provider = aiProvider;
+                final String key = apiKey;
+                AiCredentialStore.markHasApiKey(provider, true);
+                ApplicationManager.getApplication().executeOnPooledThread(
+                        () -> AiCredentialStore.storeApiKey(provider, key));
             }
         }
 

@@ -938,7 +938,7 @@ public class WorkflowActionPanel extends JPanel {
             }
             case GENERATING -> {
                 JMenuItem cancelItem = new JMenuItem("Cancel");
-                cancelItem.addActionListener(ev -> onCancelGeneration());
+                cancelItem.addActionListener(ev -> onCancelGeneration(artifact.id()));
                 menu.add(cancelItem);
             }
             default -> {
@@ -988,8 +988,22 @@ public class WorkflowActionPanel extends JPanel {
         return count;
     }
 
-    private void onCancelGeneration() {
-        onCancelGenerateAll();
+    /**
+     * In-flight single-artifact generations, keyed by artifact id, so each chip's Cancel targets its
+     * own run. A single shared field would mis-target: right-clicking Generate on two chips in a row
+     * (each mutates {@code nextArtifactId}) runs both concurrently, and one indicator would overwrite
+     * the other — cancelling chip A would then cancel B. Entries are removed when their run ends.
+     */
+    private final java.util.Map<String, com.intellij.openapi.progress.ProgressIndicator> activeGenerations =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private void onCancelGeneration(String artifactId) {
+        // Cancel this artifact's own generation indicator (not the Generate-All flag); the isCanceled()
+        // guard in executeGeneration then discards the result — no file written, no success UI.
+        com.intellij.openapi.progress.ProgressIndicator ind = activeGenerations.get(artifactId);
+        if (ind != null) {
+            ind.cancel();
+        }
     }
 
     // --- Apply ---
@@ -1602,6 +1616,7 @@ public class WorkflowActionPanel extends JPanel {
         ProgressManager.getInstance().run(new Task.Backgroundable(project, "Generating " + artifactId, true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
+                activeGenerations.put(artifactId, indicator);
                 try {
                     ArtifactOrchestrationService orchestration = project.getService(ArtifactOrchestrationService.class);
                     ArtifactInstruction instruction = orchestration.getInstruction(changeName, artifactId);
@@ -1673,6 +1688,9 @@ public class WorkflowActionPanel extends JPanel {
                         case DIRECT_API -> {
                             DirectApiService apiService = project.getService(DirectApiService.class);
                             String result = apiService.generate(instruction);
+                            // Honor cancellation: the blocking HTTP call isn't interruptible, but a
+                            // cancelled run must not write the artifact or show a success notification.
+                            if (indicator.isCanceled()) return;
                             String outputPath = instruction.changeDir() + "/" + instruction.outputPath();
                             ApplicationManager.getApplication().invokeLater(() -> {
                                 try {
@@ -1721,10 +1739,15 @@ public class WorkflowActionPanel extends JPanel {
                                 content, com.intellij.notification.NotificationType.ERROR,
                                 OpenSpecNotifier.openSettingsAction());
                     });
+                } catch (com.intellij.openapi.progress.ProcessCanceledException pce) {
+                    throw pce; // never swallow cancellation — let the platform complete it
                 } catch (Exception ex) {
                     ApplicationManager.getApplication().invokeLater(() ->
                             OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_GENERATION, "Generate",
                                     "Generation failed: " + ex.getMessage(), com.intellij.notification.NotificationType.ERROR));
+                } finally {
+                    // Deregister only if still ours — a newer run for the same artifact may have replaced it.
+                    activeGenerations.remove(artifactId, indicator);
                 }
             }
         });

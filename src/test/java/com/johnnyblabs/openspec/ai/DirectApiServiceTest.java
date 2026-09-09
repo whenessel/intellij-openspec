@@ -37,9 +37,11 @@ class DirectApiServiceTest {
                  MockedStatic<AiCredentialStore> credsMock = mockStatic(AiCredentialStore.class)) {
                 settingsMock.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
                 when(settings.getAiProvider()).thenReturn("Claude");
-                credsMock.when(() -> AiCredentialStore.hasApiKey(AiProvider.CLAUDE)).thenReturn(false);
+                credsMock.when(() -> AiCredentialStore.hasApiKeyCached(AiProvider.CLAUDE)).thenReturn(false);
 
                 assertFalse(service.isConfigured());
+                // isConfigured must use the EDT-safe cached check, never the blocking PasswordSafe read.
+                credsMock.verify(() -> AiCredentialStore.hasApiKey(any()), never());
             }
         }
 
@@ -59,9 +61,10 @@ class DirectApiServiceTest {
                  MockedStatic<AiCredentialStore> credsMock = mockStatic(AiCredentialStore.class)) {
                 settingsMock.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
                 when(settings.getAiProvider()).thenReturn("Claude");
-                credsMock.when(() -> AiCredentialStore.hasApiKey(AiProvider.CLAUDE)).thenReturn(true);
+                credsMock.when(() -> AiCredentialStore.hasApiKeyCached(AiProvider.CLAUDE)).thenReturn(true);
 
                 assertTrue(service.isConfigured());
+                credsMock.verify(() -> AiCredentialStore.hasApiKey(any()), never());
             }
         }
     }

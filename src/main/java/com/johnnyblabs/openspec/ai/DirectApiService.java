@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
@@ -32,6 +33,18 @@ public final class DirectApiService {
 
     public DirectApiService(Project project) {
         this.project = project;
+        // Warm the has-key cache off the EDT so isConfigured() (reached from ~8 UI paths) never does a
+        // synchronous PasswordSafe read on the EDT. Guard on a live Application so plain unit tests
+        // (no IntelliJ Application) can construct the service.
+        var app = ApplicationManager.getApplication();
+        if (app != null) {
+            app.executeOnPooledThread(() -> {
+                AiProvider p = getProvider();
+                if (p != AiProvider.NONE) {
+                    AiCredentialStore.hasApiKeyCached(p);
+                }
+            });
+        }
     }
 
     private HttpClient createHttpClient() {
@@ -45,7 +58,8 @@ public final class DirectApiService {
      */
     public boolean isConfigured() {
         AiProvider provider = getProvider();
-        return provider != AiProvider.NONE && AiCredentialStore.hasApiKey(provider);
+        // hasApiKeyCached is EDT-safe (a cached map read; warmed off-EDT in the constructor).
+        return provider != AiProvider.NONE && AiCredentialStore.hasApiKeyCached(provider);
     }
 
     /**

@@ -100,6 +100,17 @@ public final class OpenSpecProjectService {
                 aiDetection.detect();
             }
 
+            // Warm the has-key cache OFF the EDT (this ProjectActivity runs on a background dispatcher)
+            // for the configured Direct API provider, so the tool window's EDT-side isConfigured() gate
+            // reads a populated cache on first open instead of blocking on a synchronous PasswordSafe.get.
+            if (settings != null) {
+                com.johnnyblabs.openspec.ai.AiProvider aiProvider =
+                        com.johnnyblabs.openspec.ai.AiProvider.fromString(settings.getAiProvider());
+                if (aiProvider != com.johnnyblabs.openspec.ai.AiProvider.NONE) {
+                    com.johnnyblabs.openspec.ai.AiCredentialStore.hasApiKeyCached(aiProvider);
+                }
+            }
+
             // D3 fallback refresh trigger: a fresh project open is the most reliable
             // signal that cached workflow profile state may have drifted from CLI truth
             // (user customized via terminal between sessions, switched profiles in

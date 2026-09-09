@@ -18,6 +18,7 @@ import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.HTMLEditorKitBuilder;
 import com.intellij.util.ui.JBUI;
 import com.intellij.ui.treeStructure.Tree;
+import com.intellij.openapi.Disposable;
 import com.intellij.util.Alarm;
 import com.johnnyblabs.openspec.model.ChangeDeltaModel;
 import com.johnnyblabs.openspec.util.CliJson;
@@ -46,7 +47,7 @@ import java.awt.event.MouseEvent;
 import java.util.*;
 import java.util.List;
 
-public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
+public class OpenSpecToolWindowPanel extends JPanel implements DataProvider, Disposable {
     private static final Logger LOG = Logger.getInstance(OpenSpecToolWindowPanel.class);
 
     private final Project project;
@@ -80,8 +81,8 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
     public OpenSpecToolWindowPanel(Project project) {
         super(new BorderLayout());
         this.project = project;
-        this.refreshAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
-        this.previewAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, project);
+        this.refreshAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
+        this.previewAlarm = new Alarm(Alarm.ThreadToUse.POOLED_THREAD, this);
 
         // Build tree with placeholder; real model loads async
         DefaultMutableTreeNode placeholder = new DefaultMutableTreeNode("Loading...");
@@ -670,8 +671,15 @@ public class OpenSpecToolWindowPanel extends JPanel implements DataProvider {
         return null;
     }
 
+    @Override
+    public void dispose() {
+        // The Alarms (parented to this) and the VFS message-bus connection (connect(this)) are
+        // released when this panel is disposed via its Content disposer (see OpenSpecToolWindowFactory).
+        // Wiring the disposer is what makes createNormalContent rebuilds not accumulate subscriptions.
+    }
+
     private void registerFileListener() {
-        project.getMessageBus().connect().subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener() {
+        project.getMessageBus().connect(this).subscribe(VirtualFileManager.VFS_CHANGES, new BulkFileListener() {
             @Override
             public void after(List<? extends VFileEvent> events) {
                 for (VFileEvent event : events) {
