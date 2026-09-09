@@ -1,0 +1,41 @@
+{
+  "items": [
+    {
+      "id": "archive-blocker",
+      "type": "change",
+      "valid": false,
+      "issues": [
+        {
+          "level": "ERROR",
+          "path": "beta/spec.md",
+          "message": "MODIFIED \"Beta Thing\" must include at least one scenario"
+        },
+        {
+          "level": "INFO",
+          "path": "alpha/spec.md",
+          "message": "Archive would refuse this delta: alpha: target spec does not exist; only ADDED requirements are allowed for new specs. MODIFIED and RENAMED operations require an existing spec."
+        }
+      ],
+      "durationMs": 8
+    }
+  ],
+  "summary": {
+    "totals": {
+      "items": 1,
+      "passed": 0,
+      "failed": 1
+    },
+    "byType": {
+      "change": {
+        "items": 1,
+        "passed": 0,
+        "failed": 1
+      }
+    }
+  },
+  "version": "1.0",
+  "root": {
+    "path": "/fixture",
+    "source": "nearest"
+  }
+}

@@ -73,5 +73,13 @@ class CliVersionTest {
         assertFalse(CliVersion.atLeast("1.10.0", "1.11.0"), "1.10.0 is not at least 1.11.0");
         // same numeric-vs-lexical property on a two-digit PATCH segment:
         assertTrue(CliVersion.atLeast("1.9.10", "1.9.9"), "1.9.10 is at least 1.9.9");
+        // 1.12 keeps ordering correctly. The load-bearing ANTI-LEXICAL case is 1.12.0 vs the
+        // single-digit-minor 1.9.0: numeric +1 (12 > 9) but lexical -1 ('1' < '9' at index 2), so a
+        // lexical regression flips exactly this pair. (1.12.0 vs 1.11.0 is NOT anti-lexical — it's
+        // true lexically too — so it only serves as a monotonicity check.)
+        assertTrue(CliVersion.compare("1.12.0", "1.9.0") > 0, "1.12.0 must sort above 1.9.0 (numeric, not lexical)");
+        assertTrue(CliVersion.compare("1.9.0", "1.12.0") < 0, "1.9.0 must sort below 1.12.0");
+        assertTrue(CliVersion.compare("1.12.0", "1.11.0") > 0, "1.12.0 sorts above 1.11.0 (monotonic across two-digit minors)");
+        assertFalse(CliVersion.atLeast("1.11.0", "1.12.0"), "1.11.0 is not at least 1.12.0");
     }
 }

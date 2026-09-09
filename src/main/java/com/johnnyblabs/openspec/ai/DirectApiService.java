@@ -20,7 +20,9 @@ import java.time.Duration;
 public final class DirectApiService {
     private static final Logger LOG = Logger.getInstance(DirectApiService.class);
     private static final Duration TIMEOUT = Duration.ofMinutes(5);
-    private static final int MAX_TOKENS = 8192;
+    // Non-streaming output cap. 16000 keeps large specs/designs from truncating on modern models
+    // while staying comfortably under the 5-minute request timeout (non-streaming).
+    private static final int MAX_TOKENS = 16000;
 
     private static final String CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
     private static final String OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";

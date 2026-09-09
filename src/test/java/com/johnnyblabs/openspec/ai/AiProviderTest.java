@@ -112,6 +112,18 @@ class AiProviderTest {
         }
 
         @Test
+        void geminiDefaultIsNotARetiringModel() {
+            // Gemini 2.5 (pro/flash/flash-lite) retires 2026-10-16 (flash already deprecated); its
+            // defaults 404'd on fresh AI Studio keys. Guard the default off the retiring line without
+            // pinning an exact version — a legitimate gemini-3.x refresh must stay green. Would fail
+            // against the prior `gemini-2.5-pro` default.
+            String def = AiProvider.GEMINI.getDefaultModel();
+            assertTrue(def.startsWith("gemini-"), "Gemini default must be a gemini- model: " + def);
+            assertFalse(def.startsWith("gemini-2.5"),
+                    "Gemini default must not be a retiring 2.5 model: " + def);
+        }
+
+        @Test
         void defaultModelIsFirstInList() {
             for (AiProvider p : AiProvider.values()) {
                 if (!p.getModels().isEmpty()) {
