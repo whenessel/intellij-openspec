@@ -26,12 +26,13 @@ public class OpenSpecToolWindowFactory implements ToolWindowFactory, DumbAware {
 
     @Override
     public void createToolWindowContent(@NotNull Project project, @NotNull ToolWindow toolWindow) {
-        GettingStartedPanel gettingStarted = new GettingStartedPanel(project, toolWindow);
-        GettingStartedPanel.State state = gettingStarted.detectState();
+        // Detect via the static form so no throwaway, Disposer-registering panel is built (and then
+        // leaked) on the initialized path; construct the panel only when it's actually shown.
+        GettingStartedPanel.State state = GettingStartedPanel.detectState(project);
 
         if (state == GettingStartedPanel.State.NOT_INITIALIZED) {
             // Project has no openspec/ directory — show Getting Started only
-            createGettingStartedContent(project, toolWindow, gettingStarted);
+            createGettingStartedContent(project, toolWindow, new GettingStartedPanel(project, toolWindow));
         } else {
             // Project is initialized — always show the tree view so users can
             // browse specs even without changes or AI configured
@@ -80,9 +81,8 @@ public class OpenSpecToolWindowFactory implements ToolWindowFactory, DumbAware {
                     dialog.show();
                     // Rebuild tool window after wizard completes
                     toolWindow.getContentManager().removeAllContents(true);
-                    GettingStartedPanel refreshed = new GettingStartedPanel(project, toolWindow);
-                    if (refreshed.detectState() == GettingStartedPanel.State.NOT_INITIALIZED) {
-                        createGettingStartedContent(project, toolWindow, refreshed);
+                    if (GettingStartedPanel.detectState(project) == GettingStartedPanel.State.NOT_INITIALIZED) {
+                        createGettingStartedContent(project, toolWindow, new GettingStartedPanel(project, toolWindow));
                     } else {
                         createNormalContent(project, toolWindow);
                     }
@@ -99,11 +99,13 @@ public class OpenSpecToolWindowFactory implements ToolWindowFactory, DumbAware {
         // Browse tab (tree view)
         OpenSpecToolWindowPanel browsePanel = new OpenSpecToolWindowPanel(project);
         Content browseContent = contentFactory.createContent(browsePanel, "Browse", false);
+        browseContent.setDisposer(browsePanel);
         toolWindow.getContentManager().addContent(browseContent);
 
         // Console tab (CLI output)
         OpenSpecConsolePanel consolePanel = new OpenSpecConsolePanel(project);
         Content consoleContent = contentFactory.createContent(consolePanel, "Console", false);
+        consoleContent.setDisposer(consolePanel);
         toolWindow.getContentManager().addContent(consoleContent);
 
         // Explore tab — only when Direct API is configured (inline input requires it)

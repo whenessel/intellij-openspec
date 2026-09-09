@@ -1,6 +1,9 @@
 package com.johnnyblabs.openspec.toolwindow;
 
+import com.intellij.execution.ui.ConsoleView;
 import com.intellij.execution.ui.ConsoleViewContentType;
+import com.intellij.openapi.Disposable;
+import com.intellij.openapi.util.Disposer;
 import com.intellij.openapi.util.io.FileUtil;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -99,5 +102,25 @@ public class OpenSpecConsolePanelTest extends BasePlatformTestCase {
     public void testEmptyPathDoesNotResolve() {
         assertFalse(OpenSpecConsolePanel.resolveLocation(getProject(), "", 1).isResolved());
         assertFalse(OpenSpecConsolePanel.resolveLocation(getProject(), null, 1).isResolved());
+    }
+
+    /**
+     * The panel owns a {@link ConsoleView} — itself a {@code Disposable} whose creator must dispose
+     * it — so the panel must be a {@code Disposable} that cascades. In production the tool window
+     * wires {@code Content.setDisposer(panel)}, so this dispose runs on tab/window teardown. Non-vacuous:
+     * before the fix the panel was a bare {@code JPanel}, the console was never disposed, and its editor
+     * leaked (an {@code ObjectTree} SEVERE at project close).
+     */
+    public void testDisposingPanelDisposesTheConsoleViewItOwns() {
+        OpenSpecConsolePanel panel = new OpenSpecConsolePanel(getProject());
+        assertTrue("panel must be a Disposable so Content.setDisposer can own it",
+                panel instanceof Disposable);
+
+        ConsoleView console = panel.getConsoleView();
+        assertFalse("the console is live before dispose", Disposer.isDisposed(console));
+
+        Disposer.dispose(panel);
+
+        assertTrue("disposing the panel must dispose the ConsoleView it created", Disposer.isDisposed(console));
     }
 }

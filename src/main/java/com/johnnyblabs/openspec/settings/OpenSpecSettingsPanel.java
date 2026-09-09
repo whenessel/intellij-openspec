@@ -776,11 +776,23 @@ public class OpenSpecSettingsPanel {
         apiKeyField.setEnabled(enabled);
         aiModelCombo.setEnabled(enabled);
 
-        if (enabled && AiCredentialStore.hasApiKey(provider)) {
-            apiKeyField.setText(API_KEY_MASK);
-        } else if (!enabled) {
+        if (!enabled) {
             apiKeyField.setText("");
+            return;
         }
+        // PasswordSafe.get is blocking (@RequiresBackgroundThread) — read off the EDT, then set the
+        // masked placeholder back on the EDT (mirrors detectCli). Guard against a rapid provider
+        // switch so a late result doesn't mask the wrong provider.
+        com.intellij.openapi.application.ModalityState modality =
+                com.intellij.openapi.application.ModalityState.stateForComponent(mainPanel);
+        com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            boolean hasKey = AiCredentialStore.hasApiKey(provider);
+            com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
+                if (getSelectedProvider() == provider && hasKey) {
+                    apiKeyField.setText(API_KEY_MASK);
+                }
+            }, modality);
+        });
     }
 
     private AiProvider getSelectedProvider() {
@@ -795,16 +807,9 @@ public class OpenSpecSettingsPanel {
         aiTestResultLabel.setForeground(JBColor.GRAY);
 
         AiProvider provider = getSelectedProvider();
-        String key = getApiKey();
         String model = getAiModel();
-
-        // Store the key so the API call can use it
-        if (key != null && !key.isBlank() && !key.equals(API_KEY_MASK)) {
-            AiCredentialStore.storeApiKey(provider, key);
-        } else if (key != null && key.equals(API_KEY_MASK)) {
-            // Masked key means use the already-stored one
-            key = AiCredentialStore.getApiKey(provider);
-        }
+        // Read the UI field on the EDT; the blocking PasswordSafe store/get happens in the worker below.
+        final String uiKey = getApiKey();
 
         DirectApiService apiService = project.getService(DirectApiService.class);
         if (apiService == null) {
@@ -814,12 +819,19 @@ public class OpenSpecSettingsPanel {
         }
 
         // Pass current UI values directly — don't rely on persisted settings
-        final String apiKey = key;
         final String apiModel = model;
         new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
-                return apiService.testConnection(provider, apiKey, apiModel);
+                // Credential store I/O is blocking (@RequiresBackgroundThread) — do it here, off the EDT.
+                String key = uiKey;
+                if (key != null && !key.isBlank() && !key.equals(API_KEY_MASK)) {
+                    AiCredentialStore.storeApiKey(provider, key);
+                } else if (key != null && key.equals(API_KEY_MASK)) {
+                    // Masked key means use the already-stored one
+                    key = AiCredentialStore.getApiKey(provider);
+                }
+                return apiService.testConnection(provider, key, apiModel);
             }
 
             @Override

@@ -61,7 +61,17 @@ public class GettingStartedPanel extends JPanel implements Disposable {
         // Alarm is disposed automatically via Disposer parent (this)
     }
 
+    /** Instance convenience — delegates to the static form. */
     public State detectState() {
+        return detectState(project);
+    }
+
+    /**
+     * Detects tool-window state from the project alone, so callers that only need the state (the
+     * tool-window factory) don't construct a Disposer-registering panel that is then discarded and
+     * leaks. Reads only {@code project}.
+     */
+    public static State detectState(Project project) {
         if (!OpenSpecFileUtil.isOpenSpecProject(project)) {
             return State.NOT_INITIALIZED;
         }
