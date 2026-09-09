@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+### Added
+
+- **OpenSpec CLI 1.12.x is now a supported line.** 1.12 is an additive, safe-direction superset of 1.11 — verified by running the real 1.12.0 CLI over the shared parity corpus, its default and strict validation verdicts are unchanged, so nothing is re-gated and the built-in validator needs no change. 1.12 adds one new, verdict-neutral diagnostic: when validating a change, an informational note now flags a delta whose target spec does not yet exist ("archive would refuse this delta"). It never affects the pass/fail verdict, and the plugin already surfaces it at the correct severity. The plugin declares 1.12.x supported (minimum CLI remains 1.3.0), with per-generation contract coverage against captured real 1.12.0 output including a positive-control lock on the new diagnostic.
+
+### Fixed
+
+- **Direct API: refreshed the built-in Gemini and Claude model lists to current identifiers.** The bundled Gemini models were `gemini-2.5-*`, which Google is retiring (2.5 Flash already deprecated), so a fresh Google AI Studio key failed with a model-not-found error on the first generation. Gemini now defaults to a current stable Flash model (`gemini-3.5-flash`) and the Claude list was refreshed to current dateless aliases; the Direct API output cap was also raised so large specs/designs don't truncate. The request contract, auth headers, and response parsing are unchanged. (OpenAI's list is unchanged this release, pending verification against its current models endpoint.)
+
 ## v0.11.0
 
 ### Added

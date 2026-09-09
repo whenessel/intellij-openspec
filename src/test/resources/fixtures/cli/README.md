@@ -474,3 +474,36 @@ single-change parse is untouched; the Antigravity adapter directory rename and s
 generation — AI-tool / CLI-UX surfaces; and the transactional `schema init` that now writes `schema:`
 (removing legacy `defaultSchema:`) — a config write path the plugin does not drive. Re-capture recipe for
 the parity twins: the generic "Durable next-generation capture" block above, with `<gen>` = `1.11.0`.
+
+## `1.12.0/` — parity corpus (safe-direction superset of 1.11) + archive-blocker positive control
+
+Real CLI **1.12.0** captures. 1.12 is an **additive, safe-direction superset of 1.11**: the validation
+verdict logic is byte-identical to 1.11, so `validate --all --json` default (12/13 valid) and `--strict`
+(9/13 valid) over the shared `1.6.0/parity-corpus` markdown are **content-identical** to the `1.11.0` twins
+**except for exactly one added `INFO`** — the new archive-blocker on `nameless-change` — present in **both**
+the default and strict twin (`info-change` gains nothing; its delta is ADDED-only, which trips no blocker).
+Per-item INFO totals: `info-change` 1, `nameless-change` 2. `nameless-change` stays `valid:true` in both
+(INFO never feeds the verdict). `1.12.0` is in `ValidatorVerdictVersionStabilityTest.FLOOR`.
+
+- `validate-parity-corpus.json` / `validate-parity-corpus-strict.json` — real `validate --all --json`
+  (default and `--strict`) over `1.6.0/parity-corpus`, re-run through 1.12.0. Consumed by
+  `ValidatorVerdictVersionStabilityTest` (both arms). **Capture-time discipline:** after sanitizing
+  (`root.path` → `/fixture/parity-corpus`), diff each twin against its `1.11.0` counterpart with
+  `del(.durationMs, .items[].durationMs, .root.path)` and confirm the **only** difference is the single
+  added `nameless-change` archive-blocker INFO — anything else is a real 1.12 behavior change (stop; do not
+  edit the fixture). This is **not** a durationMs-only copy.
+- `version.txt` — real `openspec --version` (bare `1.12.0`). Also asserted by `TargetVersionSingleSourceTest`
+  (must equal `openspecTargetVersion` in `gradle.properties`).
+- `validate-archive-blocker.json` — **positive control for the new verdict-neutral archive-blocker `INFO`**
+  (the only new 1.12 validation behavior). The parity-corpus INFO rides `valid:true` items and
+  `CliOutputParser.parseJsonOutput` extracts issues only from `valid:false` items, so the corpus alone can't
+  exercise the INFO through the parser. This capture is a **constructed** `valid:false` change carrying BOTH
+  a structural `ERROR` (a MODIFIED requirement with no scenario, on `beta/spec.md`) AND the archive-blocker
+  `INFO` (a well-formed MODIFIED requirement targeting a spec that does not exist, on `alpha/spec.md`) — on
+  **different** delta paths (upstream `findArchiveBlockers` dedupes a blocker against any path that already
+  carries an ERROR, so they must be separate specIds). Real `openspec validate archive-blocker --type change
+  --json`, project root sanitized → `/fixture`. Consumed by `CliContractTest.ArchiveBlockerInfoContractV1_12`:
+  a raw-JSON arm pins the captured level/path/message and the different-paths invariant; a parser arm asserts
+  the INFO surfaces at `Severity.INFO` on a `valid:false` item while the failing verdict is preserved (the
+  parser overwrites the issue path with `type/id`, so delta paths are asserted off the raw JSON only). This is
+  the first fixture to positively exercise the `INFO` → `Severity.INFO` JSON mapping.

@@ -56,6 +56,10 @@ class CliContractTest {
         return loadFixture("1.11.0/" + name);
     }
 
+    private static String fixture112(String name) {
+        return loadFixture("1.12.0/" + name);
+    }
+
     /** Look an artifact up by id — 1.7 reorders {@code artifacts[]} to schema order, so index-based
      * status assertions would be fragile; keying by id makes the reorder inert. */
     private static ArtifactInfo byId(ChangeArtifactDag dag, String id) {
@@ -1235,6 +1239,72 @@ class CliContractTest {
             String prompt = assertDoesNotThrow(inst::buildPrompt);
             assertTrue(prompt.contains("Path: specs/**/*.md"),
                     "a done glob dependency renders as a path-only reference, not inlined content");
+        }
+    }
+
+    /**
+     * 1.12's one new validation behavior: a verdict-neutral {@code INFO} diagnostic from
+     * {@code findArchiveBlockers} ("Archive would refuse this delta…") on a change whose delta is a
+     * MODIFIED/RENAMED operation against a main spec that does not yet exist. The parity corpus can't
+     * exercise it through the parser — there the INFO rides {@code valid:true} items and
+     * {@link CliOutputParser#parseJsonOutput} extracts issues only from {@code valid:false} items. So
+     * this positive control is a constructed {@code valid:false} change carrying BOTH an {@code ERROR}
+     * and the archive-blocker {@code INFO} on DIFFERENT delta paths (they dedupe when they share one).
+     * Two-arm, mirroring {@link ValidatePurposePlaceholderContractV1_11}.
+     */
+    @Nested
+    class ArchiveBlockerInfoContractV1_12 {
+
+        private com.google.gson.JsonObject firstItem() {
+            com.google.gson.JsonObject root = com.google.gson.JsonParser
+                    .parseString(fixture112("validate-archive-blocker.json")).getAsJsonObject();
+            return root.getAsJsonArray("items").get(0).getAsJsonObject();
+        }
+
+        private com.google.gson.JsonObject issueByLevel(com.google.gson.JsonObject item, String level) {
+            for (var el : item.getAsJsonArray("issues")) {
+                com.google.gson.JsonObject issue = el.getAsJsonObject();
+                if (level.equals(issue.get("level").getAsString())) {
+                    return issue;
+                }
+            }
+            throw new AssertionError("no " + level + " issue in the captured item");
+        }
+
+        @Test
+        void rawCaptureHasErrorAndArchiveBlockerInfoOnDifferentDeltaPaths() {
+            com.google.gson.JsonObject item = firstItem();
+            assertFalse(item.get("valid").getAsBoolean(), "the change is invalid (the beta ERROR forces it)");
+            com.google.gson.JsonObject error = issueByLevel(item, "ERROR");
+            com.google.gson.JsonObject info = issueByLevel(item, "INFO");
+            assertEquals("beta/spec.md", error.get("path").getAsString(),
+                    "the structural ERROR is on the beta delta");
+            assertEquals("alpha/spec.md", info.get("path").getAsString(),
+                    "the archive-blocker INFO is on the alpha delta (spec does not exist)");
+            assertNotEquals(error.get("path").getAsString(), info.get("path").getAsString(),
+                    "load-bearing: ERROR and archive-blocker INFO must ride DIFFERENT delta paths, or upstream dedupes the INFO");
+            assertTrue(info.get("message").getAsString().contains("Archive would refuse this delta"),
+                    "the INFO carries the archive-blocker message");
+            assertTrue(info.get("message").getAsString().contains("target spec does not exist"));
+        }
+
+        @Test
+        void parserSurfacesTheArchiveBlockerInfoAtInfoSeverityOnAFailingItem() {
+            // The crux: first fixture to surface an INFO on a valid:false item through the production
+            // parser. If parseSeverity stops mapping "INFO" (defaults to ERROR) OR the valid:false-only
+            // extraction regresses, this fails.
+            ValidationResult r = CliOutputParser.parseJsonOutput(fixture112("validate-archive-blocker.json"));
+            assertFalse(r.passed(), "the failing verdict is preserved");
+            assertEquals(1, r.errorCount(), "exactly the beta structural ERROR");
+            List<ValidationIssue> infos = r.issues().stream()
+                    .filter(i -> i.severity() == ValidationIssue.Severity.INFO).toList();
+            assertEquals(1, infos.size(),
+                    "the archive-blocker INFO surfaces at INFO severity (not dropped, not mapped to ERROR)");
+            assertTrue(infos.get(0).message().contains("Archive would refuse this delta"),
+                    "it is the archive-blocker INFO");
+            assertEquals(2, r.issues().size(), "ERROR + INFO, nothing invented or dropped");
+            assertEquals("change/archive-blocker", infos.get(0).filePath(),
+                    "parseJsonOutput overwrites the issue path with type/id — assert delta paths off the raw JSON only");
         }
     }
 }
