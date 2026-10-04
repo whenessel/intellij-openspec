@@ -79,8 +79,20 @@ public record ArtifactInstruction(
             return null;
         }
         try {
-            Path filePath = Path.of(changeDir, relativePath);
-            if (Files.exists(filePath) && Files.isRegularFile(filePath)) {
+            Path root = Path.of(changeDir).toAbsolutePath().normalize();
+            Path relative = Path.of(relativePath);
+            if (relative.isAbsolute() || relativePath.contains("\\") || relativePath.contains(":")) return null;
+            Path filePath = root.resolve(relative).normalize();
+            if (!filePath.startsWith(root) || filePath.equals(root)) return null;
+            Path current = filePath;
+            while (current != null) {
+                if (Files.isSymbolicLink(current)) return null;
+                current = current.getParent();
+            }
+            String name = filePath.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+            if (name.startsWith(".") || name.contains("credential") || name.equals("auth.json")
+                    || name.endsWith(".pem") || name.endsWith(".key")) return null;
+            if (Files.exists(filePath) && Files.isRegularFile(filePath) && Files.size(filePath) <= 32 * 1024) {
                 return Files.readString(filePath);
             }
         } catch (IOException | InvalidPathException ignored) {
