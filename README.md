@@ -76,6 +76,7 @@ CI verifies the plugin on **Windows and macOS in addition to Linux**, so platfor
 ## Links
 
 - [Documentation Index](docs/README.md) — Map of every doc: purpose, audience, and maintenance class
+- [Local Codex acceptance checklist](docs/local-codex-acceptance.md) — Mock journey and pending SDK/runtime evidence
 - [Integrated Local Codex](docs/local-codex.md) — Setup, billing, restricted context, compatibility and current validation limits
 - [Feature Reference](docs/feature-reference.md) — Complete reference for all plugin features, settings, and troubleshooting
 - [OpenSpec Client Coverage](docs/openspec-support.md) — What the plugin supports vs. the OpenSpec client, by CLI version

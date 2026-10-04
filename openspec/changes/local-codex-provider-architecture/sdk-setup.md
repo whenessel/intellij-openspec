@@ -29,6 +29,18 @@ Gradle also accepts `dependencies { intellijPlatform { local("/absolute/path/to/
 
 The manual DevKit workflow adds JDK first, then File → Project Structure → SDKs → Add IntelliJ Platform Plugin SDK from disk, selects an IDE installation and internal JDK, and sets Sandbox Home. JetBrains describes this in [theme/DevKit environment setup](https://plugins.jetbrains.com/docs/intellij/setting-up-theme-environment.html). It is a separate older project model, not a missing step in this Gradle project. Plugin DevKit provides IDE development tooling; it is not itself the platform dependency. JetBrains recommends Gradle for behavior plugins in [Introduction to Plugin Development](https://plugins.jetbrains.com/docs/intellij/developing-plugins.html).
 
+## Import and source navigation
+
+For this Gradle project, open its root build/settings files as a Gradle project, choose JDK 21 for the Gradle JVM and reload Gradle. Enable dependency source downloads to navigate platform source. JetBrains documents that source attachment is handled by Plugin DevKit and Gradle; a separate manually created Plugin SDK is not required by this build model. See [attaching platform sources](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin.html#attaching-sources-in-the-ide).
+
+| Component | Role in this repository |
+| --- | --- |
+| JDK 21 | Gradle toolchain and Java compilation for target platform 2024.2 |
+| IntelliJ Platform dependency | Actual target IDE distribution and APIs resolved by `intellijIdeaCommunity("2024.2")` |
+| Plugin DevKit | IDE-side plugin development support and source navigation; does not supply the target distribution |
+| Platform test framework | Explicit `testFramework(TestFrameworkType.Platform)` dependency for IDE-backed tests |
+| Starter/Driver | Separate existing `integrationTest` stack pinned to branch 242 for real UI smoke tests |
+
 ## Verification and current blocker
 
 For this repository, import/reload the Gradle project with JDK 21. The [documented tasks](https://plugins.jetbrains.com/docs/intellij/tools-intellij-platform-gradle-plugin-tasks.html) provide `runIde` for a development IDE, `buildPlugin` for the plugin archive and `verifyPlugin` for compatibility checks. Existing project `build` and `uiSmoke` gates must also pass. Source parsing and pure JUnit tests cannot establish platform API compatibility or UI behavior.

@@ -275,6 +275,17 @@ public final class ArtifactOrchestrationService {
      */
     public void generateAllRemaining(String changeName, AiExecutionService apiService,
                                      GenerateAllListener listener) {
+        DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
+        generateAllRemaining(changeName, apiService, listener, resolver == null ? null : resolver.resolveSnapshot(null));
+    }
+
+    public void generateAllRemaining(String changeName, AiExecutionService apiService,
+                                     GenerateAllListener listener,
+                                     com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot route) {
+        if (route != null && !route.executesBackend()) {
+            listener.onError(null, new IllegalStateException("Manual delivery selected; Generate All starts no backend."));
+            return;
+        }
         generateAllCancelled.set(false);
 
         // Count total remaining artifacts
@@ -339,7 +350,8 @@ public final class ArtifactOrchestrationService {
 
             try {
                 ArtifactInstruction instruction = getInstruction(changeName, artifactId);
-                apiService.generateAndApply(instruction);
+                if (route == null) apiService.generateAndApply(instruction);
+                else apiService.generateAndApply(instruction, route);
                 invalidateCache(changeName);
                 listener.onArtifactCompleted(artifactId);
             } catch (AiApiException e) {

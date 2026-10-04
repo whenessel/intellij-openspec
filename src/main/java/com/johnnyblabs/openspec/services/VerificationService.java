@@ -218,22 +218,23 @@ public final class VerificationService {
         if (requirementNames.isEmpty()) return;
 
         DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
-        if (resolver == null || resolver.resolve().mode() != com.johnnyblabs.openspec.ai.DeliveryMode.DIRECT_API) {
+        var route = resolver == null ? null : resolver.resolveSnapshot(null);
+        if (route == null || !route.executesBackend()) {
             report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
                     "Correctness/coherence not assessed (manual delivery selected; no AI request sent)"));
             return;
         }
         AiExecutionService ai = project.getService(AiExecutionService.class);
-        if (ai == null || !ai.isConfigured()) {
+        if (ai == null || !route.available()) {
             report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
                     "Correctness/coherence not assessed (AI provider not configured)"));
             return;
         }
 
         try {
-            // The AI call is an unbounded network round-trip — honor cancellation and show progress.
+            // Honor cancellation while the selected backend performs its bounded request.
             checkCanceledIfPossible("Verifying correctness via AI…");
-            String response = ai.generateRaw(buildCorrectnessPrompt(requirementNames, changeDir));
+            String response = ai.generateRaw(buildCorrectnessPrompt(requirementNames, changeDir), ignored -> {}, route);
             for (String line : response.split("\\R")) {
                 String trimmed = line.strip();
                 if (trimmed.regionMatches(true, 0, "GAP:", 0, 4)) {

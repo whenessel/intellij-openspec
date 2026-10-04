@@ -6,6 +6,9 @@ import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.util.ui.JBUI;
+import com.johnnyblabs.openspec.settings.OpenSpecSettings;
+import java.util.List;
+import java.util.ArrayList;
 import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
@@ -22,12 +25,7 @@ public final class ContextReviewService {
     public static final int MAX_PROMPT_BYTES = ContextPayloadPolicy.MAX_PROMPT_BYTES;
     private final Project project;
     private final BiFunction<String, String, String> reviewer;
-    public ContextReviewService(Project project) {
-        this(project, (prompt, backend) -> {
-            ContextDialog dialog = new ContextDialog(project, prompt, backend);
-            return dialog.showAndGet() ? dialog.text() : null;
-        });
-    }
+    public ContextReviewService(Project project) { this.project = project; this.reviewer = null; }
     ContextReviewService(Project project, BiFunction<String, String, String> reviewer) { this.project = project; this.reviewer = reviewer; }
 
     public ReviewedContext review(String prompt, String backendLabel) throws IOException {
@@ -36,22 +34,29 @@ public final class ContextReviewService {
     public ReviewedContext review(String prompt, String backendLabel, int configuredByteBudget) throws IOException {
         ProgressManager.checkCanceled();
         if (configuredByteBudget <= 0) throw new IOException("Invalid AI context budget");
-        int effectiveBudget = Math.min(configuredByteBudget, MAX_PROMPT_BYTES);
-        String safe = redactAndBound(prompt);
-        checkBudget(safe, effectiveBudget);
+        OpenSpecSettings settings = project == null ? null : OpenSpecSettings.getInstance(project);
+        int tokens = settings == null ? 12000 : settings.getAiContextMaxInputTokens();
+        ContextManifest.Budget budget = new ContextManifest.Budget(64, 32768,
+                Math.min(configuredByteBudget, MAX_PROMPT_BYTES), tokens, null, 4096, 1024);
+        String safe = ContextManifest.fromPrompt(prompt, List.of(), budget).prompt();
+        ContextPayloadPolicy.redactAndBound(safe, budget);
         AtomicReference<String> approved = new AtomicReference<>();
         Runnable review = () -> {
             if (project != null && project.isDisposed()) throw new ProcessCanceledException();
-            approved.set(reviewer.apply(safe, backendLabel + "\nPayload: " + safe.getBytes(StandardCharsets.UTF_8).length
-                    + " UTF-8 bytes; effective budget " + effectiveBudget + " bytes (token estimate only)."));
+            String destination = backendLabel + "\nPayload: " + safe.getBytes(StandardCharsets.UTF_8).length
+                    + " UTF-8 bytes. " + budget.disclosure();
+            if (reviewer != null) approved.set(reviewer.apply(safe, destination));
+            else {
+                ContextDialog dialog = new ContextDialog(project, safe, destination, budget);
+                approved.set(dialog.showAndGet() ? dialog.text() : null);
+            }
         };
         var app = ApplicationManager.getApplication();
         if (app == null || app.isDispatchThread()) review.run(); else app.invokeAndWait(review);
         if (approved.get() == null) throw new ProcessCanceledException();
         ProgressManager.checkCanceled();
         // The text editor may only reduce/refine scope; redaction and limits also apply after edits.
-        String reviewed = redactAndBound(approved.get());
-        checkBudget(reviewed, effectiveBudget);
+        String reviewed = ContextPayloadPolicy.redactAndBound(approved.get(), budget);
         Path root = Files.createTempDirectory("openspec-reviewed-context-");
         try {
             Files.writeString(root.resolve("reviewed-context.md"), reviewed, StandardCharsets.UTF_8);
@@ -77,9 +82,15 @@ public final class ContextReviewService {
         private final String prompt;
         private final String backend;
         private JTextArea editor;
-        ContextDialog(Project project, String prompt, String backend) {
+        private final Project contextProject;
+        private final ContextManifest.Budget budget;
+        private SwingWorker<String, Void> inclusionWorker;
+        private volatile boolean closed;
+        ContextDialog(Project project, String prompt, String backend, ContextManifest.Budget budget) {
             super(project, true);
             this.prompt = prompt;
+            this.contextProject = project;
+            this.budget = budget;
             this.backend = backend == null ? "Selected AI backend" : backend;
             setTitle("Review AI Context and Destination");
             setOKButtonText("Send Reviewed Context");
@@ -102,7 +113,55 @@ public final class ContextReviewService {
             editor.setLineWrap(true);
             editor.setWrapStyleWord(true);
             panel.add(new JScrollPane(editor), BorderLayout.CENTER);
+            JButton include = new JButton("Include files once (multiple selection)...");
+            include.setMnemonic('I');
+            include.getAccessibleContext().setAccessibleDescription("Explicitly select additional files for this reviewed request");
+            JLabel inclusionStatus = new JLabel("Additional files: none. Hidden, credential, ignored and binary files are excluded.");
+            include.setEnabled(contextProject != null && contextProject.getBasePath() != null);
+            include.addActionListener(event -> {
+                Path root = Path.of(contextProject.getBasePath()).toAbsolutePath().normalize();
+                JFileChooser chooser = new JFileChooser(root.toFile());
+                chooser.setMultiSelectionEnabled(true);
+                chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+                if (chooser.showOpenDialog(panel) != JFileChooser.APPROVE_OPTION) return;
+                List<ContextManifest.Selection> selections = new ArrayList<>();
+                for (java.io.File file : chooser.getSelectedFiles()) {
+                    Path path = file.toPath().toAbsolutePath().normalize();
+                    if (!path.startsWith(root)) { inclusionStatus.setText("Choose files within this project; no content was added."); return; }
+                    String relative = root.relativize(path).toString().replace('\\', '/');
+                    selections.add(new ContextManifest.Selection(root, relative,
+                            relative.startsWith("openspec/changes/") ? ContextManifest.Origin.ADDITIONAL_CHANGE : ContextManifest.Origin.SOURCE, false));
+                }
+                if (selections.isEmpty()) return;
+                String currentText = editor.getText();
+                include.setEnabled(false); editor.setEditable(false); setOKActionEnabled(false);
+                inclusionStatus.setText("Reading explicitly selected files...");
+                inclusionWorker = new SwingWorker<>() {
+                    @Override protected String doInBackground() throws Exception {
+                        return ContextManifest.fromPrompt(currentText, selections, budget).prompt();
+                    }
+                    @Override protected void done() {
+                        if (closed || isCancelled() || contextProject.isDisposed()) return;
+                        try {
+                            editor.setText(get());
+                            inclusionStatus.setText("Selected files were evaluated; included files and omissions are listed in the preview.");
+                        } catch (Exception ignored) {
+                            inclusionStatus.setText("Files could not fit safely; reduce scope and review again. No request was sent.");
+                            include.setEnabled(true);
+                        } finally { editor.setEditable(true); setOKActionEnabled(true); }
+                    }
+                };
+                inclusionWorker.execute();
+            });
+            JPanel additions = new JPanel(new BorderLayout(0, 4));
+            additions.add(include, BorderLayout.NORTH); additions.add(inclusionStatus, BorderLayout.SOUTH);
+            panel.add(additions, BorderLayout.SOUTH);
             return panel;
+        }
+        @Override protected void dispose() {
+            closed = true;
+            if (inclusionWorker != null) inclusionWorker.cancel(true);
+            super.dispose();
         }
         String text() { return editor.getText(); }
     }

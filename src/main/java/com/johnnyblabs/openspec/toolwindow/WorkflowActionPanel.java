@@ -1624,6 +1624,10 @@ public class WorkflowActionPanel extends JPanel {
 
     private void executeGeneration(DeliveryMode mode) {
         if (activeChangeName == null || nextArtifactId == null) return;
+        var resolver = project.getService(com.johnnyblabs.openspec.services.DeliveryMethodResolver.class);
+        if (resolver == null) return;
+        var routing = resolver.resolveSnapshot(new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RunOverride(mode));
+        String selectedToolName = getSelectedToolName();
 
         String changeName = activeChangeName;
         String artifactId = nextArtifactId;
@@ -1639,16 +1643,17 @@ public class WorkflowActionPanel extends JPanel {
                     String prompt = instruction.buildPrompt();
 
                     lastPrompt = prompt;
-                    lastOutputPath = instruction.outputPath();
+                    String outputPath = instruction.outputPath();
+                    lastOutputPath = outputPath;
 
-                    switch (mode) {
+                    switch (routing.mode()) {
                         case CLIPBOARD -> {
-                            String toolName = getSelectedToolName();
+                            String toolName = selectedToolName;
                             String clipboardPrompt = prompt;
                             if (!toolName.isBlank() && AiToolDetectionService.isCliTool(toolName)
-                                    && instruction.changeDir() != null && lastOutputPath != null) {
+                                    && instruction.changeDir() != null && outputPath != null) {
                                 clipboardPrompt = prompt + "\n\nSave your response to: "
-                                        + instruction.changeDir() + "/" + lastOutputPath;
+                                        + instruction.changeDir() + "/" + outputPath;
                             }
                             lastPrompt = clipboardPrompt;
                             Toolkit.getDefaultToolkit().getSystemClipboard()
@@ -1657,8 +1662,8 @@ public class WorkflowActionPanel extends JPanel {
                                 String toolLabel = toolName.isBlank() ? null : toolName;
                                 AiToolDetectionService.ToolGuidance guidance =
                                         AiToolDetectionService.getToolGuidance(toolLabel != null ? toolLabel : "your AI tool");
-                                String savePath = (instruction.changeDir() != null && lastOutputPath != null)
-                                        ? instruction.changeDir() + "/" + lastOutputPath : lastOutputPath;
+                                String savePath = (instruction.changeDir() != null && outputPath != null)
+                                        ? instruction.changeDir() + "/" + outputPath : outputPath;
                                 String detail = guidance.canAutoSave()
                                         ? guidance.pasteAction() + " \u2014 it will save automatically."
                                         : guidance.pasteAction() + ". Save to: " + savePath;
@@ -1668,7 +1673,7 @@ public class WorkflowActionPanel extends JPanel {
                                                     .setContents(new StringSelection(lastPrompt), null);
                                             OpenSpecNotifier.info(project, "Generate", "Prompt re-copied to clipboard");
                                         });
-                                if (instruction.changeDir() != null && lastOutputPath != null) {
+                                if (instruction.changeDir() != null && outputPath != null) {
                                     startFileWatcher(instruction.changeDir(), lastOutputPath);
                                 }
                             });
@@ -1689,11 +1694,11 @@ public class WorkflowActionPanel extends JPanel {
                                 if (scratch != null) {
                                     FileEditorManager.getInstance(project).openFile(scratch, true);
                                 }
-                                String savePath = (instruction.changeDir() != null && lastOutputPath != null)
-                                        ? instruction.changeDir() + "/" + lastOutputPath : lastOutputPath;
+                                String savePath = (instruction.changeDir() != null && outputPath != null)
+                                        ? instruction.changeDir() + "/" + outputPath : outputPath;
                                 showGuidancePopover(chipAnchor, "\u2713 Opened in editor tab",
                                         "Copy to your AI tool. Save response to: " + savePath, null);
-                                if (instruction.changeDir() != null && lastOutputPath != null) {
+                                if (instruction.changeDir() != null && outputPath != null) {
                                     startFileWatcher(instruction.changeDir(), lastOutputPath);
                                 }
                             } catch (IOException ex) {
@@ -1703,10 +1708,10 @@ public class WorkflowActionPanel extends JPanel {
                         });
                         case DIRECT_API -> {
                             AiExecutionService apiService = project.getService(AiExecutionService.class);
-                            if (apiService == null || !apiService.isConfigured()) {
-                                throw new IllegalStateException("Selected AI backend is not ready. Check OpenSpec settings.");
+                            if (apiService == null || !routing.available()) {
+                                throw new IllegalStateException("Selected AI backend is not ready: " + routing.readiness().detail() + ". Check OpenSpec settings.");
                             }
-                            List<java.nio.file.Path> written = apiService.generateAndApply(instruction);
+                            List<java.nio.file.Path> written = apiService.generateAndApply(instruction, routing);
                             indicator.checkCanceled();
                             orchestration.invalidateCache(changeName);
                             ApplicationManager.getApplication().invokeLater(() -> {
@@ -1834,8 +1839,11 @@ public class WorkflowActionPanel extends JPanel {
 
     private void onGenerateAll() {
         if (activeChangeName == null) return;
+        var resolver = project.getService(com.johnnyblabs.openspec.services.DeliveryMethodResolver.class);
+        if (resolver == null) return;
+        var routing = resolver.resolveSnapshot(new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RunOverride(getSelectedDeliveryMode()));
         AiExecutionService service = project.getService(AiExecutionService.class);
-        if (getSelectedDeliveryMode() != DeliveryMode.DIRECT_API || service == null || !service.isConfigured()) {
+        if (getSelectedDeliveryMode() != DeliveryMode.DIRECT_API || service == null || !routing.available()) {
             OpenSpecNotifier.warn(project, "Generate All", "Choose a ready integrated backend for automatic generation. Manual delivery generates one prompt at a time.");
             return;
         }
@@ -1983,7 +1991,7 @@ public class WorkflowActionPanel extends JPanel {
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             ArtifactOrchestrationService orchestration = project.getService(ArtifactOrchestrationService.class);
             AiExecutionService apiService = project.getService(AiExecutionService.class);
-            orchestration.generateAllRemaining(changeName, apiService, listener);
+            orchestration.generateAllRemaining(changeName, apiService, listener, routing);
         });
     }
 

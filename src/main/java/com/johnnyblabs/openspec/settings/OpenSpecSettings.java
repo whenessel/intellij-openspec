@@ -122,6 +122,8 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
     public void setCodexApiBillingAcknowledged(boolean acknowledged) { state.codexApiBillingAcknowledged = acknowledged; }
     public int getAiContextMaxBytes() { return state.aiContextMaxBytes > 0 ? state.aiContextMaxBytes : 262144; }
     public void setAiContextMaxBytes(int maxBytes) { state.aiContextMaxBytes = maxBytes; }
+    public int getAiContextMaxInputTokens() { return state.aiContextMaxInputTokens > 0 && state.aiContextMaxInputTokens <= 65536 ? state.aiContextMaxInputTokens : 12000; }
+    public void setAiContextMaxInputTokens(int tokens) { state.aiContextMaxInputTokens = tokens; }
 
     public String getAiProvider() {
         return state.aiProvider == null ? "" : state.aiProvider;
@@ -299,6 +301,7 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         public int codexTimeoutSeconds = 180;
         public boolean codexApiBillingAcknowledged = false;
         public int aiContextMaxBytes = 262144;
+        public int aiContextMaxInputTokens = 12000;
         public String aiProvider = "NONE";
         public String aiModel = "";
         public String preferredDeliveryMethod = "";

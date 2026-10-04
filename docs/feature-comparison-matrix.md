@@ -64,7 +64,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Direct API: Claude (Anthropic) | Yes | No | No | No | No |
 | Direct API: OpenAI | Yes | No | No | No | No |
 | Direct API: Gemini | Yes | No | No | No | No |
-| Installed Codex CLI execution | Implemented MVP; [compatibility and validation limits](local-codex.md) | No | No | No | No |
+| Installed Codex CLI execution | Source implementation; [compatibility and validation limits](local-codex.md) | No | No | No | No |
 | CLI-owned ChatGPT login / account model catalog | Codex MVP, subscription limits apply | No | No | No | No |
 | Context preview and validated artifact batch review | Yes (integrated REST/Codex) | No | No | No | No |
 | Persistent Codex conversation resume | Explore: implemented with ChatGPT workspace identity/scope guards; pending live acceptance | — | — | — | — |

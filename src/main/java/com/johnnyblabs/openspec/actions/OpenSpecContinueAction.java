@@ -41,7 +41,9 @@ public class OpenSpecContinueAction extends OpenSpecBaseAction {
         String changeName = activeChanges.getFirst().getName();
 
         DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
-        if (resolver == null || resolver.resolve().mode() != DeliveryMode.DIRECT_API) {
+        if (resolver == null) return;
+        var routing = resolver.resolveSnapshot(null);
+        if (routing.mode() != DeliveryMode.DIRECT_API) {
             var toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow("OpenSpec");
             if (toolWindow != null) toolWindow.activate(() -> {
                 var content = toolWindow.getContentManager().findContent("Browse");
@@ -75,16 +77,16 @@ public class OpenSpecContinueAction extends OpenSpecBaseAction {
 
                 indicator.setText("Generating " + nextArtifact.id() + "...");
                 AiExecutionService apiService = project.getService(AiExecutionService.class);
-                if (apiService == null || !apiService.isConfigured()) {
+                if (apiService == null || !routing.available()) {
                     ApplicationManager.getApplication().invokeLater(() ->
                             OpenSpecNotifier.error(project, "AI backend not ready",
-                                    "Configure an AI provider in Settings to use Continue."));
+                                    "Selected backend is unavailable: " + routing.readiness().detail() + ". Check OpenSpec settings."));
                     return;
                 }
 
                 try {
                     ArtifactInstruction instruction = orchestration.getInstruction(changeName, nextArtifact.id());
-                    apiService.generateAndApply(instruction);
+                    apiService.generateAndApply(instruction, routing);
                     indicator.checkCanceled();
                     orchestration.invalidateCache(changeName);
 

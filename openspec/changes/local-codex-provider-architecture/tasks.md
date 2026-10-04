@@ -1,6 +1,6 @@
 ## 1. P1 — Execution contracts and migration (after implementation authorization)
 
-- [ ] 1.1 Define immutable requests, discriminated results/events, capability states, cancellation and deadlines; verify unit tests reject incompatible required capabilities and complete terminal state exactly once.
+- [x] 1.1 Define immutable requests, discriminated results/events, capability states, cancellation and deadlines; verify unit tests reject incompatible required capabilities and complete terminal state exactly once.
 - [ ] 1.2 Introduce shared routing and readiness snapshots; verify precedence tests for run override, explicit manual preference, legacy REST, detected-tool suggestion and unavailable backend with zero fallback calls.
 - [ ] 1.3 Adapt existing Claude/OpenAI/Gemini transport behind backend contracts while retaining PasswordSafe identities and request semantics; verify captured existing provider fixtures and header/token-limit regression tests.
 - [ ] 1.4 Version settings migration for provider-scoped models/backend/delivery while preserving legacy rollback fields and independent OpenSpec CLI settings; verify old persisted-state fixtures including NONE, blank, invalid and clipboard-with-saved-key cases.
@@ -9,9 +9,9 @@
 ## 2. P2 — Context privacy and safe results (depends on P1)
 
 - [ ] 2.1 Build selected-change context manifests with explicit inclusion of other changes/source; verify filesystem fixture tests preserve required instruction order and exclude unselected changes.
-- [ ] 2.2 Add byte/file/token budgets, exclusions and redaction with essential-content overflow errors; verify boundary tests for large files, unknown tokenizer/model bounds, secrets, binary/ignored files and visible omissions.
+- [x] 2.2 Add byte/file/token budgets, exclusions and redaction with essential-content overflow errors; verify boundary tests for large files, unknown tokenizer/model bounds, secrets, binary/ignored files and visible omissions.
 - [ ] 2.3 Implement shared context preview and acceptance bound to action/backend/model/account/security/content; verify UI/controller tests invalidate approval on expanded scope or changed billing destination and do not send before review.
-- [ ] 2.4 Define result envelope v1 for concrete create/replace/patch operations with allowed root/pattern and base versions; verify parser fixtures reject malformed/unknown envelopes and two-domain specs result passes without treating specs/**/*.md as a filename.
+- [x] 2.4 Define result envelope v1 for concrete create/replace/patch operations with allowed root/pattern and base versions; verify parser fixtures reject malformed/unknown envelopes and two-domain specs result passes without treating specs/**/*.md as a filename.
 - [x] 2.5 Implement full-batch path/scope validation; verify adversarial fixtures for ../, absolute/UNC/drive paths, separators/streams/NUL, wildcard concrete names, symlink escapes, case collisions, duplicates and targets outside resolved store roots.
 - [ ] 2.6 Add base-hash/document-conflict checks and diff preview; verify edits after preview, unsaved documents, forbidden deletion and changed parent symlinks block writes and require re-review.
 - [ ] 2.7 Replace both orchestration and workflow-panel artifact writers with one recoverable undoable safe writer; verify multi-file acceptance, rejection/no writes, injected mid-batch failure/recovery and VFS/document refresh behavior in IDE tests.
@@ -21,10 +21,10 @@
 
 - [x] 3.1 Capture sanitized real no-inference version/help/app-server generated schema, initialization/account/model events for candidate CLI versions in isolated directories; verify provenance/version manifest and select a supported minimum/range from actual fixtures rather than hand-invented contracts.
 - [ ] 3.2 Define supported OS read-scope/tool restrictions from verified CLI schemas/config controls; verify no-inference permission captures and document unsupported profiles that must be blocked; do not read/copy auth files.
-- [ ] 3.3 Implement validated executable resolution and argument-array/stdin process launch with controlled environment; verify mock executable records exact args/stdin for spaces, Unicode, metacharacters, missing paths and unsupported wrappers without shell evaluation or secret logging.
-- [ ] 3.4 Implement concurrent bounded stdout/stderr readers and bidirectional JSON framing/correlation; verify mock subprocess partial lines, interleaved IDs, notifications, server requests, EOF, huge stderr, oversized/malformed frames and process crash.
-- [ ] 3.5 Implement initialize/initialized and typed thread/start/resume and turn/start events using captured schema codecs; verify captured valid fixtures plus mock event ordering/duplicate/unknown optional events and incompatible required-field errors.
-- [ ] 3.6 Implement terminal-status assembly and incremental response updates; verify failed/interrupted terminal states, delta-before-terminal, missing completion, zero exit without completion and wrong-thread/turn isolation.
+- [x] 3.3 Implement validated executable resolution and argument-array/stdin process launch with controlled environment; verify mock executable records exact args/stdin for spaces, Unicode, metacharacters, missing paths and unsupported wrappers without shell evaluation or secret logging.
+- [x] 3.4 Implement concurrent bounded stdout/stderr readers and bidirectional JSON framing/correlation; verify mock subprocess partial lines, interleaved IDs, notifications, server requests, EOF, huge stderr, oversized/malformed frames and process crash.
+- [x] 3.5 Implement initialize/initialized and typed thread/start/resume and turn/start events using captured schema codecs; verify captured valid fixtures plus mock event ordering/duplicate/unknown optional events and incompatible required-field errors.
+- [x] 3.6 Implement terminal-status assembly and incremental response updates; verify failed/interrupted terminal states, delta-before-terminal, missing completion, zero exit without completion and wrong-thread/turn isolation.
 - [ ] 3.7 Implement interruption/deadline/fake-clock lifecycle and project/executable-change cleanup; verify delayed completion after cancel, no interrupt ACK, hung descendant, stream closure and project disposal with no file writes.
 - [ ] 3.8 Enforce reviewed read-only context/tool policy for MVP and deny unsupported approvals/escalation; verify malicious tool requests and unsupported permission-profile fixtures cannot broaden access or create workspace files.
 - [ ] 3.9 Add auth/account/rate-limit status without plugin credential ownership; verify managed ChatGPT, API-key, signed-out, unknown/new mode and unavailable-limit fixtures show truthful billing/status and invalidate stale sessions.

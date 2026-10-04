@@ -1,27 +1,24 @@
 package com.johnnyblabs.openspec.services;
 
 import com.intellij.openapi.components.Service;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.model.Change;
 import com.johnnyblabs.openspec.model.OpenSpecConfig;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import com.johnnyblabs.openspec.ai.safety.ContextManifest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * Assembles project context from config, active changes, specs, and detected AI tools
- * into a Markdown-formatted string. Shared by both {@code ExplorePanel} and
+ * Assembles an immutable reviewed manifest from config, the explicit selected change,
+ * and explicit additional files. Shared by both {@code ExplorePanel} and
  * {@code ExploreContextAction}.
  */
 @Service(Service.Level.PROJECT)
 public final class ExploreContextService {
-    private static final Logger LOG = Logger.getInstance(ExploreContextService.class);
     private static final String[] CHANGE_ARTIFACTS = {"proposal.md", "design.md", "tasks.md"};
 
     private final Project project;
@@ -29,38 +26,51 @@ public final class ExploreContextService {
 
     public void setSelectedChange(String changeName) { selectedChange = changeName; }
 
-    private static String readContextFile(Path root, Path path) throws IOException {
-        Path normalized = path.toAbsolutePath().normalize();
-        if (!normalized.startsWith(root.toAbsolutePath().normalize()) || !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("Context path is outside permitted scope");
-        }
-        for (Path current = normalized; current != null; current = current.getParent()) {
-            if (Files.isSymbolicLink(current)) throw new IOException("Symlink context omitted");
-        }
-        if (Files.size(path) > 32 * 1024) throw new IOException("Oversized context omitted");
-        return Files.readString(path);
-    }
-
     public ExploreContextService(Project project) {
         this.project = project;
     }
 
     /**
-     * Assembles the full project context as a Markdown-formatted string.
-     *
-     * @return Markdown string containing config summary, active changes with proposal
-     *         summaries, spec domains, and detected AI tools.
+     * Assembles selected context with visible exclusions and conservative budget disclosure.
      */
     public String assembleContext() {
-        StringBuilder context = new StringBuilder();
-        context.append("# OpenSpec Explore Context\n\n");
+        com.johnnyblabs.openspec.settings.OpenSpecSettings settings = com.johnnyblabs.openspec.settings.OpenSpecSettings.getInstance(project);
+        ContextManifest.Budget budget = settings == null ? ContextManifest.Budget.defaults()
+                : new ContextManifest.Budget(64, 32768,
+                        Math.min(settings.getAiContextMaxBytes(), com.johnnyblabs.openspec.ai.safety.ContextPayloadPolicy.MAX_PROMPT_BYTES),
+                        settings.getAiContextMaxInputTokens(), null, 4096, 1024);
+        try { return assembleManifest(List.of(), budget).prompt(); }
+        catch (IOException ex) { throw new UncheckedIOException("Explore context cannot fit safely; reduce selected scope", ex); }
+    }
 
+    public ContextManifest assembleManifest(List<ContextManifest.Selection> explicitSelections,
+                                            ContextManifest.Budget budget) throws IOException {
+        var builder = new ContextManifest.Builder(budget);
+        appendContext(builder);
+        for (ContextManifest.Selection selection : explicitSelections) builder.file(selection);
+        return builder.build();
+    }
+
+    /** Adds to the same request builder so skill/topic/context share one admission budget. */
+    public void appendContext(ContextManifest.Builder builder) throws IOException {
+        StringBuilder context = new StringBuilder("# OpenSpec Explore Context\n\n");
         appendConfigSummary(context);
         appendDetectedTools(context);
-        appendActiveChanges(context);
-        appendSpecsDomains(context);
-
-        return context.toString();
+        context.append("## Active Changes\n");
+        ChangeService changeService = project.getService(ChangeService.class);
+        List<Change> changes = changeService == null ? List.of() : changeService.getActiveChanges();
+        String chosen = selectedChange;
+        Change selected = changes.stream().filter(change -> change.getName().equals(chosen)).findFirst().orElse(null);
+        if (changes.isEmpty()) context.append("No active changes.\n");
+        else if (selected == null) context.append("No change selected; active change contents are excluded. Select a change explicitly.\n");
+        else context.append("\n### ").append(selected.getName())
+                .append(selected.getMetadata() != null && selected.getMetadata().getSchema() != null
+                        ? " (" + selected.getMetadata().getSchema() + ")" : "").append("\n");
+        context.append("\n## Specs\nProject-wide spec contents require explicit file inclusion.\n");
+        builder.inline("Explore project instructions", ContextManifest.Origin.INSTRUCTION, context.toString(), true);
+        if (!changes.isEmpty()) builder.omission("Other active changes", ContextManifest.Origin.ADDITIONAL_CHANGE,
+                "Unselected changes excluded unless concrete files are explicitly included");
+        if (selected != null) appendChangeArtifacts(selected, builder);
     }
 
     private void appendConfigSummary(StringBuilder context) {
@@ -107,127 +117,32 @@ public final class ExploreContextService {
         context.append("\n");
     }
 
-    private void appendActiveChanges(StringBuilder context) {
-        ChangeService changeService = project.getService(ChangeService.class);
-        if (changeService == null) return;
-
-        List<Change> changes = changeService.getActiveChanges();
-        context.append("## Active Changes\n");
-        if (changes.isEmpty()) {
-            context.append("No active changes.\n");
-        } else {
-            context.append("Other active changes are excluded unless explicitly included in reviewed context.\n");
-            String chosen = selectedChange != null ? selectedChange : changes.getFirst().getName();
-            for (Change change : changes) {
-                if (!change.getName().equals(chosen)) continue;
-                context.append("\n### ").append(change.getName());
-                if (change.getMetadata() != null && change.getMetadata().getSchema() != null) {
-                    context.append(" (").append(change.getMetadata().getSchema()).append(")");
-                }
-                context.append("\n");
-
-                appendChangeArtifacts(change.getName(), context);
-            }
+    private void appendChangeArtifacts(Change change, ContextManifest.Builder builder) throws IOException {
+        if (change.getPath() == null) {
+            builder.omission("Selected change", ContextManifest.Origin.SELECTED_CHANGE, "Planning root unavailable");
+            return;
         }
-        context.append("\n");
-    }
-
-    private void appendChangeArtifacts(String changeName, StringBuilder context) {
-        String basePath = project.getBasePath();
-        if (basePath == null) return;
-
-        Path changeDir = Path.of(basePath, "openspec", "changes", changeName);
-
-        // Read standard artifacts
+        Path root = Path.of(change.getPath()).toAbsolutePath().normalize();
         for (String artifact : CHANGE_ARTIFACTS) {
-            Path artifactPath = changeDir.resolve(artifact);
-            if (Files.exists(artifactPath)) {
-                String label = artifact.replace(".md", "");
-                try {
-                    String content = readContextFile(changeDir, artifactPath);
-                    if (context.length() + content.length() > 48 * 1024) {
-                        context.append("\n[Artifact omitted: effective context budget]\n");
-                    } else context.append("\n**").append(label).append(":**\n\n").append(content.strip()).append("\n");
-                } catch (IOException ignored) {
-                    context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
-                }
+            builder.file(new ContextManifest.Selection(root, artifact, ContextManifest.Origin.SELECTED_CHANGE, false));
+        }
+        Path specs = root.resolve("specs");
+        if (Files.isSymbolicLink(specs)) {
+            builder.omission("specs", ContextManifest.Origin.SELECTED_CHANGE, "Symlink context omitted");
+            return;
+        }
+        if (!Files.isDirectory(specs, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return;
+        // Immediate domains only; never traverse arbitrary workspace directories or symlinks.
+        try (var domains = Files.list(specs)) {
+            List<Path> paths = domains.limit(65).sorted().toList();
+            for (Path domain : paths.stream().limit(64).toList()) {
+                String relative = "specs/" + domain.getFileName() + "/spec.md";
+                builder.file(new ContextManifest.Selection(root, relative, ContextManifest.Origin.SELECTED_CHANGE, false));
             }
+            if (paths.size() > 64) builder.omission("Additional delta spec domains", ContextManifest.Origin.SELECTED_CHANGE,
+                    "Traversal count bound; select concrete files explicitly");
+        } catch (IOException | SecurityException ex) {
+            builder.omission("Delta specs", ContextManifest.Origin.SELECTED_CHANGE, "Unsafe or unreadable delta specs omitted");
         }
-
-        // Read delta specs
-        Path specsDir = changeDir.resolve("specs");
-        if (Files.isDirectory(specsDir)) {
-            try (var dirs = Files.list(specsDir).limit(64).sorted()) {
-                dirs.filter(Files::isDirectory).forEach(dir -> {
-                    Path specFile = dir.resolve("spec.md");
-                    if (Files.exists(specFile)) {
-                        try {
-                            if (context.length() > 40 * 1024) { context.append("\n[Delta spec omitted: context budget]\n"); return; }
-                            String content = readContextFile(Path.of(basePath, "openspec"), specFile);
-                            context.append("\n**delta spec (").append(dir.getFileName()).append("):**\n\n")
-                                    .append(content.strip()).append("\n");
-                        } catch (IOException ignored) {
-                            context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
-                        }
-                    }
-                });
-            } catch (IOException ignored) {
-                context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
-            }
-        }
-    }
-
-    private static final Pattern REQUIREMENT_PATTERN =
-            com.johnnyblabs.openspec.util.SpecPatterns.REQUIREMENT_HEADER;
-    private static final Pattern SCENARIO_PATTERN = Pattern.compile(
-            "^#### Scenario:", Pattern.MULTILINE);
-
-    private void appendSpecsDomains(StringBuilder context) {
-        String basePath = project.getBasePath();
-        if (basePath == null) return;
-
-        Path specsDir = Path.of(basePath, "openspec", "specs");
-        if (!Files.isDirectory(specsDir)) return;
-
-        context.append("## Specs\n");
-        try (var dirs = Files.list(specsDir).limit(64).sorted()) {
-            dirs.filter(Files::isDirectory).forEach(dir -> {
-                Path specFile = dir.resolve("spec.md");
-                if (!Files.exists(specFile)) return;
-
-                if (context.length() > 40 * 1024) return;
-                context.append("\n### ").append(dir.getFileName()).append("\n");
-                try {
-                    String content = readContextFile(Path.of(basePath, "openspec"), specFile);
-                    Matcher reqMatcher = REQUIREMENT_PATTERN.matcher(content);
-                    while (reqMatcher.find()) {
-                        String reqName = reqMatcher.group(1).trim();
-                        // Extract description: text between requirement header and first scenario (or next requirement/section)
-                        int descStart = reqMatcher.end();
-                        Matcher scenarioMatcher = SCENARIO_PATTERN.matcher(content);
-                        int descEnd = content.length();
-                        if (scenarioMatcher.find(descStart)) {
-                            descEnd = scenarioMatcher.start();
-                        }
-                        // Also stop at next ### or ##
-                        Matcher nextHeader = Pattern.compile("^#{2,3} ", Pattern.MULTILINE).matcher(content);
-                        if (nextHeader.find(descStart)) {
-                            descEnd = Math.min(descEnd, nextHeader.start());
-                        }
-                        String description = content.substring(descStart, descEnd).strip();
-                        context.append("- **").append(reqName).append("**");
-                        if (!description.isEmpty()) {
-                            context.append(": ").append(description);
-                        }
-                        context.append("\n");
-                    }
-                } catch (IOException ignored) {
-                    context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
-                }
-            });
-        } catch (IOException ignored) {
-            context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
-        }
-        context.append("\n");
     }
 }

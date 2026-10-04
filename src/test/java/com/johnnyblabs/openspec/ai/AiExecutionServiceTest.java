@@ -110,6 +110,60 @@ class AiExecutionServiceTest {
         }
     }
 
+    @Test
+    void manualRunOverrideCannotStartAnyBackendEvenWithSavedCodex() {
+        var route = new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot(
+                DeliveryMode.CLIPBOARD, null,
+                new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendReadiness(true, "Manual"),
+                com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.Source.RUN_OVERRIDE, "Clipboard");
+        try (MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class)) {
+            assertThrows(AiApiException.class, () -> execution.generateRaw("private", ignored -> {}, route));
+            assertFalse(execution.hasActiveRequest());
+            assertTrue(local.constructed().isEmpty());
+            verifyNoInteractions(review, rest);
+        }
+    }
+
+    @Test
+    void explicitBackendOverrideUsesFrozenDestinationWithoutChangingSavedSettings() throws Exception {
+        ReviewedContext context = mock(ReviewedContext.class);
+        when(context.prompt()).thenReturn("reviewed");
+        when(context.root()).thenReturn(java.nio.file.Path.of("/unused-context"));
+        when(review.review(anyString(), anyString(), anyInt())).thenReturn(context);
+        when(rest.isConfigured(AiProvider.OPENAI)).thenReturn(true);
+        when(rest.generateRaw(eq("reviewed"), eq(AiProvider.OPENAI), eq("override-model"), any())).thenReturn("answer");
+        var route = new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot(
+                DeliveryMode.DIRECT_API,
+                new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendSelection("REST", "OPENAI", "override-model", "", ""),
+                new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendReadiness(false, "Unprobed override"),
+                com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.Source.RUN_OVERRIDE, "Override");
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class)) {
+            assertEquals("answer", execution.generateRaw("prompt", ignored -> {}, route));
+            assertEquals("LOCAL_CODEX", settings.getAiBackend());
+            assertFalse(execution.hasActiveRequest());
+            assertTrue(local.constructed().isEmpty());
+            verify(review).review(eq("prompt"), contains("override-model"), anyInt());
+            verify(rest).generateRaw(eq("reviewed"), eq(AiProvider.OPENAI), eq("override-model"), any());
+        }
+    }
+
+    @Test
+    void inputTokenBudgetChangedAfterPreviewPreventsInference() throws Exception {
+        ReviewedContext context = mock(ReviewedContext.class);
+        when(review.review(anyString(), anyString(), anyInt())).thenAnswer(call -> {
+            settings.setAiContextMaxInputTokens(2048);
+            return context;
+        });
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = localBackend("chatgpt")) {
+            assertThrows(AiApiException.class, () -> execution.generateRaw("prompt"));
+            verify(local.constructed().getFirst(), never()).generate(any(), any(), any());
+            verifyNoInteractions(rest);
+            verify(context).close();
+        }
+    }
+
     private static MockedStatic<ProgressManager> platformProgress() {
         MockedStatic<ProgressManager> progress = mockStatic(ProgressManager.class);
         progress.when(ProgressManager::getInstance).thenReturn(mock(ProgressManager.class));
@@ -148,7 +202,7 @@ class AiExecutionServiceTest {
         try (MockedStatic<ProgressManager> progress = platformProgress();
              MockedConstruction<CodexAppServerBackend> local = localBackend("chatgpt")) {
             assertThrows(ProcessCanceledException.class, () -> execution.generateExplore("prompt", "scope", ignored -> {}));
-            verify(local.constructed().getFirst(), never()).generateConversation(any(), any(), any(), anyString(), anyBoolean());
+            verify(local.constructed().getFirst(), never()).generateConversation(any(), any(), any(), anyString(), anyBoolean(), anyInt());
             verify(context).close();
             verifyNoInteractions(rest);
         }

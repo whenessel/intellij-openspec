@@ -9,6 +9,8 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.backend.*;
+import com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.*;
+import com.johnnyblabs.openspec.services.DeliveryMethodResolver;
 import com.johnnyblabs.openspec.ai.safety.ContextReviewService;
 import com.johnnyblabs.openspec.ai.safety.SafeArtifactService;
 import com.johnnyblabs.openspec.model.ArtifactInstruction;
@@ -38,20 +40,33 @@ public final class AiExecutionService implements Disposable {
     private volatile boolean disposed;
 
     public AiExecutionService(Project project) { this.project = project; }
+    public static AiExecutionService getInstance(Project project) { return project.getService(AiExecutionService.class); }
 
     /** Cached only: safe for AnAction.update and UI rendering. */
-    public boolean isConfigured() {
+    public boolean isConfigured() { return cachedBackendReadiness().available(); }
+
+    /** Readiness queries never start I/O; refresh is an explicit settings action. */
+    public BackendReadiness cachedBackendReadiness() {
         OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
         if ("REST".equals(settings.getAiBackend())) {
             DirectApiService rest = project.getService(DirectApiService.class);
-            return rest != null && rest.isConfigured();
+            return new BackendReadiness(rest != null && rest.isConfigured(), "REST API configuration");
         }
-        if (!"LOCAL_CODEX".equals(settings.getAiBackend())) return false;
-        if (!settings.getCodexExecutable().equals(statusExecutable)) {
-            refreshStatus();
-            return false;
-        }
-        return codexStatus.available();
+        if (!"LOCAL_CODEX".equals(settings.getAiBackend())) return new BackendReadiness(false, "Unsupported AI backend");
+        if (!settings.getCodexExecutable().equals(statusExecutable)) return new BackendReadiness(false, "Refresh Codex status in Settings");
+        return new BackendReadiness(codexStatus.available(), codexStatus.detail());
+    }
+
+    private RoutingSnapshot currentRoute() {
+        DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
+        if (resolver != null) return resolver.resolveSnapshot(null);
+        // Keeps isolated service tests viable; production always registers the shared resolver.
+        OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
+        DeliveryMode mode = DeliveryMode.DIRECT_API;
+        try { if (!settings.getPreferredDeliveryMethod().isBlank()) mode = DeliveryMode.valueOf(settings.getPreferredDeliveryMethod()); }
+        catch (IllegalArgumentException ignored) { }
+        BackendSelection backend = configuredSelection(settings);
+        return new RoutingSnapshot(mode, backend, cachedBackendReadiness(), Source.SAVED_PREFERENCE, "Selected AI backend");
     }
 
     public String getBackendLabel() {
@@ -99,11 +114,15 @@ public final class AiExecutionService implements Disposable {
 
     /** Snapshots targets before inference so concurrent edits cannot be overwritten after preview. */
     public List<Path> generateAndApply(ArtifactInstruction instruction) throws AiApiException, IOException {
+        return generateAndApply(instruction, currentRoute());
+    }
+    public List<Path> generateAndApply(ArtifactInstruction instruction, RoutingSnapshot route) throws AiApiException, IOException {
+        requireIntegrated(route);
         AtomicBoolean canceled = reserveRun();
         try {
             SafeArtifactService writer = project.getService(SafeArtifactService.class);
             var snapshot = writer.begin(instruction);
-            String result = execute(artifactPrompt(instruction) + "\nExisting artifact destinations (use replace; other destinations use create): " + snapshot.baseHashes().keySet(), artifactSchema(instruction.artifactId()), ignored -> {}, canceled);
+            String result = execute(artifactPrompt(instruction, snapshot, contextBudget(OpenSpecSettings.getInstance(project))), artifactSchema(instruction.artifactId()), ignored -> {}, canceled, null, -1, route);
             ProgressManager.checkCanceled();
             return writer.apply(writer.prepare(snapshot, result), () -> canceled.get() || disposed);
         } finally { active.compareAndSet(canceled, null); }
@@ -111,16 +130,30 @@ public final class AiExecutionService implements Disposable {
 
     public String generateRaw(String prompt) throws AiApiException { return generateRaw(prompt, ignored -> {}); }
     public String generateRaw(String prompt, Consumer<String> onDelta) throws AiApiException {
-        return execute(prompt, null, onDelta);
+        return generateRaw(prompt, onDelta, currentRoute());
+    }
+    public String generateRaw(String prompt, Consumer<String> onDelta, RoutingSnapshot route) throws AiApiException {
+        requireIntegrated(route);
+        AtomicBoolean canceled = reserveRun();
+        try { return execute(prompt, null, onDelta, canceled, null, -1, route); }
+        finally { active.compareAndSet(canceled, null); }
+    }
+    private static void requireIntegrated(RoutingSnapshot route) throws AiApiException {
+        if (route == null || !route.executesBackend() || route.backend() == null)
+            throw new AiApiException("Manual delivery selected; no AI request was sent.");
     }
 
     /** Explore history is held by one CLI-owned thread, isolated from generation and Verify. */
     public String generateExplore(String prompt, String contextScope, Consumer<String> onDelta) throws AiApiException {
+        return generateExplore(prompt, contextScope, onDelta, currentRoute());
+    }
+    public String generateExplore(String prompt, String contextScope, Consumer<String> onDelta, RoutingSnapshot route) throws AiApiException {
+        requireIntegrated(route);
         long epoch = exploreEpoch.get();
         AtomicBoolean canceled = reserveRun();
         activeExplore.set(canceled);
         if (epoch != exploreEpoch.get()) canceled.set(true);
-        try { return execute(prompt, null, onDelta, canceled, contextScope, epoch); }
+        try { return execute(prompt, null, onDelta, canceled, contextScope, epoch, route); }
         finally { activeExplore.compareAndSet(canceled, null); active.compareAndSet(canceled, null); }
     }
 
@@ -152,32 +185,39 @@ public final class AiExecutionService implements Disposable {
     }
 
     private String execute(String prompt, JsonObject outputSchema, Consumer<String> onDelta, AtomicBoolean canceled) throws AiApiException {
-        return execute(prompt, outputSchema, onDelta, canceled, null, -1);
+        return execute(prompt, outputSchema, onDelta, canceled, null, -1, currentRoute());
     }
 
     private String execute(String prompt, JsonObject outputSchema, Consumer<String> onDelta, AtomicBoolean canceled,
-                           String contextScope, long conversationEpoch) throws AiApiException {
+                           String contextScope, long conversationEpoch, RoutingSnapshot route) throws AiApiException {
+        requireIntegrated(route);
         ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
         CancellationToken token = () -> canceled.get() || disposed || indicator != null && indicator.isCanceled()
                 || contextScope != null && conversationEpoch != exploreEpoch.get();
         try {
             OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
-            String backend = settings.getAiBackend();
-            String executable = settings.getCodexExecutable();
-            String codexModel = settings.getCodexModel();
-            String codexEffort = settings.getCodexReasoningEffort();
-            String restProvider = settings.getAiProvider();
-            String restModel = settings.getAiModel();
+            BackendSelection configuredAtStart = configuredSelection(settings);
+            String deliveryAtStart = settings.getPreferredDeliveryMethod();
+            BackendSelection destination = route.backend();
+            String backend = destination.backendId();
+            String executable = destination.executable();
+            String codexModel = destination.model();
+            String codexEffort = destination.reasoningEffort();
+            String restProvider = destination.provider();
+            String restModel = destination.model();
             int timeout = settings.getCodexTimeoutSeconds();
             int budget = settings.getAiContextMaxBytes();
+            int tokenBudget = settings.getAiContextMaxInputTokens();
             if (!"REST".equals(backend) && !"LOCAL_CODEX".equals(backend)) throw new AiApiException("Unsupported AI backend; choose a backend in Settings.");
+            if ("REST".equals(backend) && !codexEffort.isBlank()) throw new AiApiException("Reasoning effort override is unsupported by the existing REST adapter.");
             CodexAppServerBackend local = null;
             BackendStatus executionStatus = null;
             ModelSelection.Selection selection = null;
             if ("LOCAL_CODEX".equals(backend)) {
                 local = new CodexAppServerBackend(executable);
                 CancellationToken discoveryToken = () -> token.isCancelled()
-                        || !executable.equals(settings.getCodexExecutable()) || !backend.equals(settings.getAiBackend());
+                        || !configuredAtStart.equals(configuredSelection(settings))
+                        || !java.util.Objects.equals(deliveryAtStart, settings.getPreferredDeliveryMethod());
                 executionStatus = local.probe(discoveryToken);
                 if (discoveryToken.isCancelled()) throw new ProcessCanceledException();
                 codexStatus = executionStatus;
@@ -199,15 +239,16 @@ public final class AiExecutionService implements Disposable {
                       + (restModel.isBlank() ? AiProvider.fromString(restProvider).getDefaultModel() : restModel) + " · API billing"
                     : "Local Codex · " + selection.wireModel() + (selection.defaultSelection() ? " (account default)" : "")
                       + " · effort: " + (codexEffort.isBlank() ? "CLI default" : codexEffort) + " · " + billingLabel(expectedAuth);
-            String historyNotice = contextScope == null || local == null ? "" : "\nExplore conversation: prior reviewed turns are retained by Codex. Clear only hides the display; New conversation discards reuse.\nCLI stores this conversation for resume. Native tools remain disabled.";
+            CodexAppServerBackend previousConversation = exploreBackend.get();
+            String historyNotice = contextScope == null || local == null ? "" : "\nExplore conversation: prior reviewed turns are retained by Codex. Clear only hides the display; New conversation discards reuse.\nCLI stores this conversation for resume. Native tools remain disabled."
+                    + "\n" + (previousConversation == null ? "No prior thread. Input-token cap: " + tokenBudget
+                    : previousConversation.conversationBudgetSummary());
             try (var context = project.getService(ContextReviewService.class).review(prompt, reviewedDestination + historyNotice, budget)) {
                 if (canceled.get() || disposed || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
-                if (!backend.equals(settings.getAiBackend()) || budget != settings.getAiContextMaxBytes()
-                        || local != null && (!executable.equals(settings.getCodexExecutable())
-                        || !codexModel.equals(settings.getCodexModel()) || timeout != settings.getCodexTimeoutSeconds()
-                        || !codexEffort.equals(settings.getCodexReasoningEffort())
-                        || "apikey".equals(expectedAuth) && !settings.isCodexApiBillingAcknowledged())
-                        || local == null && (!restProvider.equals(settings.getAiProvider()) || !restModel.equals(settings.getAiModel()))) {
+                if (!configuredAtStart.equals(configuredSelection(settings))
+                        || !java.util.Objects.equals(deliveryAtStart, settings.getPreferredDeliveryMethod())
+                        || budget != settings.getAiContextMaxBytes() || tokenBudget != settings.getAiContextMaxInputTokens() || timeout != settings.getCodexTimeoutSeconds()
+                        || local != null && "apikey".equals(expectedAuth) && !settings.isCodexApiBillingAcknowledged()) {
                     throw new AiApiException("AI destination or review settings changed. Review the request again before sending.");
                 }
                 String result;
@@ -234,14 +275,21 @@ public final class AiExecutionService implements Disposable {
                         }
                         String reviewedScope = com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.key(
                                 project.getBasePath(), executable, selection.wireModel(), codexEffort, contextScope, context.prompt(), budget);
-                        response = conversation.generateConversation(request, token, onDelta, reviewedScope, false);
-                    } else response = local.generate(request, token, onDelta);
+                        CodexAppServerBackend selectedConversation = conversation;
+                        response = AiExecutionEvents.run(delta -> selectedConversation.generateConversation(request, token, delta, reviewedScope, false, tokenBudget),
+                                token, event -> { if (event instanceof AiEvent.Delta delta) onDelta.accept(delta.text()); });
+                    } else {
+                        CodexAppServerBackend selectedLocal = local;
+                        response = AiExecutionEvents.run(delta -> selectedLocal.generate(request, token, delta),
+                                token, event -> { if (event instanceof AiEvent.Delta delta) onDelta.accept(delta.text()); });
+                    }
                     result = response.text();
                 } else {
                     AiBackend rest = new RestAiBackend(project.getService(DirectApiService.class),
                             AiProvider.fromString(restProvider), restModel);
-                    result = rest.generate(new AiRequest(context.prompt(), restModel, context.root(), Duration.ofMinutes(5)),
-                            () -> canceled.get() || disposed || indicator != null && indicator.isCanceled(), onDelta).text();
+                    result = AiExecutionEvents.run(delta -> rest.generate(
+                            new AiRequest(context.prompt(), restModel, context.root(), Duration.ofMinutes(5), outputSchema), token, delta),
+                            token, event -> { if (event instanceof AiEvent.Delta delta) onDelta.accept(delta.text()); }).text();
                 }
                 if (canceled.get() || disposed || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
                 return result;
@@ -253,29 +301,38 @@ public final class AiExecutionService implements Disposable {
         }
     }
 
+    private static BackendSelection configuredSelection(OpenSpecSettings settings) {
+        String backend = settings.getAiBackend();
+        return new BackendSelection(backend, settings.getAiProvider(),
+                "LOCAL_CODEX".equals(backend) ? settings.getCodexModel() : settings.getAiModel(),
+                "LOCAL_CODEX".equals(backend) ? settings.getCodexExecutable() : "",
+                "LOCAL_CODEX".equals(backend) ? settings.getCodexReasoningEffort() : "");
+    }
+
+    public boolean hasActiveRequest() { return active.get() != null; }
+
     public void cancelActive() { AtomicBoolean current = active.get(); if (current != null) current.set(true); }
     public void cancelExplore() { AtomicBoolean current = activeExplore.get(); if (current != null) current.set(true); }
     @Override public void dispose() { disposed = true; cancelActive(); resetExploreConversation(); }
 
-    private static String artifactPrompt(ArtifactInstruction instruction) throws AiApiException {
-        String prompt;
-        try { prompt = com.johnnyblabs.openspec.ai.safety.ArtifactPromptBuilder.build(instruction); }
-        catch (IOException ex) { throw new AiApiException("Unsafe or oversized artifact context: " + ex.getMessage(), ex); }
-        return prompt + "\n\nReturn ONLY a JSON artifact envelope with schemaVersion 1, artifactId "
-                + instruction.artifactId() + ", and files [{relativePath, operation, content}]. "
-                + "Use concrete paths matching " + instruction.outputPath() + ". operation is create or replace. "
-                + "Never use a glob as a filename, write files yourself, or include paths outside this artifact.";
+    private static com.johnnyblabs.openspec.ai.safety.ContextManifest.Budget contextBudget(OpenSpecSettings settings) {
+        return new com.johnnyblabs.openspec.ai.safety.ContextManifest.Budget(64, 32768,
+                Math.min(settings.getAiContextMaxBytes(), com.johnnyblabs.openspec.ai.safety.ContextPayloadPolicy.MAX_PROMPT_BYTES),
+                settings.getAiContextMaxInputTokens(), null, 4096, 1024);
     }
-
+    private static String artifactPrompt(ArtifactInstruction instruction) throws AiApiException {
+        return artifactPrompt(instruction, null, com.johnnyblabs.openspec.ai.safety.ContextManifest.Budget.defaults());
+    }
+    private static String artifactPrompt(ArtifactInstruction instruction,
+            com.johnnyblabs.openspec.ai.safety.ArtifactRequestSnapshot snapshot,
+            com.johnnyblabs.openspec.ai.safety.ContextManifest.Budget budget) throws AiApiException {
+        try {
+            String prompt = com.johnnyblabs.openspec.ai.safety.ArtifactPromptBuilder.buildManifest(instruction, List.of(), budget, snapshot).prompt()
+                    + com.johnnyblabs.openspec.ai.safety.ArtifactEnvelopeSchema.instruction(instruction.artifactId(), instruction.outputPath());
+            return com.johnnyblabs.openspec.ai.safety.ContextPayloadPolicy.redactAndBound(prompt, budget);
+        } catch (IOException ex) { throw new AiApiException("Unsafe or oversized artifact context: " + ex.getMessage(), ex); }
+    }
     static JsonObject artifactSchema(String artifactId) {
-        JsonObject schema = JsonParser.parseString("""
-            {"type":"object","additionalProperties":false,"required":["schemaVersion","artifactId","files"],
-             "properties":{"schemaVersion":{"type":"integer","enum":[1]},"artifactId":{"type":"string"},
-             "files":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,
-             "required":["relativePath","operation","content"],"properties":{"relativePath":{"type":"string"},
-             "operation":{"type":"string","enum":["create","replace"]},"content":{"type":"string"}}}}}}
-            """).getAsJsonObject();
-        schema.getAsJsonObject("properties").getAsJsonObject("artifactId").add("enum", new com.google.gson.Gson().toJsonTree(List.of(artifactId)));
-        return schema;
+        return com.johnnyblabs.openspec.ai.safety.ArtifactEnvelopeSchema.forArtifact(artifactId);
     }
 }

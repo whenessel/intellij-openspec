@@ -23,6 +23,61 @@ public class SafeArtifactServiceIdeTest extends BasePlatformTestCase {
         assertEquals("reviewed", FileDocumentManager.getInstance().getDocument(file).getText());
         assertFalse(FileDocumentManager.getInstance().isDocumentUnsaved(FileDocumentManager.getInstance().getDocument(file)));
     }
+    public void testExactArtifactPatchUsesSharedReviewedDocumentWriter() throws Exception {
+        var file = myFixture.addFileToProject("openspec/changes/example/proposal.md", "# Old proposal\n").getVirtualFile();
+        var service = new SafeArtifactService(getProject(), ignored -> true);
+        var request = service.begin(instruction(Path.of(file.getParent().getPath())));
+        assertEquals("# Old proposal\n", request.baseContents().get("proposal.md"));
+        String response = """
+                {"schemaVersion":1,"artifactId":"proposal","files":[
+                  {"relativePath":"proposal.md","operation":"patch","baseHash":"%s",
+                   "patch":{"schemaVersion":1,"edits":[{"start":2,"end":5,"oldText":"Old","newText":"New"}]}}
+                ]}
+                """.formatted(request.baseHashes().get("proposal.md"));
+        var batch = service.prepare(request, response);
+        assertEquals("patch", batch.files().getFirst().operation());
+        service.apply(batch);
+        assertEquals("# New proposal\n", FileDocumentManager.getInstance().getDocument(file).getText());
+    }
+    public void testCrLfPatchNormalizesDocumentAndPreservesExistingDiskSeparator() throws Exception {
+        var file = myFixture.addFileToProject("openspec/changes/example/proposal.md", "# Old\n").getVirtualFile();
+        WriteCommandAction.runWriteCommandAction(getProject(), () -> {
+            try { file.setBinaryContent("# Old\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8)); }
+            catch (IOException ex) { throw new RuntimeException(ex); }
+        });
+        var service = new SafeArtifactService(getProject(), ignored -> true);
+        var request = service.begin(instruction(Path.of(file.getParent().getPath())));
+        assertEquals("# Old\r\n", request.baseContents().get("proposal.md"));
+        String response = """
+                {"schemaVersion":1,"artifactId":"proposal","files":[
+                  {"relativePath":"proposal.md","operation":"patch","baseHash":"%s",
+                   "patch":{"schemaVersion":1,"edits":[{"start":2,"end":5,"oldText":"Old","newText":"New"}]}}
+                ]}
+                """.formatted(request.baseHashes().get("proposal.md"));
+        var batch = service.prepare(request, response);
+        assertEquals("# New\n", batch.files().getFirst().content());
+        service.apply(batch);
+        assertEquals("# New\n", FileDocumentManager.getInstance().getDocument(file).getText());
+        assertEquals("# New\r\n", java.nio.file.Files.readString(Path.of(file.getPath())));
+    }
+    public void testPatchStaleGenerationBaseBlocksBeforeAnyPreview() throws Exception {
+        var file = myFixture.addFileToProject("openspec/changes/example/proposal.md", "original").getVirtualFile();
+        var reviewed = new java.util.concurrent.atomic.AtomicBoolean();
+        var service = new SafeArtifactService(getProject(), ignored -> { reviewed.set(true); return true; });
+        var request = service.begin(instruction(Path.of(file.getParent().getPath())));
+        var document = FileDocumentManager.getInstance().getDocument(file);
+        WriteCommandAction.runWriteCommandAction(getProject(), () -> { document.setText("changed"); FileDocumentManager.getInstance().saveDocument(document); });
+        String response = """
+                {"schemaVersion":1,"artifactId":"proposal","files":[
+                  {"relativePath":"proposal.md","operation":"patch","baseHash":"%s",
+                   "patch":{"schemaVersion":1,"edits":[{"start":0,"end":8,"oldText":"original","newText":"new"}]}}
+                ]}
+                """.formatted(request.baseHashes().get("proposal.md"));
+        try { service.prepare(request, response); fail("Stale patch must fail before preview"); }
+        catch (IOException expected) { assertTrue(expected.getMessage().contains("base hash conflicts")); }
+        assertFalse(reviewed.get());
+        assertEquals("changed", document.getText());
+    }
     public void testRejectedPreviewWritesNothing() throws Exception {
         var file = myFixture.addFileToProject("openspec/changes/example/proposal.md", "original").getVirtualFile();
         var service = new SafeArtifactService(getProject(), ignored -> false);

@@ -2,6 +2,9 @@ package com.johnnyblabs.openspec.services;
 
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.DeliveryMode;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
+import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.*;
 import com.johnnyblabs.openspec.settings.OpenSpecSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -134,7 +137,8 @@ class DeliveryMethodResolverTest {
             assertEquals(new DeliveryMethodResolver.ResolvedMethod(DeliveryMode.DIRECT_API,
                     "Generate via Local Codex [integrated]"), resolver.resolve());
             verify(settings, never()).getAiProvider();
-            verifyNoInteractions(project);
+            verify(project).getService(AiExecutionService.class);
+            verify(project, never()).getService(DirectApiService.class);
         }
     }
 
@@ -157,6 +161,41 @@ class DeliveryMethodResolverTest {
             verify(settings, never()).getAiBackend();
             verify(settings, never()).getAiProvider();
             verifyNoInteractions(project);
+        }
+    }
+
+    @Test
+    void explicitCopyOverrideWinsSavedIntegratedWithoutReadingBackendSettings() {
+        try (MockedStatic<OpenSpecSettings> statics = mockStatic(OpenSpecSettings.class)) {
+            statics.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
+            when(settings.getPreferredDeliveryMethod()).thenReturn("DIRECT_API");
+            var route = resolver.resolveSnapshot(new RunOverride(DeliveryMode.CLIPBOARD));
+            assertEquals(DeliveryMode.CLIPBOARD, route.mode());
+            assertEquals(Source.RUN_OVERRIDE, route.source());
+            verify(settings, never()).getAiBackend();
+            verifyNoInteractions(project);
+        }
+    }
+
+    @Test
+    void unavailableCodexKeepsFrozenRouteWithoutCallingRestOrGenerating() throws Exception {
+        AiExecutionService execution = mock(AiExecutionService.class);
+        try (MockedStatic<OpenSpecSettings> statics = mockStatic(OpenSpecSettings.class)) {
+            statics.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
+            when(settings.getAiBackend()).thenReturn("LOCAL_CODEX");
+            when(settings.getCodexExecutable()).thenReturn("missing codex");
+            when(settings.getCodexModel()).thenReturn("selected model");
+            when(project.getService(AiExecutionService.class)).thenReturn(execution);
+            when(execution.cachedBackendReadiness()).thenReturn(new BackendReadiness(false, "Executable missing"));
+            var route = resolver.resolveSnapshot(null);
+            assertEquals(DeliveryMode.DIRECT_API, route.mode());
+            assertFalse(route.available());
+            assertEquals("missing codex", route.backend().executable());
+            assertEquals("selected model", route.backend().model());
+            verify(project, never()).getService(DirectApiService.class);
+            verify(project, never()).getService(AiToolDetectionService.class);
+            verify(execution, never()).generateRaw(anyString());
+            verify(execution, never()).refreshStatus();
         }
     }
 

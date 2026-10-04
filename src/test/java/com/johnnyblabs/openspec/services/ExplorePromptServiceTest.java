@@ -10,6 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.IOException;
+import com.johnnyblabs.openspec.ai.safety.ContextManifest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -168,17 +169,25 @@ class ExplorePromptServiceTest {
 
     @Nested
     class PromptAssembly {
+        private void contextText(String text) throws IOException {
+            doAnswer(invocation -> {
+                ContextManifest.Builder builder = invocation.getArgument(0);
+                builder.inline("Project context", ContextManifest.Origin.INSTRUCTION, text, true);
+                return null;
+            }).when(contextService).appendContext(any());
+        }
+
 
         @Test
-        void includesThreeSections() {
+        void includesThreeSections() throws IOException {
             when(project.getBasePath()).thenReturn("/nonexistent");
             when(project.getService(ExploreContextService.class)).thenReturn(contextService);
-            when(contextService.assembleContext()).thenReturn("# Project Context\n\nSome context.");
+            contextText("# Project Context\n\nSome context.");
 
             String prompt = service.buildPrompt("How should we handle auth?");
 
             // Three sections separated by ---
-            assertTrue(prompt.contains("---"));
+            assertTrue(prompt.contains("Reviewed context manifest"));
             // Contains explore instructions (default since no skill file)
             assertTrue(prompt.contains("Enter explore mode"));
             // Contains project context
@@ -189,24 +198,32 @@ class ExplorePromptServiceTest {
         }
 
         @Test
-        void topicChangesKeepScopeAndContextEditsInvalidateIt() {
+        void topicChangesKeepScopeAndContextEditsInvalidateIt() throws IOException {
             when(project.getBasePath()).thenReturn("/nonexistent");
             when(project.getService(ExploreContextService.class)).thenReturn(contextService);
-            when(contextService.assembleContext()).thenReturn("context", "context", "changed context");
+            var reads = new java.util.concurrent.atomic.AtomicInteger();
+            doAnswer(invocation -> {
+                ContextManifest.Builder builder = invocation.getArgument(0);
+                builder.inline("Project context", ContextManifest.Origin.INSTRUCTION,
+                        reads.incrementAndGet() > 2 ? "changed context" : "context", true);
+                return null;
+            }).when(contextService).appendContext(any());
             var first = service.buildRequest("first topic");
             var second = service.buildRequest("follow up");
             var changed = service.buildRequest("follow up");
-            assertEquals(first.contextScope(), second.contextScope());
+            assertEquals(com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.key("project", "codex", "model", first.contextScope(), first.prompt(), 12000),
+                    com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.key("project", "codex", "model", second.contextScope(), second.prompt(), 12000));
             assertNotEquals(first.prompt(), second.prompt());
-            assertNotEquals(second.contextScope(), changed.contextScope());
-            verify(contextService, times(3)).assembleContext();
+            assertNotEquals(com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.key("project", "codex", "model", second.contextScope(), second.prompt(), 12000),
+                    com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.key("project", "codex", "model", changed.contextScope(), changed.prompt(), 12000));
+            verify(contextService, times(3)).appendContext(any());
         }
 
         @Test
-        void blankTopicUsesDefaultText() {
+        void blankTopicUsesDefaultText() throws IOException {
             when(project.getBasePath()).thenReturn("/nonexistent");
             when(project.getService(ExploreContextService.class)).thenReturn(contextService);
-            when(contextService.assembleContext()).thenReturn("context");
+            contextText("context");
 
             String prompt = service.buildPrompt("");
 
@@ -214,10 +231,10 @@ class ExplorePromptServiceTest {
         }
 
         @Test
-        void nullTopicUsesDefaultText() {
+        void nullTopicUsesDefaultText() throws IOException {
             when(project.getBasePath()).thenReturn("/nonexistent");
             when(project.getService(ExploreContextService.class)).thenReturn(contextService);
-            when(contextService.assembleContext()).thenReturn("context");
+            contextText("context");
 
             String prompt = service.buildPrompt(null);
 
@@ -225,10 +242,10 @@ class ExplorePromptServiceTest {
         }
 
         @Test
-        void topicIsTrimmed() {
+        void topicIsTrimmed() throws IOException {
             when(project.getBasePath()).thenReturn("/nonexistent");
             when(project.getService(ExploreContextService.class)).thenReturn(contextService);
-            when(contextService.assembleContext()).thenReturn("context");
+            contextText("context");
 
             String prompt = service.buildPrompt("  auth system  ");
 

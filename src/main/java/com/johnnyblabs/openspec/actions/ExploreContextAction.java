@@ -113,6 +113,8 @@ public class ExploreContextAction extends OpenSpecBaseAction {
     }
 
     private static void runExploreDeliver(@NotNull Project project, String topic) {
+        var resolver = project.getService(DeliveryMethodResolver.class);
+        var routing = resolver == null ? null : resolver.resolveSnapshot(null);
         UiRun ui = new UiRun();
         ExplorePanelService panels = project.getService(ExplorePanelService.class);
         ui.panel = panels == null ? null : panels.getExplorePanel();
@@ -130,15 +132,14 @@ public class ExploreContextAction extends OpenSpecBaseAction {
                     ExplorePromptService.ExploreRequest request = prompts.buildRequest(topic);
                     String prompt = request.prompt();
                     indicator.checkCanceled();
-                    DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
-                    DeliveryMode mode = resolver == null ? DeliveryMode.CLIPBOARD : resolver.resolve().mode();
+                    DeliveryMode mode = routing == null ? DeliveryMode.CLIPBOARD : routing.mode();
                     switch (mode) {
                         case CLIPBOARD -> ApplicationManager.getApplication().invokeLater(() -> {
                             if (!project.isDisposed() && ui.current() && !indicator.isCanceled()) deliverClipboard(project, prompt);
                             recoverInput(project, ui);
                         });
                         case EDITOR_TAB -> { if (ui.current()) deliverEditorTab(project, prompt, ui); recoverInput(project, ui); }
-                        case DIRECT_API -> deliverDirectApi(project, request, topic, indicator, ui);
+                        case DIRECT_API -> deliverDirectApi(project, request, topic, indicator, ui, routing);
                     }
                 } catch (com.intellij.openapi.progress.ProcessCanceledException ex) {
                     recoverInput(project, ui);
@@ -180,10 +181,11 @@ public class ExploreContextAction extends OpenSpecBaseAction {
 
     /** Called only by the background preparation task; all panel access is marshalled to EDT. */
     private static void deliverDirectApi(@NotNull Project project, ExplorePromptService.ExploreRequest request, String topic,
-                                         ProgressIndicator indicator, UiRun ui) throws Exception {
+                                         ProgressIndicator indicator, UiRun ui,
+                                         com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot routing) throws Exception {
         AiExecutionService apiService = project.getService(AiExecutionService.class);
-        if (apiService == null || !apiService.isConfigured()) {
-            throw new IllegalStateException("Selected AI backend is not ready. Check Settings → Tools → OpenSpec.");
+        if (apiService == null || !routing.available()) {
+            throw new IllegalStateException("Selected AI backend is not ready: " + routing.readiness().detail() + ". Check OpenSpec settings.");
         }
         ApplicationManager.getApplication().invokeAndWait(() -> {
             if (project.isDisposed()) return;
@@ -203,7 +205,7 @@ public class ExploreContextAction extends OpenSpecBaseAction {
                 indicator.checkCanceled();
                 if (!ui.current()) throw new com.intellij.openapi.progress.ProcessCanceledException();
                 if (ui.panel != null) ui.panel.appendDelta(ui.epoch, delta);
-            });
+            }, routing);
             indicator.checkCanceled();
             ApplicationManager.getApplication().invokeLater(() -> {
                 if (!project.isDisposed() && ui.panel != null) ui.panel.showResult(ui.epoch, topic, response);

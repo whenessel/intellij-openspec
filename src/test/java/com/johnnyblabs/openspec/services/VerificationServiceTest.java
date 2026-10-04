@@ -49,8 +49,14 @@ class VerificationServiceTest {
         service = new VerificationService(project);
         lenient().when(project.getBasePath()).thenReturn(tempDir.toString());
         lenient().when(project.getService(DeliveryMethodResolver.class)).thenReturn(deliveryResolver);
-        lenient().when(deliveryResolver.resolve()).thenReturn(
-                new DeliveryMethodResolver.ResolvedMethod(DeliveryMode.DIRECT_API, "Integrated backend"));
+        lenient().when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, true));
+    }
+
+    private static com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot route(DeliveryMode mode, boolean ready) {
+        return new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot(mode,
+                mode == DeliveryMode.DIRECT_API ? new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendSelection("REST", "OPENAI", "", "", "") : null,
+                new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendReadiness(ready, "Fixture readiness"),
+                com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.Source.SAVED_PREFERENCE, "Fixture route");
     }
 
     private Path createChangeDir(String name) throws IOException {
@@ -399,7 +405,7 @@ class VerificationServiceTest {
         void no_ai_provider_degrades_to_not_assessed() throws IOException {
             changeWithRequirement("my-change", "auth", "Authentication service");
             lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
-            when(aiService.isConfigured()).thenReturn(false);
+            when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, false));
 
             VerificationReport report = service.verify("my-change");
             List<VerificationFinding> correctness = report.getFindings(Dimension.CORRECTNESS);
@@ -412,8 +418,8 @@ class VerificationServiceTest {
         void ai_ok_response_no_findings() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
             lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
-            when(aiService.isConfigured()).thenReturn(true);
-            when(aiService.generateRaw(anyString())).thenReturn("OK");
+            when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, true));
+            when(aiService.generateRaw(anyString(), any(), any())).thenReturn("OK");
 
             VerificationReport report = service.verify("my-change");
             assertEquals(0, report.getFindings(Dimension.CORRECTNESS).size());
@@ -423,8 +429,8 @@ class VerificationServiceTest {
         void ai_gap_lines_become_warnings() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
             lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
-            when(aiService.isConfigured()).thenReturn(true);
-            when(aiService.generateRaw(anyString())).thenReturn(
+            when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, true));
+            when(aiService.generateRaw(anyString(), any(), any())).thenReturn(
                     "GAP: Authentication service — no token validation described\nnoise line");
 
             VerificationReport report = service.verify("my-change");
@@ -438,8 +444,8 @@ class VerificationServiceTest {
         void ai_failure_degrades_to_suggestion() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
             lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
-            when(aiService.isConfigured()).thenReturn(true);
-            when(aiService.generateRaw(anyString())).thenThrow(new AiApiException("rate limited"));
+            when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, true));
+            when(aiService.generateRaw(anyString(), any(), any())).thenThrow(new AiApiException("rate limited"));
 
             VerificationReport report = service.verify("my-change");
             List<VerificationFinding> correctness = report.getFindings(Dimension.CORRECTNESS);
@@ -457,8 +463,8 @@ class VerificationServiceTest {
             Files.createDirectories(srcDir);
             Files.writeString(srcDir.resolve("AuthService.kt"), "class AuthService { /* auth */ }");
             lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
-            when(aiService.isConfigured()).thenReturn(true);
-            when(aiService.generateRaw(anyString())).thenReturn("OK");
+            when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, true));
+            when(aiService.generateRaw(anyString(), any(), any())).thenReturn("OK");
 
             VerificationReport report = service.verify("kt-change");
             assertEquals(0, report.getFindings(Dimension.CORRECTNESS).size());
@@ -468,9 +474,8 @@ class VerificationServiceTest {
         void manualClipboardDoesNotCallConfiguredBackend() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
             lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
-            lenient().when(aiService.isConfigured()).thenReturn(true);
-            when(deliveryResolver.resolve()).thenReturn(new DeliveryMethodResolver.ResolvedMethod(
-                    DeliveryMode.CLIPBOARD, "Clipboard"));
+            lenient().when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.DIRECT_API, true));
+            when(deliveryResolver.resolveSnapshot(null)).thenReturn(route(DeliveryMode.CLIPBOARD, true));
 
             VerificationReport report = service.verify("my-change");
 

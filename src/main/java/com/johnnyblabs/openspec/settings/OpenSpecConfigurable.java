@@ -58,6 +58,7 @@ public class OpenSpecConfigurable implements Configurable {
                 || panel.getCodexTimeoutSeconds() != settings.getCodexTimeoutSeconds()
                 || panel.isCodexApiBillingAcknowledged() != settings.isCodexApiBillingAcknowledged()
                 || panel.getAiContextMaxBytes() != settings.getAiContextMaxBytes()
+                || panel.getAiContextMaxInputTokens() != settings.getAiContextMaxInputTokens()
                 || !panel.getAiProvider().equals(safe(settings.getAiProvider(), "NONE"))
                 || !panel.getAiModel().equals(safe(settings.getAiModel()))
                 || !panel.getAiProviderModels().equals(settings.getAiProviderModels())
@@ -94,6 +95,7 @@ public class OpenSpecConfigurable implements Configurable {
         settings.setCodexTimeoutSeconds(panel.getCodexTimeoutSeconds());
         settings.setCodexApiBillingAcknowledged(panel.isCodexApiBillingAcknowledged());
         settings.setAiContextMaxBytes(panel.getAiContextMaxBytes());
+        settings.setAiContextMaxInputTokens(panel.getAiContextMaxInputTokens());
         settings.setAiProviderModels(panel.getAiProviderModels());
         settings.setAiProvider(panel.getAiProvider());
         settings.setAiModel(panel.getAiModel());
@@ -163,6 +165,7 @@ public class OpenSpecConfigurable implements Configurable {
         panel.setCodexTimeoutSeconds(settings.getCodexTimeoutSeconds());
         panel.setCodexApiBillingAcknowledged(settings.isCodexApiBillingAcknowledged());
         panel.setAiContextMaxBytes(settings.getAiContextMaxBytes());
+        panel.setAiContextMaxInputTokens(settings.getAiContextMaxInputTokens());
         panel.setAiProviderModels(settings.getAiProviderModels());
         panel.setAiProvider(settings.getAiProvider());
         panel.setAiModel(settings.getAiModel());

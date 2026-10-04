@@ -4,14 +4,14 @@ import com.intellij.openapi.components.Service;
 import com.intellij.openapi.project.Project;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.util.List;
+import com.johnnyblabs.openspec.ai.safety.ContextManifest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.LinkOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 
 /**
  * Builds the full explore prompt by combining skill instructions, project context, and topic.
@@ -87,16 +87,39 @@ public final class ExplorePromptService {
 
     /** One context read per turn; topic changes preserve the conversation scope. */
     public ExploreRequest buildRequest(String topic) {
-        String prefix = loadSkillInstructions() + "\n\n---\n\n" + assembleContext();
-        String scope;
-        try {
-            scope = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(prefix.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
-        return new ExploreRequest(prefix + "\n\n---\n\n" + buildTopicSection(topic), scope);
+        com.johnnyblabs.openspec.settings.OpenSpecSettings settings = com.johnnyblabs.openspec.settings.OpenSpecSettings.getInstance(project);
+        ContextManifest.Budget budget = settings == null ? ContextManifest.Budget.defaults()
+                : new ContextManifest.Budget(64, 32768,
+                        Math.min(settings.getAiContextMaxBytes(), com.johnnyblabs.openspec.ai.safety.ContextPayloadPolicy.MAX_PROMPT_BYTES),
+                        settings.getAiContextMaxInputTokens(), null, 4096, 1024);
+        try { return buildRequest(topic, List.of(), budget); }
+        catch (IOException ex) { throw new UncheckedIOException("Explore context exceeds safe scope or budget", ex); }
     }
 
-    public record ExploreRequest(String prompt, String contextScope) {}
+    public ExploreRequest buildRequest(String topic, List<ContextManifest.Selection> explicitSelections,
+                                       ContextManifest.Budget budget) throws IOException {
+        var builder = new ContextManifest.Builder(budget)
+                .inline("Required Explore skill instructions", ContextManifest.Origin.INSTRUCTION, loadSkillInstructions(), true);
+        ExploreContextService context = project.getService(ExploreContextService.class);
+        if (context == null) builder.inline("Project context", ContextManifest.Origin.INSTRUCTION,
+                "# Project Context\n\nNo project context available.", true);
+        else context.appendContext(builder);
+        for (ContextManifest.Selection selection : explicitSelections) builder.file(selection);
+        String prefix = builder.build().prompt();
+        String topicText = buildTopicSection(topic);
+        String nonce;
+        do { nonce = java.util.UUID.randomUUID().toString(); }
+        while (prefix.contains(nonce) || topicText.contains(nonce));
+        String scope = com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.typedContext(ContextManifest.hash(prefix), nonce);
+        builder.inline("Topic", ContextManifest.Origin.TOPIC,
+                com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.markTopic(topicText, nonce), true);
+        ContextManifest manifest = builder.build();
+        return new ExploreRequest(manifest.prompt(), scope, manifest);
+    }
+
+    public record ExploreRequest(String prompt, String contextScope, ContextManifest manifest) {
+        public ExploreRequest(String prompt, String contextScope) { this(prompt, contextScope, null); }
+    }
 
     static final int MAX_SKILL_BYTES = 32768;
     static final String SKILL_OMISSION = "\n\n**Context omission:** An unsafe, unreadable or oversized project Explore skill was omitted; safe instructions are used.";
@@ -137,14 +160,6 @@ public final class ExplorePromptService {
         for (Path ancestor = path; ancestor != null; ancestor = ancestor.getParent()) {
             if (Files.isSymbolicLink(ancestor)) throw new IOException("Symlinked skill path");
         }
-    }
-
-    private String assembleContext() {
-        ExploreContextService contextService = project.getService(ExploreContextService.class);
-        if (contextService != null) {
-            return contextService.assembleContext();
-        }
-        return "# Project Context\n\nNo project context available.";
     }
 
     private static String buildTopicSection(String topic) {

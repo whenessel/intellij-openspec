@@ -5,6 +5,6 @@ import com.johnnyblabs.openspec.ai.AiApiException;
 /** Explicit cancellation outcome; callers must not render it as backend unavailability. */
 public final class AiOperationCancelledException extends AiApiException {
     public AiOperationCancelledException() {
-        super("Codex operation cancelled; no result was applied.");
+        super("AI operation cancelled; no result was applied.");
     }
 }

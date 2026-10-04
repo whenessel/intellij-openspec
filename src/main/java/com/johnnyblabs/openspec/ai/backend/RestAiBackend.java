@@ -32,6 +32,6 @@ public final class RestAiBackend implements AiBackend {
         String text = transport.generateRaw(request.prompt(), provider, selectedModel, cancellation::isCancelled);
         if (cancellation.isCancelled()) throw new AiApiException("AI request canceled");
         onDelta.accept(text);
-        return new AiResult(text, id(), selectedModel);
+        return AiResult.fromResponse(text, id(), selectedModel, request.outputSchema() != null);
     }
 }

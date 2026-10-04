@@ -46,9 +46,10 @@ public final class SafeArtifactService {
         // Validate scope before walking any directory.
         if (!pattern.equals("specs/**/*.md")) ArtifactResultValidator.checkRelativePath(pattern);
         Map<String, String> hashes = new HashMap<>();
+        Map<String, String> contents = new HashMap<>();
         if (!ArtifactResultValidator.isGlob(pattern)) {
             Path target = ArtifactResultValidator.checkedTarget(root, pattern);
-            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) hashes.put(pattern, readHash(target));
+            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) captureBase(pattern, target, hashes, contents);
         } else {
             Path specs = root.resolve("specs");
             if (Files.isSymbolicLink(specs)) throw new IOException("Symlink context roots are not permitted");
@@ -64,14 +65,14 @@ public final class SafeArtifactService {
                         if (ArtifactResultValidator.matches(pattern, relative)) {
                             ArtifactResultValidator.checkedTarget(root, relative);
                             if (hashes.size() >= ArtifactResultValidator.MAX_FILES) throw new IOException("Too many existing artifact files");
-                            hashes.put(relative, readHash(path));
+                            captureBase(relative, path, hashes, contents);
                         }
                     }
                 }
             }
         }
         ensureSaved(hashes.keySet().stream().map(root::resolve).toList());
-        return new ArtifactRequestSnapshot(root, instruction.artifactId(), pattern, hashes);
+        return new ArtifactRequestSnapshot(root, instruction.artifactId(), pattern, hashes, contents);
     }
 
     public ReviewedArtifactBatch prepare(ArtifactInstruction instruction, String response) throws IOException {
@@ -179,7 +180,8 @@ public final class SafeArtifactService {
             var file = new com.google.gson.JsonObject();
             file.addProperty("relativePath", edit.relativePath());
             file.addProperty("operation", edit.operation());
-            file.addProperty("content", edit.content());
+            if (edit.patch() != null) file.add("patch", ArtifactPatchCodec.encode(edit.patch()));
+            else file.addProperty("content", edit.content());
             if (edit.baseHash() != null) file.addProperty("baseHash", edit.baseHash());
             files.add(file);
         }
@@ -220,6 +222,16 @@ public final class SafeArtifactService {
             }
         });
         if (conflict.get() != null) throw conflict.get();
+    }
+    private static void captureBase(String relative, Path path, Map<String, String> hashes, Map<String, String> contents) throws IOException {
+        if (Files.size(path) > ArtifactResultValidator.MAX_FILE_BYTES) throw new IOException("Existing artifact exceeds review budget");
+        String content = Files.readString(path, StandardCharsets.UTF_8);
+        ArtifactTextPolicy.canonicalContent(content); // Block unsupported disk separators before inference.
+        long total = ArtifactResultValidator.utf8(content).length;
+        for (String existing : contents.values()) total += ArtifactResultValidator.utf8(existing).length;
+        if (total > ArtifactResultValidator.MAX_TOTAL_BYTES) throw new IOException("Existing artifact batch exceeds context snapshot budget");
+        contents.put(relative, content);
+        hashes.put(relative, ArtifactResultValidator.hash(content));
     }
     private static String readHash(Path path) throws IOException {
         if (Files.size(path) > ArtifactResultValidator.MAX_FILE_BYTES) throw new IOException("Existing artifact exceeds review budget");

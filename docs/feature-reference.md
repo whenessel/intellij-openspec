@@ -355,10 +355,11 @@ Read-only display of the current profile name and description from `config.yaml`
 | **Codex model override** | Refreshed account catalog or manual model ID; blank uses the CLI default. |
 | **Refresh status and models (no inference)** | Shows CLI version, effective authentication and compatibility without generating text. |
 | **Codex timeout** | Request timeout in seconds. |
+| **Context input token cap** | Conservative admission bound; unknown tokenizer uses one UTF-8 byte per token. Effective limits and omissions are shown before sending. |
 | **Allow API billed Codex requests** | Explicit opt-in when Codex reports API key authentication. |
 | **Maximum context (UTF-8 bytes)** | User budget, capped at 48 KiB by the review policy. |
 
-Integrated artifact generation, Explore and Verify share routing and an editable context preview. Codex Explore resumes CLI-owned history only with a verifiable ChatGPT workspace/account identity; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify but not persistent Explore. Artifact batches receive validated path checks and a result preview before writing. Explicit Clipboard/Editor delivery remains manual and prevents inference through a saved backend. Codex owns login/refresh; ChatGPT login uses subscription limits and online inference. Unsupported configurations fail without REST fallback.
+Integrated artifact generation, Explore and Verify share routing and an editable context preview. Codex Explore resumes CLI-owned history only with a verifiable ChatGPT workspace/account identity; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify but not persistent Explore. Artifact batches receive validated path/base checks and a result preview before create/replace/exact artifact patch operations. Context manifests disclose explicitly included files, redactions and omissions. Explicit Clipboard/Editor delivery remains manual and prevents inference through a saved backend. Codex owns login/refresh; ChatGPT login uses subscription limits and online inference. Unsupported configurations fail without REST fallback.
 
 See the [local Codex guide](local-codex.md) for the exact version/OS baseline, prompt-only execution profile, persistent Explore identity/history boundaries and current build/acceptance blockers. OpenRouter and autonomous workspace-writing Apply are later phases.
 

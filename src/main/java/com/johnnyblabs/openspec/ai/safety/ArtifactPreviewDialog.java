@@ -38,7 +38,7 @@ final class ArtifactPreviewDialog extends DialogWrapper {
             var factory = DiffContentFactory.getInstance();
             var diff = DiffManager.getInstance().createRequestPanel(project, getDisposable(), null);
             diff.setRequest(new SimpleDiffRequest(edit.relativePath(),
-                    factory.create(project, edit.original() == null ? "" : edit.original(), PlainTextFileType.INSTANCE),
+                    factory.create(project, edit.original() == null ? "" : edit.original().replace("\r\n", "\n"), PlainTextFileType.INSTANCE),
                     factory.create(project, edit.content(), PlainTextFileType.INSTANCE), "Current", "Generated " + edit.operation()));
             tabs.addTab(edit.relativePath(), diff.getComponent());
         }

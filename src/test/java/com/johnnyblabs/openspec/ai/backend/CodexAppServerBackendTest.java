@@ -72,7 +72,8 @@ class CodexAppServerBackendTest {
         MockProcess process=new MockProcess(context,Mode.SUCCESS); List<String> args=new ArrayList<>();
         var backend=new CodexAppServerBackend("/opt/codex with spaces",(arguments,cwd)->{args.addAll(arguments);return process;});
         JsonObject schema=new JsonObject();schema.addProperty("type","object");
-        backend.generate(new AiRequest("$(touch forbidden) ; secret",null,context,Duration.ofSeconds(3),schema),CancellationToken.NONE,ignored->{});
+        AiResult result=backend.generate(new AiRequest("$(touch forbidden) ; контекст `literal` secret",null,context,Duration.ofSeconds(3),schema),CancellationToken.NONE,ignored->{});
+        assertInstanceOf(AiResult.ArtifactOutput.class,result.payload());
         assertEquals("/opt/codex with spaces",args.get(0));assertFalse(args.contains("sh"));assertTrue(args.stream().noneMatch(x->x.contains("touch forbidden")));
         assertEquals(schema,process.turnParams.getAsJsonObject("outputSchema"));assertTrue(process.turnParams.getAsJsonArray("input").get(0).getAsJsonObject().get("text").getAsString().contains("$(touch"));
     }
@@ -434,6 +435,118 @@ class CodexAppServerBackendTest {
         var offline = new CodexAppServerBackend("codex", (args, root) -> { throw new IOException("offline"); }, cache);
         assertThrows(AiApiException.class, () -> offline.catalog(status, false));
     }
+    @Test void optionalNotificationsWithoutParamsAndPartialFramesRemainCompatible() throws Exception {
+        for (Mode mode : List.of(Mode.OPTIONAL_EVENTS, Mode.PARTIAL_LINES, Mode.WRONG_THREAD, Mode.HUGE_STDERR)) {
+            MockProcess process = new MockProcess(context, mode);
+            List<String> deltas = new ArrayList<>();
+            assertEquals("final answer", backend(process).generate(request(), CancellationToken.NONE, deltas::add).text(), mode.toString());
+            assertEquals(List.of("final ", "answer"), deltas, mode.toString());
+            assertTrue(process.destroyed.get());
+            if (mode == Mode.HUGE_STDERR) assertTrue(process.stderrBytes.get() > 0);
+        }
+    }
+    @Test void requiredNotificationFieldsEofCrashAndNoCompletionCannotReturnSuccess() throws Exception {
+        for (Mode mode : List.of(Mode.MISSING_PARAMS, Mode.MALFORMED_FIELD, Mode.EOF, Mode.CRASH, Mode.ZERO_EXIT_NO_COMPLETION, Mode.NOTIFICATION_FLOOD, Mode.INVALID_UTF8)) {
+            MockProcess process = new MockProcess(context, mode);
+            AiApiException error = assertThrows(AiApiException.class, () -> backend(process).generate(request(), CancellationToken.NONE, ignored -> {}), mode.toString());
+            assertTrue(process.methods.contains("turn/start"), mode.toString());
+            assertFalse(error.getMessage().contains("stderr-secret"));
+            assertTrue(process.destroyed.get(), mode.toString());
+            if(mode==Mode.CRASH)assertEquals(2,process.exitValue());
+            if(mode==Mode.ZERO_EXIT_NO_COMPLETION)assertEquals(0,process.exitValue());
+        }
+    }
+    @Test void fakeMonotonicClockControlsActualRpcAndTurnDeadlinesAndInterruptCleanup() throws Exception {
+        for (String phase : List.of("account/read", "turn/start")) {
+            java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong(100);
+            MockProcess process = new MockProcess(context, Mode.SUCCESS);
+            process.onRequest = method -> { if (method.equals(phase)) clock.addAndGet(Duration.ofSeconds(4).toNanos()); };
+            var backend = new CodexAppServerBackend("codex", (args, root) -> { process.root = root; return process; },
+                    new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2), clock::get);
+            AiApiException error = assertThrows(AiApiException.class, () -> backend.generate(request(), CancellationToken.NONE, ignored -> {}));
+            assertTrue(error.getMessage().contains("timed out")); assertTrue(process.destroyed.get());
+            assertTrue(process.methods.contains(phase));
+        }
+        java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
+        MockProcess process = new MockProcess(context, Mode.SUCCESS);
+        var backend = new CodexAppServerBackend("codex", (args, root) -> { process.root = root; return process; },
+                new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2), clock::get);
+        AiApiException error = assertThrows(AiApiException.class, () -> backend.generate(request(), CancellationToken.NONE,
+                delta -> clock.addAndGet(Duration.ofSeconds(4).toNanos())));
+        assertTrue(error.getMessage().contains("timed out")); assertTrue(process.methods.contains("turn/interrupt")); assertTrue(process.destroyed.get());
+    }
+    @Test void missingInterruptAcknowledgementCannotRetainProcessOrReturnPartialResult() throws Exception {
+        AtomicBoolean cancelled=new AtomicBoolean();MockProcess process=new MockProcess(context,Mode.NO_INTERRUPT_ACK);
+        assertThrows(AiOperationCancelledException.class,()->backend(process).generate(request(),cancelled::get,delta->cancelled.set(true)));
+        assertTrue(process.methods.contains("turn/interrupt"));assertTrue(process.destroyed.get());
+    }
+    @Test void nativeSchemaTurnRejectsPlainTextEvenAfterSuccessfulCompletion() throws Exception {
+        MockProcess process=new MockProcess(context,Mode.INVALID_STRUCTURED);
+        JsonObject schema=new JsonObject();schema.addProperty("type","object");
+        AiApiException error=assertThrows(AiApiException.class,()->backend(process).generate(new AiRequest("prompt",null,context,Duration.ofSeconds(3),schema),CancellationToken.NONE,ignored->{}));
+        assertTrue(error.getMessage().contains("structured artifact envelope"));assertTrue(process.methods.contains("turn/start"));assertTrue(process.destroyed.get());
+    }
+    @Test void unsupportedAuthAndRateLimitsHaveTruthfulNoInferenceStatuses() throws Exception {
+        MockProcess unsupported=new MockProcess(context,Mode.UNSUPPORTED_AUTH);
+        BackendStatus status=backend(unsupported).probe();assertFalse(status.available());assertTrue(status.detail().contains("Unsupported CLI authentication mode"));
+        assertFalse(unsupported.methods.contains("turn/start"));assertFalse(unsupported.methods.contains("account/rateLimits/read"));
+        for(Mode mode:List.of(Mode.LIMIT_ALLOWED,Mode.LIMIT_DENIED,Mode.LIMIT_MALFORMED)) {
+            MockProcess process=new MockProcess(context,mode);BackendStatus limits=backend(process).probe();
+            assertTrue(limits.available());assertTrue(process.methods.contains("account/rateLimits/read"));assertFalse(process.methods.contains("turn/start"));
+            assertTrue(limits.limitSummary().contains(mode==Mode.LIMIT_ALLOWED?"currently allowed":mode==Mode.LIMIT_DENIED?"currently unavailable":"availability unknown"));
+        }
+    }
+    @Test void conversationHistoryRequiresKnownUsageAndRespectsReviewedBudgetOrModelWindow() throws Exception {
+        for(Mode first:List.of(Mode.NO_USAGE,Mode.SMALL_CONTEXT,Mode.SUCCESS)) {
+            List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,first,Mode.SUCCESS);
+            backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false,first==Mode.SUCCESS?1000:12000);
+            AiRequest next=first==Mode.SMALL_CONTEXT?new AiRequest("x".repeat(1000),"selected-model",context,Duration.ofSeconds(3)):request();
+            AiApiException error=assertThrows(AiApiException.class,()->backend.generateConversation(next,CancellationToken.NONE,ignored->{},"scope",false,first==Mode.SUCCESS?1000:12000));
+            assertTrue(error.getMessage().contains("history"));assertTrue(error.getMessage().contains("New conversation"));
+            assertFalse(processes.get(1).methods.contains("thread/resume"));assertFalse(processes.get(1).methods.contains("turn/start"));backend.closeConversation();
+        }
+    }
+    @Test void decreasingUsageAndChangedHistoryBudgetRequireExplicitNew() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,Mode.SUCCESS,Mode.DECREASED_USAGE);
+        backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false,12000);
+        AiApiException error=assertThrows(AiApiException.class,()->backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false,12000));
+        assertTrue(error.getMessage().contains("usage decreased"));assertTrue(processes.get(1).methods.contains("turn/start"));backend.closeConversation();
+        List<MockProcess> changed=new ArrayList<>();var changedBackend=conversationBackend(changed,Mode.SUCCESS,Mode.SUCCESS);
+        changedBackend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false,12000);
+        assertThrows(AiApiException.class,()->changedBackend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false,24000));
+        assertFalse(changed.get(1).methods.contains("thread/resume"));changedBackend.closeConversation();
+    }
+    @Test void knownModelWindowReservesOutputAndSafetyBeforeHistoryResume() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,Mode.RESERVED_WINDOW,Mode.SUCCESS);
+        backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false,12000);
+        assertTrue(backend.conversationBudgetSummary().contains("output/safety reserve: 5120"));
+        AiRequest next=new AiRequest("x".repeat(500),"selected-model",context,Duration.ofSeconds(3));
+        AiApiException error=assertThrows(AiApiException.class,()->backend.generateConversation(next,CancellationToken.NONE,ignored->{},"scope",false,12000));
+        assertTrue(error.getMessage().contains("history exceeds"));assertFalse(processes.get(1).methods.contains("thread/resume"));backend.closeConversation();
+    }
+    @Test void changedReportedModelWindowInvalidatesConversationAndUnknownUsageNoticeIsTruthful() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,Mode.SUCCESS,Mode.RESERVED_WINDOW);
+        backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false);
+        AiApiException error=assertThrows(AiApiException.class,()->backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false));
+        assertTrue(error.getMessage().contains("context window changed"));assertTrue(backend.conversationBudgetSummary().contains("start a New"));backend.closeConversation();
+        List<MockProcess> unknown=new ArrayList<>();var unknownBackend=conversationBackend(unknown,Mode.NO_USAGE);
+        unknownBackend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false);
+        assertTrue(unknownBackend.conversationBudgetSummary().contains("usage is unavailable"));unknownBackend.closeConversation();
+    }
+    @Test void strictFramerRejectsDuplicateKeysCommentsAndNonstandardJsonBeforeCompletion() throws Exception {
+        for(Mode mode:List.of(Mode.DUPLICATE_FRAME,Mode.COMMENT_FRAME,Mode.UNQUOTED_FRAME,Mode.TRAILING_FRAME,Mode.ARRAY_FRAME)) {
+            MockProcess process=new MockProcess(context,mode);
+            AiApiException error=assertThrows(AiApiException.class,()->backend(process).generate(request(),CancellationToken.NONE,ignored->{}));
+            assertTrue(process.methods.contains("turn/start"));assertTrue(process.destroyed.get());
+            assertTrue(error.getMessage().contains("stream") || error.getMessage().contains("input"));
+        }
+    }
+    @Test void serverApprovalDuringHandshakeIsDeniedBeforeAccountOrThreadStart() throws Exception {
+        MockProcess process=new MockProcess(context,Mode.APPROVAL_AT_INIT);
+        BackendStatus status=backend(process).probe();
+        assertFalse(status.available());assertTrue(status.detail().contains("unsupported approval/tool"));assertTrue(process.deniedRequest.get());
+        assertFalse(process.methods.contains("account/read"));assertFalse(process.methods.contains("thread/start"));assertTrue(process.destroyed.get());
+    }
     private CodexAppServerBackend catalogBackend(List<MockProcess> processes,ModelCatalogCache cache,Mode...modes) {
         return new CodexAppServerBackend("codex",(args,root)->{MockProcess process=new MockProcess(root,modes[processes.size()]);processes.add(process);return process;},cache);
     }
@@ -447,7 +560,7 @@ class CodexAppServerBackendTest {
         }
     }
     private CodexAppServerBackend backend(MockProcess process) { return new CodexAppServerBackend("codex",(arguments,cwd)->{process.root=cwd;return process;}); }
-    private enum Mode {SIGNED_OUT, API_KEY, SUCCESS, FAILED, INTERRUPTED, NO_FINAL, APPROVAL, HANG, WRONG_VERSION, WINDOWS, BROAD_PROFILE, MCP_CONFIG, PLUGIN_CONFIG, MALFORMED, OVERSIZED, WRONG_ID, BLOCK_STDIN, EARLY_DELTA, BROAD_ENVIRONMENT, HANG_CHILD, OTHER_ACCOUNT, ROUTING_CHANGED, DEFAULT_CHANGED, ACCOUNT_UPDATED, SAME_ACCOUNT_UPDATED, CUSTOM_PROVIDER, CUSTOM_ENDPOINT, CATALOG_ERROR, PAGED_CATALOG, ID_WIRE, MISSING_MODALITY, IMAGE_ONLY_MODALITY, DUPLICATE_ID, DUPLICATE_CURSOR, INVALID_DEFAULT_EFFORT, DUPLICATE_TERMINAL, UNKNOWN_ACCOUNT_ID}
+    private enum Mode {APPROVAL_AT_INIT, DUPLICATE_FRAME, COMMENT_FRAME, UNQUOTED_FRAME, TRAILING_FRAME, ARRAY_FRAME, RESERVED_WINDOW, NO_USAGE, SMALL_CONTEXT, DECREASED_USAGE, INVALID_UTF8, UNSUPPORTED_AUTH, LIMIT_ALLOWED, LIMIT_DENIED, LIMIT_MALFORMED, INVALID_STRUCTURED, NO_INTERRUPT_ACK, OPTIONAL_EVENTS, PARTIAL_LINES, WRONG_THREAD, HUGE_STDERR, MISSING_PARAMS, MALFORMED_FIELD, EOF, CRASH, ZERO_EXIT_NO_COMPLETION, NOTIFICATION_FLOOD, SIGNED_OUT, API_KEY, SUCCESS, FAILED, INTERRUPTED, NO_FINAL, APPROVAL, HANG, WRONG_VERSION, WINDOWS, BROAD_PROFILE, MCP_CONFIG, PLUGIN_CONFIG, MALFORMED, OVERSIZED, WRONG_ID, BLOCK_STDIN, EARLY_DELTA, BROAD_ENVIRONMENT, HANG_CHILD, OTHER_ACCOUNT, ROUTING_CHANGED, DEFAULT_CHANGED, ACCOUNT_UPDATED, SAME_ACCOUNT_UPDATED, CUSTOM_PROVIDER, CUSTOM_ENDPOINT, CATALOG_ERROR, PAGED_CATALOG, ID_WIRE, MISSING_MODALITY, IMAGE_ONLY_MODALITY, DUPLICATE_ID, DUPLICATE_CURSOR, INVALID_DEFAULT_EFFORT, DUPLICATE_TERMINAL, UNKNOWN_ACCOUNT_ID}
     /** Reactive mock uses real captured handshake/config/model shapes; turn events are deliberate adversarial fixtures. */
     private static final class MockProcess extends Process {
         private final PipedInputStream stdout=new PipedInputStream(1024*1024);
@@ -455,6 +568,8 @@ class CodexAppServerBackendTest {
         private final ByteArrayOutputStream stdin=new ByteArrayOutputStream();
         final List<String> methods=new CopyOnWriteArrayList<>();
         final AtomicBoolean destroyed=new AtomicBoolean(),deniedRequest=new AtomicBoolean(),childForced=new AtomicBoolean();
+        final java.util.concurrent.atomic.AtomicLong stderrBytes = new java.util.concurrent.atomic.AtomicLong();
+        final CountDownLatch stderrRead = new CountDownLatch(1);
         Runnable onDestroy = () -> {};
         Runnable onBlockedWrite = () -> {};
         boolean childBeforeParentExit;
@@ -470,11 +585,14 @@ class CodexAppServerBackendTest {
             if (method.equals(hangMethod)) { requestReached.countDown(); return; }
             onRequest.accept(method);
             if(!req.has("id"))return;
+            if(mode==Mode.NO_INTERRUPT_ACK && method.equals("turn/interrupt"))return;
+            if(mode==Mode.APPROVAL_AT_INIT && method.equals("initialize")) {JsonObject approval=new JsonObject();approval.addProperty("id","approval-init");approval.addProperty("method","item/commandExecution/requestApproval");approval.add("params",new JsonObject());emit(approval);return;}
             JsonObject result=new JsonObject();
             switch(method){
                 case "initialize" -> {result=captured(1);if(mode==Mode.WRONG_VERSION)result.addProperty("userAgent","openspec/9.0.0 bad");if(mode==Mode.WINDOWS)result.addProperty("platformOs","windows");}
                 case "config/read" -> {result=captured(3);JsonObject config=result.getAsJsonObject("config");JsonObject fs=config.getAsJsonObject("permissions").getAsJsonObject("openspec_reviewed").getAsJsonObject("filesystem");fs.remove("/reviewed/context");fs.addProperty(root.toString(),"read");if(mode==Mode.BROAD_PROFILE)fs.addProperty(":root","read");if(mode==Mode.MCP_CONFIG){JsonObject mcp=new JsonObject();mcp.add("server",new JsonObject());config.add("mcp_servers",mcp);}if(mode==Mode.CUSTOM_PROVIDER){JsonObject provider=new JsonObject();provider.addProperty("base_url","https://unreviewed.example.test");config.getAsJsonObject("model_providers").add("openai",provider);}if(mode==Mode.CUSTOM_ENDPOINT)config.addProperty("chatgpt_base_url","https://unreviewed.example.test");if(mode==Mode.PLUGIN_CONFIG){JsonObject plugin=new JsonObject();plugin.addProperty("enabled",true);config.getAsJsonObject("plugins").add("extra",plugin);}}
-                case "account/read" -> {accountReads++;result=captured(2);if(mode!=Mode.SIGNED_OUT){JsonObject account=new JsonObject();account.addProperty("type",mode==Mode.API_KEY?"apiKey":"chatgpt");account.addProperty("planType","plus");if(mode==Mode.API_KEY)account.add("email",JsonNull.INSTANCE);else account.addProperty("email",mode==Mode.OTHER_ACCOUNT?"other@example.test":"fixture@example.test");result.add("account",account);if(mode!=Mode.API_KEY){JsonObject routing=new JsonObject();routing.addProperty("chatgptAccountId",(mode==Mode.OTHER_ACCOUNT || mode==Mode.ACCOUNT_UPDATED && accountReads>1)?"other-account":"fixture-account");routing.addProperty("backendOrigin",mode==Mode.ROUTING_CHANGED?"https://another-route.example.test":"https://chatgpt.com");routing.addProperty("accountRoutingOverride","NO_CONSTRAINT");if(mode!=Mode.UNKNOWN_ACCOUNT_ID)result.add("workspaceRouting",routing);}}}
+                case "account/read" -> {accountReads++;result=captured(2);if(mode!=Mode.SIGNED_OUT){JsonObject account=new JsonObject();account.addProperty("type",mode==Mode.API_KEY?"apiKey":mode==Mode.UNSUPPORTED_AUTH?"amazonBedrock":"chatgpt");account.addProperty("planType","plus");if(mode==Mode.API_KEY)account.add("email",JsonNull.INSTANCE);else account.addProperty("email",mode==Mode.OTHER_ACCOUNT?"other@example.test":"fixture@example.test");result.add("account",account);if(mode!=Mode.API_KEY){JsonObject routing=new JsonObject();routing.addProperty("chatgptAccountId",(mode==Mode.OTHER_ACCOUNT || mode==Mode.ACCOUNT_UPDATED && accountReads>1)?"other-account":"fixture-account");routing.addProperty("backendOrigin",mode==Mode.ROUTING_CHANGED?"https://another-route.example.test":"https://chatgpt.com");routing.addProperty("accountRoutingOverride","NO_CONSTRAINT");if(mode!=Mode.UNKNOWN_ACCOUNT_ID)result.add("workspaceRouting",routing);}}}
+                case "account/rateLimits/read" -> {if(mode==Mode.LIMIT_ALLOWED || mode==Mode.LIMIT_DENIED)result.addProperty("ordinaryUsageAllowed",mode==Mode.LIMIT_ALLOWED);if(mode==Mode.LIMIT_MALFORMED)result.addProperty("ordinaryUsageAllowed","true");}
                 case "model/list" -> {result=captured(5);
                     if (mode == Mode.PAGED_CATALOG) {
                         JsonArray all = result.getAsJsonArray("data"), page = new JsonArray();
@@ -494,7 +612,7 @@ class CodexAppServerBackendTest {
                     if(mode==Mode.DUPLICATE_CURSOR)result.addProperty("nextCursor","repeated-cursor");
                     if(mode==Mode.INVALID_DEFAULT_EFFORT)result.getAsJsonArray("data").get(0).getAsJsonObject().addProperty("defaultReasoningEffort","quantum");if(mode==Mode.DEFAULT_CHANGED){for(JsonElement entry:result.getAsJsonArray("data")){JsonObject model=entry.getAsJsonObject();if(model.get("isDefault").getAsBoolean()){model.addProperty("id","changed-default");model.addProperty("model","changed-default");}}}}
                 case "thread/start", "thread/resume" -> {threadParams=req.getAsJsonObject("params").deepCopy();result=captured(4);result.getAsJsonObject("thread").addProperty("id","thread-test");result.addProperty("cwd",root.toString());if(threadParams.has("model"))result.add("model",threadParams.get("model"));if(method.equals("thread/resume"))result.getAsJsonObject("thread").add("id",threadParams.get("threadId"));if(mode==Mode.BROAD_ENVIRONMENT){JsonObject environment=new JsonObject();environment.addProperty("environmentId","local");result.getAsJsonObject("thread").getAsJsonArray("environments").add(environment);}}
-                case "turn/start" -> {turnParams=req.getAsJsonObject("params").deepCopy();JsonObject turn=new JsonObject();turn.addProperty("id","turn-test");turn.addProperty("status","inProgress");turn.add("items",new JsonArray());turn.add("error",JsonNull.INSTANCE);result.add("turn",turn);}
+                case "turn/start" -> {if(mode==Mode.HUGE_STDERR)try{if(!stderrRead.await(2,TimeUnit.SECONDS))throw new IOException("stderr reader blocked");}catch(InterruptedException e){throw new IOException(e);}turnParams=req.getAsJsonObject("params").deepCopy();JsonObject turn=new JsonObject();turn.addProperty("id","turn-test");turn.addProperty("status","inProgress");turn.add("items",new JsonArray());turn.add("error",JsonNull.INSTANCE);result.add("turn",turn);}
             }
             JsonObject response=new JsonObject();response.add("id",req.get("id"));response.add("result",result);
             if(mode==Mode.WRONG_ID&&method.equals("turn/start"))response.addProperty("id",999);
@@ -504,24 +622,63 @@ class CodexAppServerBackendTest {
             if(method.equals("turn/start"))turnEvents();
         }
         private void turnEvents()throws IOException {
+            String invalid=switch(mode) {
+                case DUPLICATE_FRAME -> "{\"method\":\"future/optional\",\"method\":\"future/optional\"}";
+                case COMMENT_FRAME -> "{\"method\":\"future/optional\",/* forbidden */\"params\":null}";
+                case UNQUOTED_FRAME -> "{method:'future/optional'}";
+                case TRAILING_FRAME -> "{\"method\":\"future/optional\"} {}";
+                case ARRAY_FRAME -> "[]";
+                default -> null;
+            };
+            if(invalid!=null){server.write((invalid+"\n").getBytes(StandardCharsets.UTF_8));server.flush();}
+            if(mode==Mode.EOF || mode==Mode.CRASH || mode==Mode.ZERO_EXIT_NO_COMPLETION) { server.close(); return; }
+            if(mode==Mode.OPTIONAL_EVENTS) {
+                for(int style=0;style<3;style++) { JsonObject unknown=new JsonObject();unknown.addProperty("method","future/optional");if(style==1)unknown.add("params",JsonNull.INSTANCE);if(style==2)unknown.addProperty("params",7);emit(unknown); }
+            }
+            if(mode==Mode.MISSING_PARAMS || mode==Mode.MALFORMED_FIELD) {
+                JsonObject malformed=new JsonObject();malformed.addProperty("method","item/agentMessage/delta");
+                if(mode==Mode.MALFORMED_FIELD){JsonObject params=params();params.addProperty("itemId","bad");params.addProperty("delta",17);malformed.add("params",params);}
+                emit(malformed);return;
+            }
+            if(mode==Mode.NOTIFICATION_FLOOD) {for(int i=0;i<1000;i++){JsonObject event=new JsonObject();event.addProperty("method","future/optional");emit(event);}return;}
+            if(mode==Mode.WRONG_THREAD) {
+                JsonObject wrongThread=params();wrongThread.addProperty("threadId","foreign-thread");wrongThread.addProperty("itemId","foreign-item");wrongThread.addProperty("delta","WRONG");event("item/agentMessage/delta",wrongThread);
+                JsonObject wrongItem=params();wrongItem.addProperty("threadId","foreign-thread");wrongItem.addProperty("completedAtMs",0);JsonObject item=new JsonObject();item.addProperty("id","foreign-item");item.addProperty("type","agentMessage");item.addProperty("text","foreign-final");wrongItem.add("item",item);event("item/completed",wrongItem);
+                JsonObject wrongEnd=new JsonObject();wrongEnd.addProperty("threadId","foreign-thread");JsonObject ended=new JsonObject();ended.addProperty("id","turn-test");ended.addProperty("status","failed");ended.add("items",new JsonArray());wrongEnd.add("turn",ended);event("turn/completed",wrongEnd);
+                wrongEnd.addProperty("threadId","thread-test");ended.addProperty("id","foreign-turn");event("turn/completed",wrongEnd);
+            }
             if(mode==Mode.HANG)return;
+            if(mode==Mode.INVALID_UTF8){server.write(new byte[]{(byte)0xc3,0x28,0x0a});server.flush();return;}
             if(mode==Mode.MALFORMED){server.write("broken json\n".getBytes(StandardCharsets.UTF_8));return;}
             if(mode==Mode.OVERSIZED){server.write(("x".repeat(256*1024+1)+"\n").getBytes(StandardCharsets.UTF_8));return;}
             if(mode==Mode.APPROVAL){JsonObject approval=new JsonObject();approval.addProperty("id","approval-1");approval.addProperty("method","item/commandExecution/requestApproval");approval.add("params",new JsonObject());emit(approval);return;}
             if (mode == Mode.ACCOUNT_UPDATED || mode == Mode.SAME_ACCOUNT_UPDATED) {JsonObject account=new JsonObject();account.addProperty("authMode","apiKey");account.add("planType",JsonNull.INSTANCE);event("account/updated",account);if(mode==Mode.ACCOUNT_UPDATED)return;}
             JsonObject wrong=params();wrong.addProperty("turnId","other-turn");wrong.addProperty("itemId","ignored");wrong.addProperty("delta","WRONG");event("item/agentMessage/delta",wrong);
             for(String delta:List.of("final ","answer")){JsonObject p=params();p.addProperty("itemId","message-1");p.addProperty("delta",delta);event("item/agentMessage/delta",p);}
-            if(mode!=Mode.NO_FINAL){JsonObject p=params(),item=new JsonObject();item.addProperty("type","agentMessage");item.addProperty("id","message-1");item.addProperty("text","final answer");item.addProperty("phase","final_answer");p.add("item",item);p.addProperty("completedAtMs",0);event("item/completed",p);}
+            if(mode!=Mode.NO_FINAL){JsonObject p=params(),item=new JsonObject();item.addProperty("type","agentMessage");item.addProperty("id","message-1");item.addProperty("text",turnParams.has("outputSchema") && mode!=Mode.INVALID_STRUCTURED ? "{\"schemaVersion\":1,\"artifactId\":\"specs\",\"files\":[{\"relativePath\":\"specs/domain/spec.md\",\"operation\":\"create\",\"content\":\"# Spec\"}]}" : "final answer");item.addProperty("phase","final_answer");p.add("item",item);p.addProperty("completedAtMs",0);event("item/completed",p);}
+            if(mode!=Mode.NO_USAGE) {
+                JsonObject usageParams=params(),usage=new JsonObject(),total=new JsonObject(),last=new JsonObject();
+                for(JsonObject breakdown:List.of(total,last)) {breakdown.addProperty("cachedInputTokens",0);breakdown.addProperty("inputTokens",2000);breakdown.addProperty("outputTokens",500);breakdown.addProperty("reasoningOutputTokens",100);breakdown.addProperty("totalTokens",mode==Mode.DECREASED_USAGE?1:2500);}
+                usage.add("total",total);usage.add("last",last);usage.addProperty("modelContextWindow",mode==Mode.SMALL_CONTEXT?3000:mode==Mode.RESERVED_WINDOW?8192:200000);usageParams.add("tokenUsage",usage);event("thread/tokenUsage/updated",usageParams);
+            }
             JsonObject p=new JsonObject();p.addProperty("threadId","thread-test");JsonObject turn=new JsonObject();turn.addProperty("id","turn-test");turn.addProperty("status",mode==Mode.FAILED?"failed":mode==Mode.INTERRUPTED?"interrupted":"completed");turn.add("items",new JsonArray());turn.add("error",JsonNull.INSTANCE);p.add("turn",turn);event("turn/completed",p);if(mode==Mode.DUPLICATE_TERMINAL)event("turn/completed",p);
         }
         private JsonObject params(){JsonObject p=new JsonObject();p.addProperty("threadId","thread-test");p.addProperty("turnId","turn-test");return p;}
         private void event(String method,JsonObject params)throws IOException {JsonObject e=new JsonObject();e.addProperty("method",method);e.add("params",params);emit(e);}
-        private void emit(JsonObject e)throws IOException {server.write((e+"\n").getBytes(StandardCharsets.UTF_8));server.flush();}
+        private void emit(JsonObject e)throws IOException {
+            byte[] bytes=(e+"\n").getBytes(StandardCharsets.UTF_8);
+            if(mode==Mode.PARTIAL_LINES){for(int i=0;i<bytes.length;i+=13){server.write(bytes,i,Math.min(13,bytes.length-i));server.flush();}}
+            else {server.write(bytes);server.flush();}
+        }
         @Override public InputStream getInputStream(){return stdout;}
-        @Override public InputStream getErrorStream(){return InputStream.nullInputStream();}
+        @Override public InputStream getErrorStream(){
+            if(mode!=Mode.HUGE_STDERR)return InputStream.nullInputStream();
+            return new InputStream(){int remaining=8*1024*1024;public int read(){return remaining-->0?'x':-1;}
+                public int read(byte[] buffer,int offset,int length){if(remaining<=0)return -1;int size=Math.min(length,remaining);Arrays.fill(buffer,offset,offset+size,(byte)'x');remaining-=size;stderrBytes.addAndGet(size);stderrRead.countDown();return size;}};
+        }
         @Override public int waitFor(){return 0;}
         @Override public boolean waitFor(long timeout,TimeUnit unit){return destroyed.get();}
-        @Override public int exitValue(){if(!destroyed.get())throw new IllegalThreadStateException();return 0;}
+        @Override public int exitValue(){if(!destroyed.get())throw new IllegalThreadStateException();return mode==Mode.CRASH?2:0;}
         @Override public void destroy(){destroyed.set(true);onDestroy.run();try{server.close();}catch(IOException ignored){}}
         @Override public Process destroyForcibly(){destroy();return this;}
         @Override public boolean isAlive(){return !destroyed.get();}

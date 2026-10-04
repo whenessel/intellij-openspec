@@ -146,7 +146,7 @@ Paste this HTML into the "Getting Started" field:
   <li><strong>Archive</strong> — Merge delta specs into your main specs and archive the change.</li>
 </ol>
 
-<p><strong>Installed Codex MVP:</strong> requires Codex 0.160.0 on Linux/macOS and a compatible restricted profile. Codex owns login and refresh; ChatGPT usage is online and subject to plan limits, while API key mode requires billing opt-in. Prompt text is supplied through stdin without native filesystem/execution tools, extra context or autonomous writes. Explore resumes CLI-owned history under ChatGPT workspace/account identity and scope guards; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify, while persistent Explore requires verifiable ChatGPT identity. Unsupported configurations fail without REST fallback. OpenRouter and autonomous Apply remain planned.</p>
+<p><strong>Installed Codex MVP:</strong> requires Codex 0.160.0 on Linux/macOS and a compatible restricted profile. Codex owns login and refresh; ChatGPT usage is online and subject to plan limits, while API key mode requires billing opt-in. Reviewed, bounded context manifests are supplied through stdin without native filesystem/execution tools or autonomous writes; extra files require explicit inclusion. Explore resumes CLI-owned history under ChatGPT workspace/account identity and scope guards; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify, while persistent Explore requires verifiable ChatGPT identity. Unsupported configurations fail without REST fallback. OpenRouter and autonomous Apply remain planned.</p>
 <p><strong>Development status:</strong> this source description includes the branch implementation; full build, Plugin Verifier and IDE acceptance are pending because SDK downloads are blocked. Live Codex inference has not been validated in this environment.</p>
 <p>The plugin hands prompts to GitHub Copilot, Claude Code, Cursor and other tools, or generates through REST providers and a supported installed Codex CLI.</p>
 
@@ -155,7 +155,7 @@ Paste this HTML into the "Getting Started" field:
 <ul>
   <li><strong>Clipboard</strong> — Copy prompts and paste into your AI tool's chat (Copilot, Cursor, etc.)</li>
   <li><strong>Editor Tab</strong> — Open prompts in a temporary editor tab for review</li>
-  <li><strong>Integrated generation</strong> — Use REST providers or your supported installed Codex CLI, review context before sending, then review validated artifact batches before writing</li>
+  <li><strong>Integrated generation</strong> — Use REST providers or your supported installed Codex CLI, review context before sending, then review validated create/replace/exact artifact-patch batches before writing</li>
 </ul>
 
 <p>For a complete walkthrough, see the <a href="https://github.com/fission-ai/openspec">OpenSpec documentation</a>.</p>

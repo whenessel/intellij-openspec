@@ -98,6 +98,7 @@ public class OpenSpecSettingsPanel {
     private String lastRestProvider;
     private JSpinner codexTimeoutSpinner;
     private JSpinner aiContextMaxBytesSpinner;
+    private JSpinner aiContextMaxInputTokensSpinner;
     private JBCheckBox codexApiBillingCheckbox;
     private JBLabel codexStatusLabel;
     private JBLabel codexCatalogStatusLabel;
@@ -769,6 +770,7 @@ public class OpenSpecSettingsPanel {
         codexModelCombo.addActionListener(e -> refreshReasoningEfforts());
         codexTimeoutSpinner = new JSpinner(new SpinnerNumberModel(180, 1, 3600, 10));
         aiContextMaxBytesSpinner = new JSpinner(new SpinnerNumberModel(262144, 1024, 16777216, 1024));
+        aiContextMaxInputTokensSpinner = new JSpinner(new SpinnerNumberModel(12000, 1, 65536, 1024));
         codexApiBillingCheckbox = new JBCheckBox("Allow API billed Codex requests when the CLI reports API key auth");
         codexStatusLabel = new JBLabel("Auth: unknown — refresh status before use");
         codexCatalogStatusLabel = new JBLabel("Model catalog: not refreshed");
@@ -792,6 +794,8 @@ public class OpenSpecSettingsPanel {
         JPanel panel = FormBuilder.createFormBuilder()
                 .addLabeledComponent(new JBLabel("AI backend:"), aiBackendCombo)
                 .addLabeledComponent(new JBLabel("Maximum context (UTF-8 bytes):"), aiContextMaxBytesSpinner)
+                .addLabeledComponent(new JBLabel("Conservative input token cap:"), aiContextMaxInputTokensSpinner)
+                .addComponent(new JBLabel("<html>Effective byte cap also respects 48 KiB and the token cap.<br>Unknown tokenizer uses one UTF-8 byte per token; estimates are shown before sending.</html>"))
                 .addComponent(restSettingsPanel)
                 .addComponent(codexSettingsPanel)
                 .getPanel();
@@ -1182,6 +1186,9 @@ public class OpenSpecSettingsPanel {
     public void setCodexTimeoutSeconds(int timeout) { codexTimeoutSpinner.setValue(timeout > 0 ? timeout : 180); }
     public boolean isCodexApiBillingAcknowledged() { return codexApiBillingCheckbox.isSelected(); }
     public void setCodexApiBillingAcknowledged(boolean acknowledged) { codexApiBillingCheckbox.setSelected(acknowledged); }
+    public int getAiContextMaxInputTokens() { return ((Number) aiContextMaxInputTokensSpinner.getValue()).intValue(); }
+    public void setAiContextMaxInputTokens(int tokens) { aiContextMaxInputTokensSpinner.setValue(tokens > 0 && tokens <= 65536 ? tokens : 12000); }
+
     public int getAiContextMaxBytes() { return ((Number) aiContextMaxBytesSpinner.getValue()).intValue(); }
     public void setAiContextMaxBytes(int bytes) { aiContextMaxBytesSpinner.setValue(bytes > 0 ? bytes : 262144); }
 

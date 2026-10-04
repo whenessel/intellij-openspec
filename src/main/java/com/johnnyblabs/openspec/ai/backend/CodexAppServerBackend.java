@@ -2,6 +2,7 @@ package com.johnnyblabs.openspec.ai.backend;
 
 import com.google.gson.*;
 import com.johnnyblabs.openspec.ai.AiApiException;
+import com.johnnyblabs.openspec.ai.safety.ArtifactEnvelopeJson;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -10,6 +11,7 @@ import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
+import java.util.function.LongSupplier;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.security.MessageDigest;
 
@@ -21,6 +23,7 @@ public final class CodexAppServerBackend implements AiBackend {
     private static final List<String> DISABLED_FEATURES = List.of("shell_tool", "view_image", "js_repl", "multi_agent", "multi_agent_v2", "apps", "plugins", "plugin_hooks", "browser_use", "computer_use", "memories", "remote_plugin", "tool_suggest", "request_permissions_tool", "agent_message_board");
     private final String executable;
     private final ProcessLauncher launcher;
+    private final LongSupplier nanoTime;
     private static final ModelCatalogCache SHARED_CATALOG = new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 16);
     private final ModelCatalogCache catalogCache;
     private final Object conversationLock = new Object();
@@ -30,6 +33,8 @@ public final class CodexAppServerBackend implements AiBackend {
         final String scopeKey;
         final Path root;
         String threadId, model, accountFingerprint, authMode, effort;
+        volatile CodexProtocol.TokenUsage usage;
+        volatile int historyBudget;
         volatile boolean closed;
         boolean failed;
         volatile Session active;
@@ -41,12 +46,19 @@ public final class CodexAppServerBackend implements AiBackend {
         Process start(List<String> arguments, Path workingDirectory) throws IOException;
     }
     public CodexAppServerBackend(String executable) {
-        this(executable, (arguments, cwd) -> new ProcessBuilder(arguments).directory(cwd.toFile()).start());
+        this(executable, (arguments, cwd) -> {
+            try { return CodexProcessPolicy.builder(arguments,cwd,System.getenv()).start(); }
+            catch (AiApiException e) { throw new IOException(e.getMessage()); }
+        });
     }
     public CodexAppServerBackend(String executable, ProcessLauncher launcher) {
         this(executable, launcher, SHARED_CATALOG);
     }
     public CodexAppServerBackend(String executable, ProcessLauncher launcher, ModelCatalogCache catalogCache) {
+        this(executable, launcher, catalogCache, System::nanoTime);
+    }
+    public CodexAppServerBackend(String executable, ProcessLauncher launcher, ModelCatalogCache catalogCache, LongSupplier nanoTime) {
+        this.nanoTime = Objects.requireNonNull(nanoTime);
         this.catalogCache = Objects.requireNonNull(catalogCache);
         this.executable = executable == null || executable.isBlank() ? "codex" : executable.trim();
         this.launcher = Objects.requireNonNull(launcher);
@@ -69,11 +81,11 @@ public final class CodexAppServerBackend implements AiBackend {
             String limits = session.limitStatus(auth);
             session.check();
             return new BackendStatus(Set.of("chatgpt", "apiKey").contains(auth), ("apiKey".equals(auth) ? "apikey" : auth),
-                    "Prompt-only reviewed context; environment access disabled; " + ("signedOut".equals(auth) ? "run codex login externally." : "CLI owns login and refresh; usage limits apply.") + limits, SUPPORTED_VERSION, limits.strip(), account.fingerprint());
-        } catch (AiApiException e) {
+                    "Prompt-only reviewed context; environment access disabled; " + ("signedOut".equals(auth) ? "run codex login externally." : Set.of("chatgpt","apiKey").contains(auth) ? "CLI owns login and refresh; usage limits apply." : "Unsupported CLI authentication mode; execution is blocked.") + limits, SUPPORTED_VERSION, limits.strip(), account.fingerprint());
+        } catch (AiApiException | RuntimeException e) {
             checkCancellation(token);
-            if (e instanceof AiOperationCancelledException) throw e;
-            return new BackendStatus(false, "unknown", e.getMessage(), "unknown");
+            if (e instanceof AiOperationCancelledException cancelled) throw cancelled;
+            return new BackendStatus(false, "unknown", e instanceof AiApiException ? e.getMessage() : "Codex returned incompatible account/status metadata.", "unknown");
         } finally { deleteRoot(root); checkCancellation(token); }
     }
     @Override public List<ModelDescriptor> models() throws AiApiException { return catalog(null, false).models(); }
@@ -172,13 +184,19 @@ public final class CodexAppServerBackend implements AiBackend {
             JsonObject started = prepareThread(session, request, root, true, null, null);
             return runTurn(session, request, onDelta, string(started, "model"));
         } catch (RuntimeException e) { throw failure("Codex returned an incompatible event stream; no result was applied."); }
+        finally { checkCancellation(cancellation); }
     }
 
     /** Reuses CLI-owned history through resume, with a fresh authenticated process per reviewed turn. */
     public AiResult generateConversation(AiRequest request, CancellationToken cancellation, Consumer<String> onDelta,
                                          String scopeKey, boolean newConversation) throws AiApiException {
+        return generateConversation(request,cancellation,onDelta,scopeKey,newConversation,12000);
+    }
+    public AiResult generateConversation(AiRequest request, CancellationToken cancellation, Consumer<String> onDelta,
+                                         String scopeKey, boolean newConversation,int historyBudgetTokens) throws AiApiException {
         Objects.requireNonNull(scopeKey); Objects.requireNonNull(cancellation); Objects.requireNonNull(onDelta);
         if (cancellation.isCancelled() || Thread.currentThread().isInterrupted()) throw failure("Codex conversation was cancelled before startup.");
+        if(historyBudgetTokens<1)throw failure("Conversation history budget must be positive.");
         reviewedRoot(request);
         capabilities().require(request.requiredCapabilities());
         if (!conversationBusy.compareAndSet(false, true)) throw failure("A Codex conversation turn is already running.");
@@ -197,6 +215,9 @@ public final class CodexAppServerBackend implements AiBackend {
             CancellationToken guarded = () -> cancellation.isCancelled() || current.closed;
             try (Session session = open(current.root, request.timeout(), guarded)) {
                 current.active = session;
+                if(current.threadId!=null)admitConversationHistory(current,request,historyBudgetTokens);
+                current.historyBudget=historyBudgetTokens;
+                session.previousUsage=current.usage;
                 session.check();
                 AccountState account = session.account();
                 validateAccount(account, request); session.accountBaseline = account;
@@ -208,11 +229,37 @@ public final class CodexAppServerBackend implements AiBackend {
                 current.threadId = session.threadId;
                 current.model = string(started, "model");
                 current.authMode = account.mode(); current.accountFingerprint = account.fingerprint(); current.effort = request.reasoningEffort();
-                return runTurn(session, request, onDelta, current.model);
-            } finally { current.active = null; }
+                AiResult result=runTurn(session, request, onDelta, current.model);
+                current.usage=session.usage;
+                return result;
+            } finally { current.active = null; checkCancellation(guarded); }
         } catch (AiApiException e) { if (state != null) { state.failed = true; if (created) deleteRoot(state.root); } throw e; }
         catch (RuntimeException e) { if (state != null) { state.failed = true; if (created) deleteRoot(state.root); } throw failure("Codex returned an incompatible conversation protocol; no result was applied."); }
         finally { conversationBusy.set(false); }
+    }
+    private static void admitConversationHistory(Conversation state,AiRequest request,int budget) throws AiApiException {
+        if(state.historyBudget!=budget || state.usage==null)throw failure("Conversation history usage is unknown or its reviewed budget changed; start a New conversation.");
+        long effective=historyInputLimit(budget,state.usage.contextWindow());
+        long prompt=request.prompt().getBytes(StandardCharsets.UTF_8).length;
+        long used=state.usage.totalTokens(),reasoning=state.usage.reasoningTokens();
+        // Counting reasoning again is deliberately conservative: it may already be included in total.
+        if(used>effective || reasoning>effective-used || prompt>effective-used-reasoning)throw failure("Conversation history exceeds the reviewed context budget; start a New conversation.");
+    }
+    private static long historyInputLimit(int budget,Long window) {
+        // The configured budget is an input cap; reserve output/safety from a known model window.
+        return window==null ? budget : Math.min(budget,Math.max(0,window-4096-1024));
+    }
+    public String conversationBudgetSummary() {
+        synchronized(conversationLock) {
+            Conversation state=conversation;
+            if(state==null)return "New conversation; CLI history token usage is not yet available.";
+            if(state.failed)return "Conversation failed or was cancelled; start a New conversation.";
+            if(state.usage==null)return "CLI history token usage is unavailable; start a New conversation before another turn.";
+            long limit=historyInputLimit(state.historyBudget,state.usage.contextWindow());
+            return "CLI cumulative history usage: "+state.usage.totalTokens()+" tokens; reported reasoning: "+state.usage.reasoningTokens()
+                    +" tokens; reviewed input cap: "+limit+" tokens. "+(state.usage.contextWindow()==null?"Model context window unknown.":"Model window: "+state.usage.contextWindow()+"; output/safety reserve: 5120 tokens.")
+                    +" Next prompt is admitted conservatively by UTF-8 bytes; exceeding the cap requires New.";
+        }
     }
     /** Explicit New conversation/disposal clears remembered history and stops any pending process. */
     public void closeConversation() {
@@ -264,7 +311,8 @@ public final class CodexAppServerBackend implements AiBackend {
         if (!array(started, "instructionSources").isEmpty()) throw failure("Codex included instruction sources outside reviewed context.");
         if (model != null && !model.isBlank() && !model.equals(string(started, "model"))) throw failure("Codex changed the selected model; review model settings again.");
         if (!array(object(started, "thread"), "environments").isEmpty()) throw failure("Codex enabled an execution environment outside the reviewed prompt-only profile.");
-        session.threadId = string(object(started, "thread"), "id");
+        CodexProtocol.ThreadStarted thread = CodexProtocol.threadStarted(started);
+        session.threadId = thread.threadId();
         if (resumeId != null && !resumeId.equals(session.threadId)) throw failure("Codex resumed a different thread; no result was applied.");
         return started;
     }
@@ -279,52 +327,62 @@ public final class CodexAppServerBackend implements AiBackend {
             if (request.outputSchema() != null) turnParams.add("outputSchema", request.outputSchema());
             if (!request.reasoningEffort().isBlank()) turnParams.addProperty("effort", request.reasoningEffort());
             JsonObject turn = session.rpc("turn/start", turnParams);
-            session.turnId = string(object(turn, "turn"), "id");
+            CodexProtocol.TurnStarted startedTurn = CodexProtocol.turnStarted(turn);
+            if (startedTurn.status() != CodexProtocol.TurnStatus.IN_PROGRESS) throw failure("Codex did not start an active turn.");
+            session.turnId = startedTurn.turnId();
             int streamedCharacters = 0;
             String finalText = null;
             while (true) {
                 JsonObject event = session.next();
                 session.rejectRequest(event);
-                String method = optional(event, "method"); if (method == null) continue;
-                if ("account/updated".equals(method)) {
+                CodexProtocol.Frame frame = CodexProtocol.frame(event);
+                if (!(frame instanceof CodexProtocol.NotificationFrame)) throw failure("Unexpected Codex response outside an active RPC.");
+                CodexProtocol.Notification notification = CodexProtocol.notification(event);
+                if (notification instanceof CodexProtocol.Unknown) continue;
+                if (notification instanceof CodexProtocol.AccountUpdated) {
                     AccountState current = session.account();
                     if (session.accountBaseline == null || !current.equals(session.accountBaseline)) { session.interrupt(); throw failure("Codex account changed during the turn; no result was applied. Review the account and start a New conversation."); }
                     session.notifications.removeIf(pending -> "account/updated".equals(optional(pending, "method")));
                     continue;
                 }
-                JsonObject params = object(event, "params");
-                if (!session.threadId.equals(optional(params, "threadId"))) continue;
-                if ("turn/completed".equals(method)) {
-                    JsonObject ended = object(params, "turn");
-                    if (!session.turnId.equals(string(ended, "id"))) continue;
-                    if (!"completed".equals(string(ended, "status"))) { session.terminal.finish("interrupted".equals(string(ended, "status")) ? TurnTerminalState.Status.CANCELLED : TurnTerminalState.Status.FAILED, ""); throw failure("Codex turn failed or was interrupted; no result was applied."); }
+                if(notification instanceof CodexProtocol.TokenUsage measured) {
+                    if(!session.threadId.equals(measured.threadId()) || !session.turnId.equals(measured.turnId()))continue;
+                    if((session.usage!=null && measured.totalTokens()<session.usage.totalTokens()) || (session.previousUsage!=null && measured.totalTokens()<session.previousUsage.totalTokens()))throw failure("Codex conversation usage decreased unexpectedly; start a New conversation.");
+                    if(session.previousUsage!=null && !Objects.equals(session.previousUsage.contextWindow(),measured.contextWindow()))throw failure("Codex model context window changed; start a New conversation.");
+                    session.usage=measured;continue;
+                }
+                if (notification instanceof CodexProtocol.TurnCompleted ended) {
+                    if (!session.threadId.equals(ended.threadId()) || !session.turnId.equals(ended.turnId())) continue;
+                    if (ended.status() != CodexProtocol.TurnStatus.COMPLETED) {
+                        session.terminal.finish(ended.status() == CodexProtocol.TurnStatus.INTERRUPTED ? TurnTerminalState.Status.CANCELLED : TurnTerminalState.Status.FAILED, "");
+                        throw failure("Codex turn failed or was interrupted; no result was applied.");
+                    }
                     session.check();
                     if (finalText == null || finalText.isBlank()) throw failure("Codex completed without a final assistant message.");
-                    session.terminal.finish(TurnTerminalState.Status.COMPLETED, finalText);
-                    return new AiResult(session.terminal.requireCompleted(), id(), model);
+                    AiResult result = AiResult.fromResponse(finalText, id(), model, request.outputSchema() != null);
+                    session.check(); session.terminal.finish(TurnTerminalState.Status.COMPLETED, result.text());
+                    session.terminal.requireCompleted(); return result;
                 }
-                if (!session.turnId.equals(optional(params, "turnId"))) continue;
-                if ("item/agentMessage/delta".equals(method)) {
-                    String delta = string(params, "delta"); string(params, "itemId");
-                    if ((long) streamedCharacters + delta.length() > MAX_TEXT) throw failure("Codex output exceeded the size limit.");
-                    streamedCharacters += delta.length(); session.check(); onDelta.accept(delta);
-                } else if ("item/completed".equals(method)) {
-                    JsonObject item = object(params, "item");
-                    if ("agentMessage".equals(string(item, "type"))) {
-                        String phase = optional(item, "phase");
-                        if (phase == null || "final_answer".equals(phase)) {
-                            finalText = string(item, "text");
-                            if (finalText.length() > MAX_TEXT) throw failure("Codex output exceeded the size limit.");
-                        }
+                if (notification instanceof CodexProtocol.Delta delta) {
+                    if (!session.threadId.equals(delta.threadId()) || !session.turnId.equals(delta.turnId())) continue;
+                    if ((long) streamedCharacters + delta.text().length() > MAX_TEXT) throw failure("Codex output exceeded the size limit.");
+                    streamedCharacters += delta.text().length(); session.check(); onDelta.accept(delta.text());
+                } else if (notification instanceof CodexProtocol.ItemCompleted item) {
+                    if (!session.threadId.equals(item.threadId()) || !session.turnId.equals(item.turnId())) continue;
+                    if (item.assistant() && (item.phase() == null || "final_answer".equals(item.phase()))) {
+                        finalText = item.text();
+                        if (finalText.length() > MAX_TEXT) throw failure("Codex output exceeded the size limit.");
                     }
-                } else if ("error".equals(method)) throw failure("Codex reported a turn error; no result was applied.");
+                } else if (notification instanceof CodexProtocol.TurnError error
+                        && session.threadId.equals(error.threadId()) && session.turnId.equals(error.turnId())) throw failure("Codex reported a turn error; no result was applied.");
             }
     }
 
     private Session open(Path root, Duration timeout, CancellationToken token) throws AiApiException {
         checkCancellation(token);
+        CodexProcessPolicy.validate(executable);
         try {
-            Session session = new Session(launcher.start(arguments(root), root), timeout, token);
+            Session session = new Session(launcher.start(arguments(root), root), timeout, token, nanoTime);
             try { session.check(); session.initialize(root); return session; }
             catch (AiApiException | RuntimeException e) { session.close(); if (e instanceof AiApiException api) throw api; throw failure("Codex returned an incompatible handshake/configuration."); }
         } catch (IOException e) { checkCancellation(token); throw failure("Cannot start Codex. Configure the installed CLI executable path."); }
@@ -359,13 +417,16 @@ public final class CodexAppServerBackend implements AiBackend {
         private final Deque<JsonObject> notifications = new ArrayDeque<>();
         private final CancellationToken token;
         private final long deadline;
+        private final LongSupplier nanoTime;
         private int sequence;
         private String threadId, turnId;
         private AccountState accountBaseline;
+        private CodexProtocol.TokenUsage usage,previousUsage;
         private final TurnTerminalState terminal = new TurnTerminalState();
         private volatile boolean closed, invalidStream;
-        Session(Process process, Duration timeout, CancellationToken token) {
-            this.process=process; this.token=token; this.deadline=System.nanoTime()+(timeout.compareTo(Duration.ofHours(1)) > 0 ? Duration.ofHours(1).toNanos() : timeout.toNanos());
+        Session(Process process, Duration timeout, CancellationToken token, LongSupplier nanoTime) {
+            this.nanoTime=nanoTime;
+            this.process=process; this.token=token; this.deadline=nanoTime.getAsLong()+(timeout.compareTo(Duration.ofHours(1)) > 0 ? Duration.ofHours(1).toNanos() : timeout.toNanos());
             input=new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8);
             Thread stdout = new Thread(() -> read(process.getInputStream()), "openspec-codex-stdout"); stdout.setDaemon(true); stdout.start();
             Thread stderr = new Thread(() -> { try(InputStream stream=process.getErrorStream()) { byte[] buffer=new byte[2048]; while(!closed && stream.read(buffer)!=-1) { /* Discard bounded chunks: stderr may contain private context. */ } } catch(IOException ignored) {} }, "openspec-codex-stderr"); stderr.setDaemon(true); stderr.start();
@@ -374,7 +435,8 @@ public final class CodexAppServerBackend implements AiBackend {
             JsonObject params=new JsonObject(), info=new JsonObject(), capabilities=new JsonObject();
             info.addProperty("name","openspec_intellij"); info.addProperty("version","1.0"); params.add("clientInfo",info); capabilities.addProperty("experimentalApi",true); params.add("capabilities",capabilities);
             JsonObject initialized=rpc("initialize",params);
-            String agent=string(initialized,"userAgent"); String os=string(initialized,"platformOs");
+            CodexProtocol.Initialized handshake=CodexProtocol.initialized(initialized);
+            String agent=handshake.userAgent(); String os=handshake.platformOs();
             if (!agent.contains("/"+SUPPORTED_VERSION+" ")) throw failure("Unsupported Codex version; the reviewed protocol baseline is 0.160.0.");
             if (!Set.of("linux","macos").contains(os)) throw failure("Unsupported Codex OS for restricted read access; Linux/macOS are required.");
             send(null,"initialized",null);
@@ -383,15 +445,12 @@ public final class CodexAppServerBackend implements AiBackend {
         }
         AccountState account() throws AiApiException {
             JsonObject params=new JsonObject(); params.addProperty("refreshToken",false);
-            JsonObject account=rpc("account/read",params);
-            JsonElement value=account.get("account");
-            if (value == null || value.isJsonNull()) return new AccountState("signedOut", "", false);
-            JsonObject identity = value.getAsJsonObject();
-            String mode = string(identity, "type"), email = optional(identity, "email");
-            JsonObject routing = object(account, "workspaceRouting");
-            String id = routing == null ? null : optional(routing, "chatgptAccountId");
-            boolean known = id != null && !id.isBlank();
-            String key = known ? "id:" + id + ":origin:" + string(routing, "backendOrigin") + ":routing:" + string(routing, "accountRoutingOverride") + ":plan:" + optional(identity, "planType") : email != null && !email.isBlank() ? "email:" + email : null;
+            CodexProtocol.AccountRead account=CodexProtocol.account(rpc("account/read",params));
+            String mode=account.reportedMode(),email=account.email();
+            CodexProtocol.WorkspaceRouting routing=account.routing();
+            String id=routing==null?null:routing.accountId();
+            boolean known=id!=null && !id.isBlank();
+            String key=known ? "id:"+id+":origin:"+routing.backendOrigin()+":routing:"+routing.routingOverride()+":plan:"+account.planType() : email!=null && !email.isBlank()?"email:"+email:null;
             if (key == null) return new AccountState(mode, "", false);
             try { return new AccountState(mode, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest((mode + ":" + key).getBytes(StandardCharsets.UTF_8))), known); }
             catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
@@ -400,9 +459,11 @@ public final class CodexAppServerBackend implements AiBackend {
             if (!"chatgpt".equals(auth)) return " Limits unavailable.";
             try {
                 JsonObject limits = rpc("account/rateLimits/read", new JsonObject());
-                JsonElement allowed = limits.get("ordinaryUsageAllowed");
-                if (allowed == null || allowed.isJsonNull()) return " Included-usage availability unknown.";
-                return allowed.getAsBoolean() ? " Included usage currently allowed." : " Included usage currently unavailable; check Codex account limits.";
+                return switch(CodexProtocol.usage(limits)) {
+                    case ALLOWED -> " Included usage currently allowed.";
+                    case UNAVAILABLE -> " Included usage currently unavailable; check Codex account limits.";
+                    case UNKNOWN -> " Included-usage availability unknown.";
+                };
             } catch (AiApiException | RuntimeException ignored) { if (ignored instanceof AiOperationCancelledException cancelled) throw cancelled; check(); return " Limits unavailable; no recovery is inferred."; }
         }
         void validateConfig(JsonObject config,Path root) throws AiApiException {
@@ -438,11 +499,17 @@ public final class CodexAppServerBackend implements AiBackend {
             int id=++sequence; send(id,method,params);
             while(true) {
                 JsonObject event=receive(); rejectRequest(event);
-                if(event.has("method")) { if(notifications.size()>=128)throw failure("Codex sent too many pending events."); notifications.add(event); continue; }
-                if(!event.has("id")||event.get("id").getAsInt()!=id) throw failure("Codex response correlation failed.");
-                if(event.has("error"))throw failure("Codex rejected "+method+"; check CLI configuration/authentication.");
-                check();
-                return object(event,"result");
+                CodexProtocol.Frame frame = CodexProtocol.frame(event);
+                if (frame instanceof CodexProtocol.NotificationFrame) {
+                    if(notifications.size()>=128)throw failure("Codex sent too many pending events.");
+                    notifications.add(event); continue;
+                }
+                if (frame instanceof CodexProtocol.FailureFrame error) {
+                    if (error.id() != id) throw failure("Codex response correlation failed.");
+                    throw failure("Codex rejected "+method+"; check CLI configuration/authentication.");
+                }
+                if (!(frame instanceof CodexProtocol.SuccessFrame success) || success.id() != id) throw failure("Codex response correlation failed.");
+                check(); return success.result();
             }
         }
         void rejectRequest(JsonObject event) throws AiApiException {
@@ -462,7 +529,7 @@ public final class CodexAppServerBackend implements AiBackend {
         void check() throws AiApiException {
             if(token.isCancelled()||Thread.currentThread().isInterrupted()) {terminal.finish(TurnTerminalState.Status.CANCELLED, "");interrupt();throw new AiOperationCancelledException();}
             if (invalidStream) throw failure("Codex stream violated the bounded JSON protocol; no result was applied.");
-            if(System.nanoTime()>=deadline) {terminal.finish(TurnTerminalState.Status.TIMED_OUT, "");interrupt();throw failure("Codex operation timed out; no result was applied.");}
+            if(nanoTime.getAsLong()-deadline>=0) {terminal.finish(TurnTerminalState.Status.TIMED_OUT, "");interrupt();throw failure("Codex operation timed out; no result was applied.");}
         }
         void interrupt() { if(threadId!=null&&turnId!=null)try {JsonObject params=new JsonObject();params.addProperty("threadId",threadId);params.addProperty("turnId",turnId);send(++sequence,"turn/interrupt",params);}catch(AiApiException ignored) {} }
         void send(Integer id,String method,JsonObject params) throws AiApiException {JsonObject value=new JsonObject();if(id!=null)value.addProperty("id",id);value.addProperty("method",method);if(params!=null)value.add("params",params);write(value);}
@@ -474,8 +541,8 @@ public final class CodexAppServerBackend implements AiBackend {
                 catch (IOException e) { throw new UncheckedIOException(e); }
             });
             while (true) {
-                if (System.nanoTime() >= writeDeadline || (!interruption && (token.isCancelled() || Thread.currentThread().isInterrupted()))) {
-                    terminal.finish(System.nanoTime() >= writeDeadline ? TurnTerminalState.Status.TIMED_OUT : TurnTerminalState.Status.CANCELLED, "");
+                if ((interruption ? System.nanoTime() - writeDeadline >= 0 : nanoTime.getAsLong() - deadline >= 0) || (!interruption && (token.isCancelled() || Thread.currentThread().isInterrupted()))) {
+                    terminal.finish((interruption ? System.nanoTime() - writeDeadline >= 0 : nanoTime.getAsLong() - deadline >= 0) ? TurnTerminalState.Status.TIMED_OUT : TurnTerminalState.Status.CANCELLED, "");
                     write.cancel(true); close();
                     checkCancellation(token);
                     throw failure("Codex input write timed out; no result was applied.");
@@ -491,10 +558,10 @@ public final class CodexAppServerBackend implements AiBackend {
             }
         }
         void read(InputStream stream) {
-            try(Reader reader=new InputStreamReader(stream,StandardCharsets.UTF_8)) {
+            try(Reader reader=new InputStreamReader(stream,StandardCharsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT))) {
                 StringBuilder line=new StringBuilder();int ch;
                 while(!closed&&(ch=reader.read())!=-1) {
-                    if(ch=='\n') {if(line.isEmpty())continue;JsonObject value=JsonParser.parseString(line.toString()).getAsJsonObject();if(!incoming.offer(value))throw new IOException("event overflow");line.setLength(0);}
+                    if(ch=='\n') {if(line.isEmpty())continue;JsonObject value=ArtifactEnvelopeJson.parse(line.toString());if(!incoming.offer(value))throw new IOException("event overflow");line.setLength(0);}
                     else {if(line.length()>=256*1024)throw new IOException("oversized line");line.append((char)ch);}
                 }
             } catch(IOException|RuntimeException ignored) { if (!closed) invalidStream = true; } finally {incoming.offer(Boolean.FALSE);}

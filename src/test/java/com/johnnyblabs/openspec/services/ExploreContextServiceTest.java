@@ -48,7 +48,6 @@ class ExploreContextServiceTest {
             when(configService.getConfig()).thenReturn(null);
             when(changeService.getActiveChanges()).thenReturn(List.of());
             when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
-            when(project.getBasePath()).thenReturn("/nonexistent");
 
             String context = service.assembleContext();
 
@@ -69,7 +68,6 @@ class ExploreContextServiceTest {
             when(project.getService(ConfigService.class)).thenReturn(configService);
             when(project.getService(ChangeService.class)).thenReturn(changeService);
             when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
-            when(project.getBasePath()).thenReturn("/nonexistent");
 
             when(changeService.getActiveChanges()).thenReturn(List.of());
             when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
@@ -98,7 +96,6 @@ class ExploreContextServiceTest {
             when(project.getService(ConfigService.class)).thenReturn(configService);
             when(project.getService(ChangeService.class)).thenReturn(changeService);
             when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
-            when(project.getBasePath()).thenReturn("/nonexistent");
             when(changeService.getActiveChanges()).thenReturn(List.of());
             when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
 
@@ -122,10 +119,11 @@ class ExploreContextServiceTest {
 
         @Test
         void showsRequirementNamesAndDescriptions() throws IOException {
+            // Available project files must still be excluded, rather than absent from the fixture.
+            lenient().when(project.getBasePath()).thenReturn(tempDir.toString());
             when(project.getService(ConfigService.class)).thenReturn(configService);
             when(project.getService(ChangeService.class)).thenReturn(changeService);
             when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
-            when(project.getBasePath()).thenReturn(tempDir.toString());
 
             when(configService.getConfig()).thenReturn(null);
             when(changeService.getActiveChanges()).thenReturn(List.of());
@@ -144,9 +142,9 @@ class ExploreContextServiceTest {
 
             String context = service.assembleContext();
 
-            assertTrue(context.contains("### validation"));
-            assertTrue(context.contains("**Config validation**: The plugin SHALL validate config.yaml for correctness."));
-            assertTrue(context.contains("**Spec format validation**: The plugin SHALL validate spec files for completeness."));
+            assertTrue(context.contains("Project-wide spec contents require explicit file inclusion"));
+            assertFalse(context.contains("Config validation"));
+            assertFalse(context.contains("Spec format validation"));
             // Should NOT contain scenario details
             assertFalse(context.contains("Config missing"));
         }
@@ -163,7 +161,6 @@ class ExploreContextServiceTest {
             when(project.getService(ConfigService.class)).thenReturn(configService);
             when(project.getService(ChangeService.class)).thenReturn(changeService);
             when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
-            when(project.getBasePath()).thenReturn(tempDir.toString());
 
             when(configService.getConfig()).thenReturn(null);
             when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
@@ -185,16 +182,17 @@ class ExploreContextServiceTest {
             Files.createDirectories(deltaDir);
             Files.writeString(deltaDir.resolve("spec.md"), "## MODIFIED Requirements\n\n### Requirement: Config\n\nUpdated.");
 
+            service.setSelectedChange("my-change");
             String context = service.assembleContext();
 
             assertTrue(context.contains("### my-change (spec-driven)"));
-            assertTrue(context.contains("**proposal:**"));
+            assertTrue(context.contains("### proposal.md"));
             assertTrue(context.contains("This is the full proposal."));
-            assertTrue(context.contains("**design:**"));
+            assertTrue(context.contains("### design.md"));
             assertTrue(context.contains("This is the full design."));
-            assertTrue(context.contains("**tasks:**"));
+            assertTrue(context.contains("### tasks.md"));
             assertTrue(context.contains("- [ ] 1.1 Do something"));
-            assertTrue(context.contains("**delta spec (validation):**"));
+            assertTrue(context.contains("### specs/validation/spec.md"));
             assertTrue(context.contains("## MODIFIED Requirements"));
         }
 
@@ -203,7 +201,6 @@ class ExploreContextServiceTest {
             when(project.getService(ConfigService.class)).thenReturn(configService);
             when(project.getService(ChangeService.class)).thenReturn(changeService);
             when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
-            when(project.getBasePath()).thenReturn(tempDir.toString());
 
             when(configService.getConfig()).thenReturn(null);
             when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
@@ -216,13 +213,14 @@ class ExploreContextServiceTest {
             Files.createDirectories(changeDir);
             Files.writeString(changeDir.resolve("proposal.md"), "Just a proposal.");
 
+            service.setSelectedChange("partial-change");
             String context = service.assembleContext();
 
             assertTrue(context.contains("### partial-change"));
-            assertTrue(context.contains("**proposal:**"));
+            assertTrue(context.contains("### proposal.md"));
             assertTrue(context.contains("Just a proposal."));
-            assertFalse(context.contains("**design:**"));
-            assertFalse(context.contains("**tasks:**"));
+            assertTrue(context.contains("design.md — OMITTED:"));
+            assertTrue(context.contains("tasks.md — OMITTED:"));
         }
     }
 
@@ -234,7 +232,6 @@ class ExploreContextServiceTest {
             when(project.getService(ConfigService.class)).thenReturn(configService);
             when(project.getService(ChangeService.class)).thenReturn(changeService);
             when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
-            when(project.getBasePath()).thenReturn("/nonexistent");
 
             when(configService.getConfig()).thenReturn(null);
             when(changeService.getActiveChanges()).thenReturn(List.of());
@@ -242,9 +239,33 @@ class ExploreContextServiceTest {
 
             String context = service.assembleContext();
 
-            assertTrue(context.startsWith("# OpenSpec Explore Context\n"));
+            assertTrue(context.contains("# OpenSpec Explore Context\n"));
             assertTrue(context.contains("## Detected AI Tools\n"));
             assertTrue(context.contains("## Active Changes\n"));
         }
+    }
+    @Test void noImplicitFirstChangeAndExplicitSelectedChangeUsesResolvedRoot(@TempDir Path tempDir) throws IOException {
+        when(project.getService(ConfigService.class)).thenReturn(configService);
+        when(project.getService(ChangeService.class)).thenReturn(changeService);
+        when(project.getService(AiToolDetectionService.class)).thenReturn(aiToolDetectionService);
+        when(configService.getConfig()).thenReturn(null);
+        when(aiToolDetectionService.getDetectedTools()).thenReturn(List.of());
+        // Resolved store path is authoritative; not assumed to be project/openspec/changes.
+        Path chosen = Files.createDirectories(tempDir.resolve("external-store/chosen"));
+        Path other = Files.createDirectories(tempDir.resolve("external-store/other"));
+        Files.writeString(chosen.resolve("proposal.md"), "selected-store-content");
+        Files.writeString(other.resolve("proposal.md"), "other-change-private-context");
+        when(changeService.getActiveChanges()).thenReturn(List.of(new Change("chosen", chosen.toString()), new Change("other", other.toString())));
+        String unselected = service.assembleContext();
+        assertTrue(unselected.contains("No change selected"));
+        assertFalse(unselected.contains("selected-store-content"));
+        service.setSelectedChange("chosen");
+        String selected = service.assembleContext();
+        assertTrue(selected.contains("selected-store-content"));
+        assertFalse(selected.contains("other-change-private-context"));
+        var inclusion = new com.johnnyblabs.openspec.ai.safety.ContextManifest.Selection(other, "proposal.md",
+                com.johnnyblabs.openspec.ai.safety.ContextManifest.Origin.ADDITIONAL_CHANGE, false);
+        var expanded = service.assembleManifest(List.of(inclusion), com.johnnyblabs.openspec.ai.safety.ContextManifest.Budget.defaults());
+        assertTrue(expanded.prompt().contains("other-change-private-context"));
     }
 }

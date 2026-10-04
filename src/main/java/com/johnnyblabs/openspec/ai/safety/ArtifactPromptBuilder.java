@@ -3,9 +3,6 @@ package com.johnnyblabs.openspec.ai.safety;
 import com.johnnyblabs.openspec.model.ArtifactInstruction;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -14,44 +11,58 @@ import java.util.Locale;
 public final class ArtifactPromptBuilder {
     private ArtifactPromptBuilder() { }
     public static String build(ArtifactInstruction instruction) throws IOException {
+        return buildManifest(instruction, List.of(), ContextManifest.Budget.defaults()).prompt();
+    }
+    public static ContextManifest buildManifest(ArtifactInstruction instruction,
+            List<ContextManifest.Selection> explicitSelections, ContextManifest.Budget budget) throws IOException {
+        return buildManifest(instruction, explicitSelections, budget, null);
+    }
+    public static ContextManifest buildManifest(ArtifactInstruction instruction,
+            List<ContextManifest.Selection> explicitSelections, ContextManifest.Budget budget,
+            ArtifactRequestSnapshot snapshot) throws IOException {
         if (instruction.changeDir() == null) throw new IOException("Missing planning context root");
         Path root = Path.of(instruction.changeDir()).toAbsolutePath().normalize();
         ArtifactResultValidator.checkRoot(root);
-        StringBuilder prompt = new StringBuilder();
-        if (instruction.changeName() != null) prompt.append("# Change: ").append(instruction.changeName()).append("\n\n");
-        if (instruction.instruction() != null) prompt.append(instruction.instruction());
-        if (instruction.template() != null) prompt.append("\n\nTemplate:\n").append(instruction.template());
-        int count = 0;
+        var builder = new ContextManifest.Builder(budget);
+        String header = instruction.changeName() == null ? "" : "# Change: " + instruction.changeName() + "\n\n";
+        builder.inline("Artifact instructions", ContextManifest.Origin.INSTRUCTION,
+                header + (instruction.instruction() == null ? "" : instruction.instruction()), true);
+        if (instruction.template() != null) builder.inline("Template", ContextManifest.Origin.TEMPLATE, instruction.template(), true);
         for (var dependency : instruction.dependencies()) {
-            prompt.append("\n\nDependency: ").append(dependency.id());
-            if (dependency.description() != null) prompt.append(" — ").append(dependency.description());
+            String description = "Dependency: " + dependency.id()
+                    + (dependency.description() == null ? "" : " — " + dependency.description());
             if (!dependency.done() || dependency.path() == null) {
-                prompt.append(" (not yet completed)\n");
+                builder.inline("Dependency state", ContextManifest.Origin.INSTRUCTION, description + " (not yet completed)", true);
                 continue;
             }
             if (ArtifactResultValidator.isGlob(dependency.path())) {
                 if (!dependency.path().equals("specs/**/*.md")) throw new IOException("Unsupported dependency output glob");
-                prompt.append("\nPath: ").append(dependency.path()).append(" (path-only reference; no files automatically included)\n");
+                builder.inline("Dependency reference", ContextManifest.Origin.INSTRUCTION,
+                        description + "\nPath: " + dependency.path() + " (path-only reference; no files automatically included)", true);
+                builder.omission(dependency.path(), ContextManifest.Origin.SELECTED_CHANGE,
+                        "Glob dependency contents require explicit concrete file inclusion");
                 continue;
             }
-            List<Path> files = dependencyFiles(root, dependency.path());
-            for (Path file : files) {
-                if (++count > ArtifactResultValidator.MAX_FILES) throw new IOException("Too many dependency files; reduce context scope");
-                String relative = root.relativize(file).toString().replace('\\', '/');
-                requirePlanningMarkdown(relative);
-                ArtifactResultValidator.checkedTarget(root, relative);
-                if (Files.size(file) > ArtifactResultValidator.MAX_FILE_BYTES) throw new IOException("Dependency exceeds per-file context budget: " + relative);
-                prompt.append("\n### ").append(relative).append("\n").append(Files.readString(file, StandardCharsets.UTF_8));
-                ContextPayloadPolicy.redactAndBound(prompt.toString());
+            requirePlanningMarkdown(dependency.path());
+            builder.inline("Dependency description", ContextManifest.Origin.INSTRUCTION, description, true);
+            builder.file(new ContextManifest.Selection(root, dependency.path(), ContextManifest.Origin.SELECTED_CHANGE, true));
+        }
+        if (snapshot != null) {
+            if (!snapshot.root().toAbsolutePath().normalize().equals(root) || !snapshot.artifactId().equals(instruction.artifactId())
+                    || !java.util.Objects.equals(snapshot.outputPattern(), instruction.outputPath()))
+                throw new IOException("Artifact base snapshot does not match context scope");
+            for (var base : snapshot.baseContents().entrySet().stream().sorted(java.util.Map.Entry.comparingByKey()).toList()) {
+                requirePlanningMarkdown(base.getKey());
+                if (!ArtifactResultValidator.matches(instruction.outputPath(), base.getKey()))
+                    throw new IOException("Artifact base context is outside output scope");
+                builder.inline("Existing output base " + base.getKey(), ContextManifest.Origin.SELECTED_CHANGE,
+                        "Path: " + base.getKey() + "\nBase SHA-256: " + snapshot.baseHashes().get(base.getKey())
+                                + "\nUTF-16 offsets apply to the following exact original text; redacted bases cannot be patched.", true);
+                builder.capturedFile(base.getKey(), ContextManifest.Origin.SELECTED_CHANGE, base.getValue(), true, ContextManifest.hash(root.toString()));
             }
         }
-        return ContextPayloadPolicy.redactAndBound(prompt.toString());
-    }
-    private static List<Path> dependencyFiles(Path root, String path) throws IOException {
-        requirePlanningMarkdown(path);
-        Path file = ArtifactResultValidator.checkedTarget(root, path);
-        if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) throw new IOException("Completed dependency is missing: " + path);
-        return List.of(file);
+        for (ContextManifest.Selection selection : explicitSelections) builder.file(selection);
+        return builder.build();
     }
     public static void requirePlanningMarkdown(String relative) throws IOException {
         ArtifactResultValidator.checkRelativePath(relative);

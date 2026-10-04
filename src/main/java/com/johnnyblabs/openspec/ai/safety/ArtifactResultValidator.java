@@ -3,7 +3,6 @@ package com.johnnyblabs.openspec.ai.safety;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -55,25 +54,36 @@ public final class ArtifactResultValidator {
                 String existing = components.putIfAbsent(prefix.toLowerCase(Locale.ROOT), prefix);
                 if (existing != null && !existing.equals(prefix)) throw new IOException("Case-colliding artifact parent paths");
             }
-            if (!file.operation().equals("create") && !file.operation().equals("replace") && !file.operation().equals("legacy")) {
-                throw new IOException("Only create and replace artifact operations are supported");
+            if (!Set.of("create", "replace", "patch", "legacy").contains(file.operation())) {
+                throw new IOException("Only create, replace and exact artifact patch operations are supported");
             }
-            byte[] content = utf8(file.content());
-            bytes += content.length;
-            if (content.length > MAX_FILE_BYTES || bytes > MAX_TOTAL_BYTES) throw new IOException("Artifact content exceeds the review budget");
             Path target = checkedTarget(root, file.path());
             boolean exists = Files.exists(target, LinkOption.NOFOLLOW_LINKS);
             if (file.operation().equals("create") && exists) throw new IOException("Create destination already exists: " + file.path());
-            if (file.operation().equals("replace") && !exists) throw new IOException("Replace destination is missing: " + file.path());
+            if ((file.operation().equals("replace") || file.operation().equals("patch")) && !exists) throw new IOException("Replace/patch destination is missing: " + file.path());
             if (exists) {
                 long size = Files.size(target);
                 originalBytes += size;
                 if (size > MAX_FILE_BYTES || originalBytes > MAX_TOTAL_BYTES) throw new IOException("Existing artifact exceeds the review budget");
             }
             String original = exists ? Files.readString(target, StandardCharsets.UTF_8) : null;
+            if (original != null) ArtifactTextPolicy.canonicalContent(original); // Validate supported disk text without altering its hash/patch offsets.
             String hash = original == null ? null : hash(original);
             if (file.baseHash() != null && !file.baseHash().equals(hash)) throw new IOException("Artifact base hash conflicts: " + file.path());
-            edits.add(new ReviewedArtifactBatch.FileEdit(file.path(), exists ? "replace" : "create", file.content(), original, hash));
+            if (file.operation().equals("patch") && file.baseHash() == null) throw new IOException("Artifact patch requires its exact base hash");
+            if (file.operation().equals("patch") && ContextPayloadPolicy.redact(original).count() > 0) {
+                throw new IOException("A redacted artifact base cannot be patched; review a full replacement or reduce sensitive context");
+            }
+            String resolved = file.patch() == null ? file.content() : ArtifactPatchCodec.apply(original, file.patch());
+            // Validate the provider's raw projection, then bind review/application to logical LF text.
+            // Patch offsets/oldText and base hashes always refer to the exact unnormalized disk base.
+            if (utf8(resolved).length > MAX_FILE_BYTES) throw new IOException("Artifact content exceeds the review budget");
+            resolved = ArtifactTextPolicy.canonicalContent(resolved);
+            byte[] content = utf8(resolved);
+            bytes += content.length;
+            if (content.length > MAX_FILE_BYTES || bytes > MAX_TOTAL_BYTES) throw new IOException("Artifact content exceeds the review budget");
+            edits.add(new ReviewedArtifactBatch.FileEdit(file.path(), file.operation().equals("patch") ? "patch" : exists ? "replace" : "create",
+                    resolved, original, hash, file.patch()));
         }
         return new ReviewedArtifactBatch(root, artifactId, outputPattern, edits);
     }
@@ -84,10 +94,10 @@ public final class ArtifactResultValidator {
         // JSON-looking response is never silently reinterpreted as text.
         if (!trimmed.startsWith("{")) {
             if (isGlob(pattern)) throw new IOException("Multi-file output requires a schemaVersion 1 JSON artifact envelope");
-            return List.of(new ProposedFile(pattern, "legacy", response, null));
+            return List.of(new ProposedFile(pattern, "legacy", response, null, null));
         }
         try {
-            JsonObject envelope = JsonParser.parseString(trimmed).getAsJsonObject();
+            JsonObject envelope = ArtifactEnvelopeJson.parse(trimmed);
             requireOnlyKeys(envelope, Set.of("schemaVersion", "artifactId", "files"));
             if (!envelope.has("schemaVersion") || !envelope.get("schemaVersion").isJsonPrimitive()
                     || !envelope.get("schemaVersion").getAsJsonPrimitive().isNumber()
@@ -98,9 +108,20 @@ public final class ArtifactResultValidator {
             List<ProposedFile> result = new ArrayList<>();
             for (JsonElement element : files) {
                 JsonObject file = element.getAsJsonObject();
-                requireOnlyKeys(file, Set.of("relativePath", "operation", "content", "baseHash"));
-                result.add(new ProposedFile(string(file, "relativePath"), string(file, "operation"),
-                        string(file, "content"), file.has("baseHash") ? string(file, "baseHash") : null));
+                String operation = string(file, "operation");
+                if (!Set.of("create", "replace", "patch").contains(operation)) throw new IOException("Unknown artifact result operation");
+                String baseHash = file.has("baseHash") ? string(file, "baseHash") : null;
+                if (baseHash != null && !baseHash.matches("[a-f0-9]{64}")) throw new IOException("Artifact base hash must be lowercase SHA-256");
+                if (operation.equals("patch")) {
+                    requireOnlyKeys(file, Set.of("relativePath", "operation", "baseHash", "patch"));
+                    JsonElement patch = file.get("patch");
+                    if (baseHash == null || patch == null || !patch.isJsonObject()) throw new IOException("Artifact patch requires baseHash and versioned patch object");
+                    result.add(new ProposedFile(string(file, "relativePath"), operation, null, baseHash, ArtifactPatchCodec.parse(patch.getAsJsonObject())));
+                } else {
+                    requireOnlyKeys(file, Set.of("relativePath", "operation", "content", "baseHash"));
+                    if (operation.equals("create") && baseHash != null) throw new IOException("Create operations cannot name an existing base");
+                    result.add(new ProposedFile(string(file, "relativePath"), operation, string(file, "content"), baseHash, null));
+                }
             }
             return result;
         } catch (RuntimeException ex) {
@@ -178,7 +199,7 @@ public final class ArtifactResultValidator {
         try { return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content.getBytes(StandardCharsets.UTF_8))); }
         catch (NoSuchAlgorithmException ex) { throw new IllegalStateException(ex); }
     }
-    private static byte[] utf8(String content) throws IOException {
+    static byte[] utf8(String content) throws IOException {
         for (int i = 0; i < content.length(); i++) {
             char c = content.charAt(i);
             if (Character.isHighSurrogate(c)) {
@@ -187,5 +208,5 @@ public final class ArtifactResultValidator {
         }
         return content.getBytes(StandardCharsets.UTF_8);
     }
-    private record ProposedFile(String path, String operation, String content, String baseHash) { }
+    private record ProposedFile(String path, String operation, String content, String baseHash, ArtifactPatch patch) { }
 }
