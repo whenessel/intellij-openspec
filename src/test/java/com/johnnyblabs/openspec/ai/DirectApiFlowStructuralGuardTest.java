@@ -104,8 +104,11 @@ class DirectApiFlowStructuralGuardTest {
                 "the running task must register its indicator keyed by artifact id so its own cancel reaches it");
         assertTrue(content.contains("activeGenerations.remove(artifactId, indicator)"),
                 "the run must deregister its indicator when it ends (conditional remove, so a newer run survives)");
-        assertTrue(content.contains("if (indicator.isCanceled()) return;"),
-                "generation must check isCanceled() after the blocking generate() call");
+        int generate = content.indexOf("apiService.generateAndApply(instruction, routing)");
+        int cancelCheck = content.indexOf("indicator.checkCanceled();", generate);
+        int invalidate = content.indexOf("orchestration.invalidateCache(changeName);", generate);
+        assertTrue(generate >= 0 && cancelCheck > generate && cancelCheck < invalidate,
+                "generation must propagate cancellation after inference and before reporting completion");
         assertTrue(content.contains("catch (com.intellij.openapi.progress.ProcessCanceledException"),
                 "a cancellation must propagate as ProcessCanceledException, not be reported as an error");
     }

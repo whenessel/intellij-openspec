@@ -33,6 +33,8 @@ class ExploreContextServiceTest {
 
     @BeforeEach
     void setUp() {
+        when(project.getService(com.johnnyblabs.openspec.settings.OpenSpecSettings.class))
+                .thenReturn(new com.johnnyblabs.openspec.settings.OpenSpecSettings());
         service = new ExploreContextService(project);
     }
 

@@ -12,6 +12,11 @@ import java.util.List;
 
 /** SDK tests cover writer/document integration; filesystem/parser tests cover adversarial data. */
 public class SafeArtifactServiceIdeTest extends BasePlatformTestCase {
+    @Override
+    protected com.intellij.testFramework.fixtures.TempDirTestFixture createTempDirTestFixture() {
+        return new com.intellij.testFramework.fixtures.impl.TempDirTestFixtureImpl();
+    }
+
     private ArtifactInstruction instruction(Path root) {
         return new ArtifactInstruction("example", "proposal", root.toString(), "proposal.md", "Write proposal", "", List.of(), List.of());
     }

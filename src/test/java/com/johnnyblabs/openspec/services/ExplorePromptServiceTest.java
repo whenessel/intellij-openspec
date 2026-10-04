@@ -169,6 +169,12 @@ class ExplorePromptServiceTest {
 
     @Nested
     class PromptAssembly {
+        @BeforeEach
+        void configureContextBudget() {
+            when(project.getService(com.johnnyblabs.openspec.settings.OpenSpecSettings.class))
+                    .thenReturn(new com.johnnyblabs.openspec.settings.OpenSpecSettings());
+        }
+
         private void contextText(String text) throws IOException {
             doAnswer(invocation -> {
                 ContextManifest.Builder builder = invocation.getArgument(0);

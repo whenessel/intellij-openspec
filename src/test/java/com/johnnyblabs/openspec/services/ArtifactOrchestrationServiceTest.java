@@ -256,6 +256,12 @@ class ArtifactOrchestrationServiceTest {
 
         @Mock AiExecutionService apiService;
 
+        @BeforeEach
+        void configureOptionalRoutingServices() {
+            doReturn(null).when(project).getService(DeliveryMethodResolver.class);
+            doReturn(null).when(project).getService(WorkflowSchemaContextService.class);
+        }
+
         @TempDir
         Path tempDir;
 
@@ -449,6 +455,7 @@ class ArtifactOrchestrationServiceTest {
 
         @Test
         void respectsCancellation_firesOnCancelled() throws Exception {
+            when(project.getService(AiExecutionService.class)).thenReturn(apiService);
             List<String> calls = new ArrayList<>();
             GenerateAllListener listener = new GenerateAllListener() {
                 @Override public void onArtifactStarted(String id, int index, int total) {
@@ -509,6 +516,7 @@ class ArtifactOrchestrationServiceTest {
             assertFalse(calls.contains("started:design"));
 
             verify(apiService).generateAndApply(argThat(instruction -> instruction.artifactId().equals("proposal")));
+            verify(apiService).cancelActive();
             verifyNoMoreInteractions(apiService);
         }
     }

@@ -105,7 +105,8 @@ class AiExecutionServiceTest {
             assertTrue(error.getMessage().contains("changed"));
             verify(review).review(eq("prompt"), contains("reviewed-model"), eq(settings.getAiContextMaxBytes()));
             verify(context).close();
-            verifyNoInteractions(rest);
+            verify(rest).isConfigured();
+            verifyNoMoreInteractions(rest);
             assertTrue(local.constructed().isEmpty());
         }
     }

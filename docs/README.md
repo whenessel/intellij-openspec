@@ -37,6 +37,7 @@ The [**Version support**](openspec-support.md#version-support) block in `openspe
 | [feature-reference.md](feature-reference.md) | Complete reference for every plugin feature, setting, and troubleshooting note | Users | Living |
 | [feature-comparison-matrix.md](feature-comparison-matrix.md) | Competitive comparison vs. VS Code OpenSpec extensions | Evaluators, maintainers | Snapshot |
 | [local-codex.md](local-codex.md) | Installed Codex setup, compatibility, billing, routing and review boundaries | Codex users, contributors | Living |
+| [local-codex-acceptance.md](local-codex-acceptance.md) | Local Codex implementation acceptance evidence and runtime checklist | Contributors, maintainers | Living |
 | [getting-started-browser.md](getting-started-browser.md) | Setup guide: browse specs, no AI setup | Reviewers, leads, PMs | Reference |
 | [getting-started-copilot.md](getting-started-copilot.md) | Setup guide: IDE-first developer (Copilot / Cursor / Windsurf / Cline) | IDE-AI developers | Reference |
 | [getting-started-cli-companion.md](getting-started-cli-companion.md) | Setup guide: terminal AI companion (Claude Code, Gemini CLI, …) | CLI-AI developers | Reference |
