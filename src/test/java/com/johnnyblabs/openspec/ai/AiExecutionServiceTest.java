@@ -149,6 +149,27 @@ class AiExecutionServiceTest {
         }
     }
 
+    @Test
+    void reviewBillingUsesExecutionSnapshotEvenWhenStatusCacheChanges() throws Exception {
+        settings.setCodexApiBillingAcknowledged(true);
+        settings = spy(settings);
+        when(project.getService(OpenSpecSettings.class)).thenReturn(settings);
+        doAnswer(call -> {
+            var cache = AiExecutionService.class.getDeclaredField("codexStatus");
+            cache.setAccessible(true);
+            cache.set(execution, new BackendStatus(true, "chatgpt", "Stale concurrent probe", "fixture"));
+            return true;
+        }).when(settings).isCodexApiBillingAcknowledged();
+        when(review.review(anyString(), anyString(), anyInt())).thenThrow(new ProcessCanceledException());
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = localBackend("apikey")) {
+            assertThrows(ProcessCanceledException.class, () -> execution.generateRaw("prompt"));
+            verify(review).review(eq("prompt"), contains("API billing"), anyInt());
+            verify(local.constructed().getFirst(), never()).generate(any(), any(), any());
+            verifyNoInteractions(rest);
+        }
+    }
+
     private static MockedConstruction<CodexAppServerBackend> localBackend(String auth) {
         return mockConstruction(CodexAppServerBackend.class, (backend, construction) ->
                 when(backend.probe()).thenReturn(new BackendStatus(true, auth, "Mock account status", "fixture")));

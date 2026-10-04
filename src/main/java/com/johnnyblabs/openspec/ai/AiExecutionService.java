@@ -177,8 +177,12 @@ public final class AiExecutionService implements Disposable {
             }
             String expectedAuth = executionStatus == null ? "apikey" : executionStatus.authMode();
             String expectedAccount = executionStatus == null ? null : executionStatus.accountFingerprint();
+            String reviewedDestination = local == null
+                    ? AiProvider.fromString(restProvider).getDisplayName() + " · "
+                      + (restModel.isBlank() ? AiProvider.fromString(restProvider).getDefaultModel() : restModel) + " · API billing"
+                    : "Local Codex · " + (codexModel.isBlank() ? "account default" : codexModel) + " · " + billingLabel(expectedAuth);
             String historyNotice = contextScope == null || local == null ? "" : "\nExplore conversation: prior reviewed turns are retained by Codex. Clear only hides the display; New conversation discards reuse.\nCLI stores this conversation for resume. Native tools remain disabled.";
-            try (var context = project.getService(ContextReviewService.class).review(prompt, getBackendLabel() + historyNotice, budget)) {
+            try (var context = project.getService(ContextReviewService.class).review(prompt, reviewedDestination + historyNotice, budget)) {
                 if (canceled.get() || disposed || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
                 if (!backend.equals(settings.getAiBackend()) || budget != settings.getAiContextMaxBytes()
                         || local != null && (!executable.equals(settings.getCodexExecutable())
