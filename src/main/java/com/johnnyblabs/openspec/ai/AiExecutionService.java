@@ -18,6 +18,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -29,6 +30,7 @@ public final class AiExecutionService implements Disposable {
     private final AtomicReference<AtomicBoolean> activeExplore = new AtomicReference<>();
     private final AtomicBoolean probing = new AtomicBoolean();
     private final AtomicReference<CodexAppServerBackend> exploreBackend = new AtomicReference<>();
+    private final Object exploreLifecycle = new Object();
     private final java.util.concurrent.atomic.AtomicLong exploreEpoch = new java.util.concurrent.atomic.AtomicLong();
     private volatile String exploreExecutable = "";
     private volatile BackendStatus codexStatus = new BackendStatus(false, "unknown", "Check Codex status in Settings", "");
@@ -56,7 +58,8 @@ public final class AiExecutionService implements Disposable {
         OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
         if ("LOCAL_CODEX".equals(settings.getAiBackend())) {
             String model = settings.getCodexModel().isBlank() ? "account default" : settings.getCodexModel();
-            return "Local Codex · " + model + " · " + billingLabel(codexStatus.authMode());
+            String effort = settings.getCodexReasoningEffort().isBlank() ? "" : " · effort: " + settings.getCodexReasoningEffort();
+            return "Local Codex · " + model + effort + " · " + billingLabel(codexStatus.authMode());
         }
         if ("REST".equals(settings.getAiBackend())) {
             AiProvider provider = AiProvider.fromString(settings.getAiProvider());
@@ -120,9 +123,12 @@ public final class AiExecutionService implements Disposable {
     }
 
     public void resetExploreConversation() {
-        exploreEpoch.incrementAndGet();
+        CodexAppServerBackend previous;
+        synchronized (exploreLifecycle) {
+            exploreEpoch.incrementAndGet();
+            previous = exploreBackend.getAndSet(null);
+        }
         cancelExplore();
-        CodexAppServerBackend previous = exploreBackend.getAndSet(null);
         if (previous != null) {
             var app = ApplicationManager.getApplication();
             if (app != null && app.isDispatchThread()) app.executeOnPooledThread(previous::closeConversation);
@@ -155,6 +161,7 @@ public final class AiExecutionService implements Disposable {
             String backend = settings.getAiBackend();
             String executable = settings.getCodexExecutable();
             String codexModel = settings.getCodexModel();
+            String codexEffort = settings.getCodexReasoningEffort();
             String restProvider = settings.getAiProvider();
             String restModel = settings.getAiModel();
             int timeout = settings.getCodexTimeoutSeconds();
@@ -162,6 +169,7 @@ public final class AiExecutionService implements Disposable {
             if (!"REST".equals(backend) && !"LOCAL_CODEX".equals(backend)) throw new AiApiException("Unsupported AI backend; choose a backend in Settings.");
             CodexAppServerBackend local = null;
             BackendStatus executionStatus = null;
+            ModelSelection.Selection selection = null;
             if ("LOCAL_CODEX".equals(backend)) {
                 local = new CodexAppServerBackend(executable);
                 executionStatus = local.probe();
@@ -174,44 +182,52 @@ public final class AiExecutionService implements Disposable {
                 if (!"chatgpt".equals(executionStatus.authMode()) && !"apikey".equals(executionStatus.authMode())) {
                     throw new AiApiException("Codex authentication mode is unknown or unsupported; check CLI login.");
                 }
+                selection = ModelSelection.negotiate(local.catalog(executionStatus, false), codexModel, codexEffort, false);
             }
             String expectedAuth = executionStatus == null ? "apikey" : executionStatus.authMode();
             String expectedAccount = executionStatus == null ? null : executionStatus.accountFingerprint();
             String reviewedDestination = local == null
                     ? AiProvider.fromString(restProvider).getDisplayName() + " · "
                       + (restModel.isBlank() ? AiProvider.fromString(restProvider).getDefaultModel() : restModel) + " · API billing"
-                    : "Local Codex · " + (codexModel.isBlank() ? "account default" : codexModel) + " · " + billingLabel(expectedAuth);
+                    : "Local Codex · " + selection.wireModel() + (selection.defaultSelection() ? " (account default)" : "")
+                      + " · effort: " + (codexEffort.isBlank() ? "CLI default" : codexEffort) + " · " + billingLabel(expectedAuth);
             String historyNotice = contextScope == null || local == null ? "" : "\nExplore conversation: prior reviewed turns are retained by Codex. Clear only hides the display; New conversation discards reuse.\nCLI stores this conversation for resume. Native tools remain disabled.";
             try (var context = project.getService(ContextReviewService.class).review(prompt, reviewedDestination + historyNotice, budget)) {
                 if (canceled.get() || disposed || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
                 if (!backend.equals(settings.getAiBackend()) || budget != settings.getAiContextMaxBytes()
                         || local != null && (!executable.equals(settings.getCodexExecutable())
                         || !codexModel.equals(settings.getCodexModel()) || timeout != settings.getCodexTimeoutSeconds()
+                        || !codexEffort.equals(settings.getCodexReasoningEffort())
                         || "apikey".equals(expectedAuth) && !settings.isCodexApiBillingAcknowledged())
                         || local == null && (!restProvider.equals(settings.getAiProvider()) || !restModel.equals(settings.getAiModel()))) {
                     throw new AiApiException("AI destination or review settings changed. Review the request again before sending.");
                 }
                 String result;
                 if (local != null) {
-                    AiRequest request = new AiRequest(context.prompt(), codexModel, context.root(),
-                            Duration.ofSeconds(timeout), outputSchema, expectedAuth, expectedAccount);
+                    Set<BackendCapability> required = outputSchema == null
+                            ? Set.of(BackendCapability.CANCELLATION)
+                            : Set.of(BackendCapability.CANCELLATION, BackendCapability.STRUCTURED_OUTPUT);
+                    AiRequest request = new AiRequest(context.prompt(), selection.wireModel(), context.root(),
+                            Duration.ofSeconds(timeout), outputSchema, expectedAuth, expectedAccount, selection.effort(), required);
                     CancellationToken token = () -> canceled.get() || disposed || indicator != null && indicator.isCanceled()
                             || contextScope != null && conversationEpoch != exploreEpoch.get();
                     AiResult response;
                     if (contextScope != null) {
-                        if (conversationEpoch != exploreEpoch.get()) throw new ProcessCanceledException();
-                        CodexAppServerBackend conversation = exploreBackend.get();
-                        if (conversation != null && !executable.equals(exploreExecutable)) {
-                            resetExploreConversation();
-                            throw new AiApiException("Codex executable changed. Start and review a new Explore conversation.");
-                        }
-                        if (conversation == null) {
-                            conversation = local;
-                            exploreExecutable = executable;
-                            exploreBackend.set(conversation);
+                        CodexAppServerBackend conversation;
+                        synchronized (exploreLifecycle) {
+                            if (disposed || canceled.get() || conversationEpoch != exploreEpoch.get()) throw new ProcessCanceledException();
+                            conversation = exploreBackend.get();
+                            if (conversation != null && !executable.equals(exploreExecutable)) {
+                                throw new AiApiException("Codex executable changed. Start and review a new Explore conversation.");
+                            }
+                            if (conversation == null) {
+                                conversation = local;
+                                exploreExecutable = executable;
+                                exploreBackend.set(conversation);
+                            }
                         }
                         String reviewedScope = com.johnnyblabs.openspec.ai.safety.ExploreConversationScope.key(
-                                project.getBasePath(), executable, codexModel, contextScope, context.prompt(), budget);
+                                project.getBasePath(), executable, selection.wireModel(), codexEffort, contextScope, context.prompt(), budget);
                         response = conversation.generateConversation(request, token, onDelta, reviewedScope, false);
                     } else response = local.generate(request, token, onDelta);
                     result = response.text();

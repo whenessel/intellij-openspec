@@ -54,11 +54,13 @@ public class OpenSpecConfigurable implements Configurable {
                 || !panel.getAiBackend().equals(settings.getAiBackend())
                 || !panel.getCodexExecutable().equals(settings.getCodexExecutable())
                 || !panel.getCodexModel().equals(settings.getCodexModel())
+                || !panel.getCodexReasoningEffort().equals(settings.getCodexReasoningEffort())
                 || panel.getCodexTimeoutSeconds() != settings.getCodexTimeoutSeconds()
                 || panel.isCodexApiBillingAcknowledged() != settings.isCodexApiBillingAcknowledged()
                 || panel.getAiContextMaxBytes() != settings.getAiContextMaxBytes()
                 || !panel.getAiProvider().equals(safe(settings.getAiProvider(), "NONE"))
                 || !panel.getAiModel().equals(safe(settings.getAiModel()))
+                || !panel.getAiProviderModels().equals(settings.getAiProviderModels())
                 || !panel.getDefaultSchema().equals(safe(settings.getDefaultSchema()))
                 || isApiKeyModified();
     }
@@ -88,9 +90,11 @@ public class OpenSpecConfigurable implements Configurable {
         settings.setAiBackend(panel.getAiBackend());
         settings.setCodexExecutable(panel.getCodexExecutable());
         settings.setCodexModel(panel.getCodexModel());
+        settings.setCodexReasoningEffort(panel.getCodexReasoningEffort());
         settings.setCodexTimeoutSeconds(panel.getCodexTimeoutSeconds());
         settings.setCodexApiBillingAcknowledged(panel.isCodexApiBillingAcknowledged());
         settings.setAiContextMaxBytes(panel.getAiContextMaxBytes());
+        settings.setAiProviderModels(panel.getAiProviderModels());
         settings.setAiProvider(panel.getAiProvider());
         settings.setAiModel(panel.getAiModel());
         settings.setDefaultSchema(panel.getDefaultSchema());
@@ -155,9 +159,11 @@ public class OpenSpecConfigurable implements Configurable {
         panel.setAiBackend(settings.getAiBackend());
         panel.setCodexExecutable(settings.getCodexExecutable());
         panel.setCodexModel(settings.getCodexModel());
+        panel.setCodexReasoningEffort(settings.getCodexReasoningEffort());
         panel.setCodexTimeoutSeconds(settings.getCodexTimeoutSeconds());
         panel.setCodexApiBillingAcknowledged(settings.isCodexApiBillingAcknowledged());
         panel.setAiContextMaxBytes(settings.getAiContextMaxBytes());
+        panel.setAiProviderModels(settings.getAiProviderModels());
         panel.setAiProvider(settings.getAiProvider());
         panel.setAiModel(settings.getAiModel());
         panel.setDefaultSchema(settings.getDefaultSchema());

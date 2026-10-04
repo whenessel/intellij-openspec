@@ -21,4 +21,9 @@ class ExploreConversationScopeTest {
         assertNotEquals(ExploreConversationScope.key("p", "codex", "m", "scope", "edited first", 1024),
                 ExploreConversationScope.key("p", "codex", "m", "scope", "edited second", 1024));
     }
+    @Test void changedReasoningEffortRequiresNewReviewedConversation() {
+        String original = ExploreConversationScope.key("p", "codex", "m", "low", "scope", "reviewed", 1024);
+        assertNotEquals(original, ExploreConversationScope.key("p", "codex", "m", "high", "scope", "reviewed", 1024));
+        assertNotEquals(original, ExploreConversationScope.key("p", "codex", "m", "", "scope", "reviewed", 1024));
+    }
 }

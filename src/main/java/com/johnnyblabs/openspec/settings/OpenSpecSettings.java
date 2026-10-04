@@ -26,6 +26,19 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
 
     @Override
     public void loadState(@NotNull State state) {
+        java.util.Map<String, String> fields = new java.util.LinkedHashMap<>();
+        fields.put("aiSettingsVersion", Integer.toString(state.aiSettingsVersion));
+        fields.put("aiBackend", state.aiBackend);
+        fields.put("aiProvider", state.aiProvider);
+        fields.put("aiModel", state.aiModel);
+        fields.put("cliPath", state.cliPath);
+        fields.put("profile", state.profile);
+        fields.put("preferredDeliveryMethod", state.preferredDeliveryMethod);
+        fields.put("preferredTool", state.preferredTool);
+        AiSettingsMigration.PersistedResult migration = AiSettingsMigration.migratePersistedFields(fields, state.aiProviderModels);
+        state.aiSettingsVersion = Integer.parseInt(migration.fields().get("aiSettingsVersion"));
+        state.aiBackend = migration.fields().get("aiBackend");
+        state.aiProviderModels = new java.util.LinkedHashMap<>(migration.providerModels());
         this.state = state;
     }
 
@@ -111,20 +124,47 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
     public void setAiContextMaxBytes(int maxBytes) { state.aiContextMaxBytes = maxBytes; }
 
     public String getAiProvider() {
-        return state.aiProvider;
+        return state.aiProvider == null ? "" : state.aiProvider;
     }
 
     public void setAiProvider(String provider) {
-        state.aiProvider = provider;
+        AiSettingsMigration.ProviderSelection selected = AiSettingsMigration.selectProvider(
+                state.aiProvider, state.aiModel, state.aiProviderModels, provider);
+        state.aiProvider = selected.provider();
+        state.aiModel = selected.model();
+        state.aiProviderModels = new java.util.LinkedHashMap<>(selected.providerModels());
+        state.aiSettingsVersion = Math.max(state.aiSettingsVersion, AiSettingsMigration.CURRENT_VERSION);
     }
 
-    public String getAiModel() {
-        return state.aiModel;
+    public String getAiModel() { return getAiModel(state.aiProvider); }
+
+    public String getAiModel(String provider) {
+        return AiSettingsMigration.readModel(provider, state.aiProvider, state.aiModel, state.aiProviderModels);
     }
 
     public void setAiModel(String model) {
-        state.aiModel = model;
+        AiSettingsMigration.ProviderSelection selected = AiSettingsMigration.updateSelectedModel(
+                state.aiProvider, model, state.aiProviderModels);
+        state.aiModel = selected.model(); // retained for downgrade/rollback compatibility
+        state.aiProviderModels = new java.util.LinkedHashMap<>(selected.providerModels());
+        state.aiSettingsVersion = Math.max(state.aiSettingsVersion, AiSettingsMigration.CURRENT_VERSION);
     }
+
+    public java.util.Map<String, String> getAiProviderModels() {
+        return state.aiProviderModels == null ? java.util.Map.of() : java.util.Map.copyOf(state.aiProviderModels);
+    }
+    public void setAiProviderModels(java.util.Map<String, String> models) {
+        if (models != null) {
+            AiSettingsMigration.ProviderSelection selected = AiSettingsMigration.applyProviderModels(
+                    state.aiProvider, state.aiModel, models);
+            state.aiProviderModels = new java.util.LinkedHashMap<>(selected.providerModels());
+            state.aiModel = selected.model();
+            state.aiSettingsVersion = Math.max(state.aiSettingsVersion, AiSettingsMigration.CURRENT_VERSION);
+        }
+    }
+
+    public String getCodexReasoningEffort() { return state.codexReasoningEffort == null ? "" : state.codexReasoningEffort; }
+    public void setCodexReasoningEffort(String effort) { state.codexReasoningEffort = effort; }
 
     public String getPreferredDeliveryMethod() {
         return state.preferredDeliveryMethod;
@@ -250,9 +290,12 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         /** Guards the one-time strict-removal migration notice; see {@code consumeStrictMigrationNotice()}. */
         public boolean migratedStrictNotice = false;
         // Plugin routing preferences, independent of the OpenSpec CLI configuration.
+        public int aiSettingsVersion = 0;
+        public java.util.Map<String, String> aiProviderModels = new java.util.LinkedHashMap<>();
         public String aiBackend = "";
         public String codexExecutable = "codex";
         public String codexModel = "";
+        public String codexReasoningEffort = "";
         public int codexTimeoutSeconds = 180;
         public boolean codexApiBillingAcknowledged = false;
         public int aiContextMaxBytes = 262144;

@@ -1,0 +1,6 @@
+<component name="OpenSpecSettings">
+  <option name="aiProvider" value="OPENAI" />
+  <option name="aiModel" value="manual-openai-model" />
+  <option name="preferredDeliveryMethod" value="CLIPBOARD" />
+  <option name="preferredTool" value="Codex" />
+</component>

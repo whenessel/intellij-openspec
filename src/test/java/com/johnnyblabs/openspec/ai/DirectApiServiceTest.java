@@ -117,6 +117,20 @@ class DirectApiServiceTest {
     class GenerateRaw {
 
         @Test
+        void capturedProviderReadsItsOwnCredentialWithoutResolvingSettingsAgain() {
+            try (MockedStatic<OpenSpecSettings> settingsMock = mockStatic(OpenSpecSettings.class);
+                 MockedStatic<AiCredentialStore> credsMock = mockStatic(AiCredentialStore.class)) {
+                credsMock.when(() -> AiCredentialStore.getApiKey(AiProvider.CLAUDE)).thenReturn(null);
+                AiApiException error = assertThrows(AiApiException.class,
+                        () -> service.generateRaw("reviewed prompt", AiProvider.CLAUDE, "reviewed-model", () -> false));
+                assertTrue(error.getMessage().contains("Claude"));
+                credsMock.verify(() -> AiCredentialStore.getApiKey(AiProvider.CLAUDE));
+                credsMock.verify(() -> AiCredentialStore.getApiKey(AiProvider.OPENAI), never());
+                settingsMock.verifyNoInteractions();
+            }
+        }
+
+        @Test
         void throwsAiApiException_whenNoProviderConfigured() {
             try (MockedStatic<OpenSpecSettings> settingsMock = mockStatic(OpenSpecSettings.class)) {
                 settingsMock.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);

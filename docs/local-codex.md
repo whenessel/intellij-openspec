@@ -20,10 +20,13 @@ Generation and Verify use one-shot requests. Integrated Explore starts a persist
 2. Open **Settings → Tools → OpenSpec → AI generation** and choose **Installed Codex CLI**.
 3. Enter `codex` if it is available on the IDE process's PATH, or browse to the executable. This field accepts an executable, not a shell command or extra arguments. An absolute path is useful when the desktop IDE does not inherit your terminal's PATH.
 4. Click **Refresh status and models (no inference)**. Inspect the version, authentication mode and compatibility status. Refresh reads CLI account and model information; it does not send a generation request.
-5. Choose a model ID from the refreshed catalog or enter an ID manually. Blank uses the CLI default. Availability is account-dependent; a manual override does not make an unavailable model usable.
-6. Set the timeout and context limit as needed. Allow API billed Codex requests only if you intend to use the CLI's API key mode. Click **Apply**.
+5. Choose a model ID from the refreshed catalog or enter an ID manually. Blank selects the catalog's verified account default. The request pins the resolved model before context review. Availability is account-dependent; a manual override does not make an unavailable model usable.
+6. Leave reasoning effort blank for the CLI default, or choose an effort advertised for the selected model. An explicit effort requires fresh verified metadata; it is never silently replaced with another effort. Changing effort requires a new Explore conversation.
+7. Set the timeout and context limit as needed. Allow API billed Codex requests only if you intend to use the CLI's API key mode. Click **Apply**.
 
-Existing settings continue to select REST unless you choose Codex. REST provider, REST model, API keys and OpenSpec CLI settings stay independent of Codex settings. Selecting a detected Codex tool for clipboard delivery is a manual handoff; it does not activate this backend.
+Existing settings continue to select REST unless you choose Codex. Versioned migration retains legacy rollback fields and manual delivery preferences, and remembers each REST provider's model separately. API keys and OpenSpec CLI settings stay independent of Codex settings. Selecting a detected Codex tool for clipboard delivery is a manual handoff; it does not activate this backend.
+
+The model catalog is a bounded in-memory metadata cache scoped to executable, authentication mode, verified account fingerprint and protocol version. The TTL is five minutes, with at most sixteen account/executable entries. Refresh bypasses the TTL. When discovery fails, cached entries are visibly stale and cannot authorize a default model, explicit effort or required model capability. With a fresh verified account, a literal manual model ID and blank effort can still be submitted for CLI validation. Accounts without a verifiable fingerprint are not cached. Absent capability metadata remains unknown; required unknown or unsupported capabilities block execution without another backend being called.
 
 ## Routing, context and results
 

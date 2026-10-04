@@ -28,7 +28,7 @@
 - [ ] 3.7 Implement interruption/deadline/fake-clock lifecycle and project/executable-change cleanup; verify delayed completion after cancel, no interrupt ACK, hung descendant, stream closure and project disposal with no file writes.
 - [ ] 3.8 Enforce reviewed read-only context/tool policy for MVP and deny unsupported approvals/escalation; verify malicious tool requests and unsupported permission-profile fixtures cannot broaden access or create workspace files.
 - [ ] 3.9 Add auth/account/rate-limit status without plugin credential ownership; verify managed ChatGPT, API-key, signed-out, unknown/new mode and unavailable-limit fixtures show truthful billing/status and invalidate stale sessions.
-- [ ] 3.10 Add provider/account-scoped catalog pagination/cache/refresh/manual model ID/effort; verify default selection, expired cache, offline discovery, absent models, account changes and unknown capabilities without silent model replacement.
+- [x] 3.10 Add provider/account-scoped catalog pagination/cache/refresh/manual model ID/effort; verify default selection, expired cache, offline discovery, absent models, account changes and unknown capabilities without silent model replacement.
 - [ ] 3.11 Implement visible scoped Explore thread reuse, New conversation and presentation-only Clear; verify resume after changed project/account/model/security context is rejected and new conversation excludes late old deltas.
 
 ## 4. P4 — Settings and every workflow entry point (depends on P1–P3)

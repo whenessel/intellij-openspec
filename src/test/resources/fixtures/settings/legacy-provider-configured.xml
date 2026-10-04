@@ -1,0 +1,7 @@
+<component name="OpenSpecSettings">
+  <option name="aiProvider" value="GEMINI" />
+  <option name="aiModel" value="manual-gemini-model" />
+  <option name="preferredDeliveryMethod" value="DIRECT_API" />
+  <option name="cliPath" value="/tools/openspec" />
+  <option name="profile" value="core" />
+</component>

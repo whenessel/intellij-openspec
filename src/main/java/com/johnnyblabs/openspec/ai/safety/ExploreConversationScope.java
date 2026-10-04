@@ -12,9 +12,14 @@ public final class ExploreConversationScope {
 
     public static String key(String project, String executable, String model, String contextScope,
                              String reviewedPrompt, int budget) {
+        return key(project, executable, model, "", contextScope, reviewedPrompt, budget);
+    }
+
+    public static String key(String project, String executable, String model, String effort, String contextScope,
+                             String reviewedPrompt, int budget) {
         int topicStart = reviewedPrompt.lastIndexOf(TOPIC_SEPARATOR);
         String reviewedContext = topicStart < 0 ? reviewedPrompt : reviewedPrompt.substring(0, topicStart);
-        String[] parts = {"prompt-only-v1", project, executable, model, contextScope, reviewedContext, String.valueOf(budget)};
+        String[] parts = {"prompt-only-v1", project, executable, model, effort, contextScope, reviewedContext, String.valueOf(budget)};
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             for (String part : parts) {

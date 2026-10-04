@@ -92,10 +92,15 @@ public class OpenSpecSettingsPanel {
     private JComboBox<String> aiBackendCombo;
     private TextFieldWithBrowseButton codexExecutableField;
     private JComboBox<String> codexModelCombo;
+    private JComboBox<String> codexReasoningEffortCombo;
+    private List<ModelDescriptor> codexCatalog = List.of();
+    private final java.util.Map<String, String> restModelDrafts = new java.util.HashMap<>();
+    private String lastRestProvider;
     private JSpinner codexTimeoutSpinner;
     private JSpinner aiContextMaxBytesSpinner;
     private JBCheckBox codexApiBillingCheckbox;
     private JBLabel codexStatusLabel;
+    private JBLabel codexCatalogStatusLabel;
     private JButton codexRefreshButton;
     private JPanel restSettingsPanel;
     private JPanel codexSettingsPanel;
@@ -748,10 +753,15 @@ public class OpenSpecSettingsPanel {
         codexModelCombo = new JComboBox<>(new String[]{""});
         codexModelCombo.setEditable(true);
         codexModelCombo.setToolTipText("Blank uses the CLI default. Refresh the catalog or enter a model ID manually.");
+        codexReasoningEffortCombo = new JComboBox<>(new String[]{""});
+        codexReasoningEffortCombo.setEditable(true);
+        codexReasoningEffortCombo.setToolTipText("Blank uses the model/CLI default. Refresh models for supported effort values; manual overrides are validated before sending.");
+        codexModelCombo.addActionListener(e -> refreshReasoningEfforts());
         codexTimeoutSpinner = new JSpinner(new SpinnerNumberModel(180, 1, 3600, 10));
         aiContextMaxBytesSpinner = new JSpinner(new SpinnerNumberModel(262144, 1024, 16777216, 1024));
         codexApiBillingCheckbox = new JBCheckBox("Allow API billed Codex requests when the CLI reports API key auth");
         codexStatusLabel = new JBLabel("Auth: unknown — refresh status before use");
+        codexCatalogStatusLabel = new JBLabel("Model catalog: not refreshed");
         codexRefreshButton = new JButton("Refresh status and models (no inference)");
         codexRefreshButton.addActionListener(e -> refreshCodexStatus());
         JBLabel codexHelp = new JBLabel("<html>Codex owns login and refresh; use <code>codex login</code> in your terminal.<br>"
@@ -762,9 +772,11 @@ public class OpenSpecSettingsPanel {
                 .addComponent(codexHelp)
                 .addLabeledComponent(new JBLabel("Codex executable:"), codexExecutableField)
                 .addLabeledComponent(new JBLabel("Codex model override:"), codexModelCombo)
+                .addLabeledComponent(new JBLabel("Codex reasoning effort:"), codexReasoningEffortCombo)
                 .addLabeledComponent(new JBLabel("Codex timeout (seconds):"), codexTimeoutSpinner)
                 .addComponent(codexRefreshButton)
                 .addComponent(codexStatusLabel)
+                .addComponent(codexCatalogStatusLabel)
                 .addComponent(codexApiBillingCheckbox)
                 .getPanel();
         JPanel panel = FormBuilder.createFormBuilder()
@@ -795,7 +807,9 @@ public class OpenSpecSettingsPanel {
             protected CodexProbe doInBackground() throws Exception {
                 CodexAppServerBackend backend = new CodexAppServerBackend(executable);
                 BackendStatus status = backend.probe();
-                return new CodexProbe(status, status.available() ? backend.models() : List.of());
+                if (!status.available()) return new CodexProbe(status, List.of(), "Catalog unavailable until CLI compatibility and login are verified");
+                var catalog = backend.catalog(status, true);
+                return new CodexProbe(status, catalog.models(), (catalog.stale() ? "STALE — " : "") + catalog.detail());
             }
 
             @Override
@@ -810,12 +824,15 @@ public class OpenSpecSettingsPanel {
                 try {
                     CodexProbe result = get();
                     codexStatusLabel.setText(formatCodexStatus(result.status()));
+                    codexCatalogStatusLabel.setText("<html>Model catalog: " + escapeHtml(result.catalogDetail()) + "</html>");
                     codexStatusLabel.setForeground(result.status().available() ? JBColor.GRAY : JBColor.RED);
                     // Preserve the latest draft override, including text being edited during refresh.
                     String currentModel = getCodexModel();
+                    codexCatalog = result.models();
                     codexModelCombo.removeAllItems();
                     for (String id : catalogModelIds(result.models())) codexModelCombo.addItem(id);
                     codexModelCombo.setSelectedItem(currentModel);
+                    refreshReasoningEfforts();
                 } catch (Exception failure) {
                     codexStatusLabel.setText("Codex unavailable — check executable and run codex login; no REST fallback");
                     codexStatusLabel.setForeground(JBColor.RED);
@@ -844,7 +861,22 @@ public class OpenSpecSettingsPanel {
         return List.copyOf(ids);
     }
 
-    private record CodexProbe(BackendStatus status, List<ModelDescriptor> models) {}
+    private void refreshReasoningEfforts() {
+        if (codexReasoningEffortCombo == null) return;
+        String draft = getCodexReasoningEffort();
+        codexReasoningEffortCombo.removeAllItems();
+        codexReasoningEffortCombo.addItem("");
+        // The catalog owns supported values; no guessed static effort list.
+        for (ModelDescriptor model : codexCatalog) {
+            if (model.id().equals(getCodexModel()) || getCodexModel().isBlank() && model.isDefault()) {
+                for (String effort : model.supportedReasoningEfforts()) codexReasoningEffortCombo.addItem(effort);
+                break;
+            }
+        }
+        codexReasoningEffortCombo.setSelectedItem(draft);
+    }
+
+    private record CodexProbe(BackendStatus status, List<ModelDescriptor> models, String catalogDetail) {}
 
     public void dispose() {
         disposed = true;
@@ -903,10 +935,18 @@ public class OpenSpecSettingsPanel {
 
     private void onProviderChanged() {
         AiProvider provider = getSelectedProvider();
+        if (AiSettingsMigration.canonicalProvider(lastRestProvider) != null) restModelDrafts.put(lastRestProvider, getAiModel());
+        lastRestProvider = provider.name();
         aiModelCombo.removeAllItems();
         for (String model : provider.getModels()) {
             aiModelCombo.addItem(model);
         }
+        String rememberedModel = restModelDrafts.get(provider.name());
+        if (rememberedModel == null) {
+            OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
+            rememberedModel = settings == null ? "" : settings.getAiModel(provider.name());
+        }
+        if (rememberedModel != null && !rememberedModel.isBlank()) aiModelCombo.setSelectedItem(rememberedModel);
         boolean enabled = provider != AiProvider.NONE;
         apiKeyField.setEnabled(enabled);
         aiModelCombo.setEnabled(enabled);
@@ -1106,6 +1146,24 @@ public class OpenSpecSettingsPanel {
         return value == null ? "" : value.toString().trim();
     }
     public void setCodexModel(String model) { codexModelCombo.setSelectedItem(model == null ? "" : model); }
+    public void setAiProviderModels(java.util.Map<String, String> values) {
+        restModelDrafts.clear();
+        if (values != null) restModelDrafts.putAll(values);
+        lastRestProvider = null;
+    }
+    public java.util.Map<String, String> getAiProviderModels() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
+        if (settings != null) values.putAll(settings.getAiProviderModels());
+        values.putAll(restModelDrafts);
+        if (AiSettingsMigration.canonicalProvider(getAiProvider()) != null) values.put(getAiProvider(), getAiModel());
+        return java.util.Map.copyOf(values);
+    }
+    public String getCodexReasoningEffort() {
+        Object value = codexReasoningEffortCombo.getEditor().getItem();
+        return value == null ? "" : value.toString().trim();
+    }
+    public void setCodexReasoningEffort(String effort) { codexReasoningEffortCombo.setSelectedItem(effort == null ? "" : effort); }
     public int getCodexTimeoutSeconds() { return ((Number) codexTimeoutSpinner.getValue()).intValue(); }
     public void setCodexTimeoutSeconds(int timeout) { codexTimeoutSpinner.setValue(timeout > 0 ? timeout : 180); }
     public boolean isCodexApiBillingAcknowledged() { return codexApiBillingCheckbox.isSelected(); }
@@ -1122,7 +1180,7 @@ public class OpenSpecSettingsPanel {
     }
 
     public String getAiModel() {
-        Object selected = aiModelCombo.getSelectedItem();
+        Object selected = aiModelCombo.isEditable() ? aiModelCombo.getEditor().getItem() : aiModelCombo.getSelectedItem();
         return selected != null ? selected.toString() : "";
     }
 

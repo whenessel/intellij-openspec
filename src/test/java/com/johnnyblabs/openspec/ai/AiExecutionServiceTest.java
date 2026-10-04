@@ -6,6 +6,8 @@ import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.backend.BackendStatus;
 import com.johnnyblabs.openspec.ai.backend.AiResult;
 import com.johnnyblabs.openspec.ai.backend.CodexAppServerBackend;
+import com.johnnyblabs.openspec.ai.backend.ModelCatalogSnapshot;
+import com.johnnyblabs.openspec.ai.backend.ModelDescriptor;
 import com.johnnyblabs.openspec.ai.safety.ContextReviewService;
 import com.johnnyblabs.openspec.ai.safety.ReviewedContext;
 import com.johnnyblabs.openspec.settings.OpenSpecSettings;
@@ -124,6 +126,7 @@ class AiExecutionServiceTest {
         try (MockedStatic<ProgressManager> progress = platformProgress();
              MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
                  when(backend.probe()).thenReturn(new BackendStatus(true, "chatgpt", "Mock", "fixture"));
+                 catalog(backend);
                  when(backend.generate(any(), any(), any())).thenReturn(new AiResult("answer", "local-codex", "model"));
              })) {
             assertEquals("answer", execution.generateRaw("prompt"));
@@ -171,7 +174,51 @@ class AiExecutionServiceTest {
     }
 
     private static MockedConstruction<CodexAppServerBackend> localBackend(String auth) {
-        return mockConstruction(CodexAppServerBackend.class, (backend, construction) ->
-                when(backend.probe()).thenReturn(new BackendStatus(true, auth, "Mock account status", "fixture")));
+        return mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
+                when(backend.probe()).thenReturn(new BackendStatus(true, auth, "Mock account status", "fixture"));
+                catalog(backend);
+        });
+    }
+
+    private static void catalog(CodexAppServerBackend backend) throws AiApiException {
+        when(backend.catalog(any(), anyBoolean())).thenReturn(new ModelCatalogSnapshot(
+                java.util.List.of(new ModelDescriptor("fixture-model", "Fixture model", "Synthetic service mock", true)),
+                java.time.Instant.now(), false, true, "Synthetic service mock"));
+    }
+
+    @Test
+    void changedEffortDuringPreviewRequiresReviewAgainWithoutInference() throws Exception {
+        ReviewedContext context = mock(ReviewedContext.class);
+        when(review.review(anyString(), anyString(), anyInt())).thenAnswer(call -> {
+            settings.setCodexReasoningEffort("high");
+            return context;
+        });
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = localBackend("chatgpt")) {
+            AiApiException error = assertThrows(AiApiException.class, () -> execution.generateRaw("prompt"));
+            assertTrue(error.getMessage().contains("changed"));
+            verify(local.constructed().getFirst(), never()).generate(any(), any(), any());
+            verify(context).close();
+            verifyNoInteractions(rest);
+        }
+    }
+
+    @Test
+    void defaultModelIsPinnedToReviewedCatalogSelection() throws Exception {
+        ReviewedContext context = mock(ReviewedContext.class);
+        when(context.prompt()).thenReturn("reviewed prompt");
+        when(context.root()).thenReturn(java.nio.file.Path.of("/unused-reviewed-context"));
+        when(review.review(anyString(), anyString(), anyInt())).thenReturn(context);
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
+                 when(backend.probe()).thenReturn(new BackendStatus(true, "chatgpt", "Mock", "fixture"));
+                 catalog(backend);
+                 when(backend.generate(any(), any(), any())).thenReturn(new AiResult("answer", "local-codex", "fixture-model"));
+             })) {
+            assertEquals("answer", execution.generateRaw("prompt"));
+            verify(review).review(eq("prompt"), contains("fixture-model (account default)"), anyInt());
+            verify(local.constructed().getFirst()).generate(argThat(request -> "fixture-model".equals(request.model())), any(), any());
+            verifyNoInteractions(rest);
+        }
     }
 }

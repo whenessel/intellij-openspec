@@ -19,15 +19,17 @@ public final class RestAiBackend implements AiBackend {
     @Override public String id() { return "REST:" + provider.name(); }
     @Override public BackendCapabilities capabilities() { return new BackendCapabilities(false, true, false, false); }
     @Override public BackendStatus probe() {
-        return new BackendStatus(transport != null && transport.isConfigured(), "apikey", provider.getDisplayName() + " API billing", "HTTP");
+        return new BackendStatus(transport != null && transport.isConfigured(provider), "apikey", provider.getDisplayName() + " API billing", "HTTP");
     }
     @Override public List<ModelDescriptor> models() {
         return provider.getModels().stream().map(id -> new ModelDescriptor(id, id, "Built-in REST suggestion; manual override supported", id.equals(provider.getDefaultModel()))).toList();
     }
     @Override public AiResult generate(AiRequest request, CancellationToken cancellation, Consumer<String> onDelta) throws AiApiException {
+        capabilities().require(request.requiredCapabilities());
+        if (!request.reasoningEffort().isBlank()) throw new AiApiException("Reasoning effort selection is unsupported by the existing REST adapter");
         if (cancellation.isCancelled()) throw new AiApiException("AI request canceled");
-        if (transport == null || !transport.isConfigured()) throw new AiApiException("REST provider is not configured");
-        String text = transport.generateRaw(request.prompt(), cancellation::isCancelled);
+        if (transport == null || !transport.isConfigured(provider)) throw new AiApiException("REST provider is not configured");
+        String text = transport.generateRaw(request.prompt(), provider, selectedModel, cancellation::isCancelled);
         if (cancellation.isCancelled()) throw new AiApiException("AI request canceled");
         onDelta.accept(text);
         return new AiResult(text, id(), selectedModel);

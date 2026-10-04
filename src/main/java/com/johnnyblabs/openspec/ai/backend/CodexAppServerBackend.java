@@ -6,6 +6,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.time.Duration;
+import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.function.Consumer;
@@ -20,13 +21,15 @@ public final class CodexAppServerBackend implements AiBackend {
     private static final List<String> DISABLED_FEATURES = List.of("shell_tool", "view_image", "js_repl", "multi_agent", "multi_agent_v2", "apps", "plugins", "plugin_hooks", "browser_use", "computer_use", "memories", "remote_plugin", "tool_suggest", "request_permissions_tool", "agent_message_board");
     private final String executable;
     private final ProcessLauncher launcher;
+    private static final ModelCatalogCache SHARED_CATALOG = new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 16);
+    private final ModelCatalogCache catalogCache;
     private final Object conversationLock = new Object();
     private final AtomicBoolean conversationBusy = new AtomicBoolean();
     private Conversation conversation;
     private static final class Conversation {
         final String scopeKey;
         final Path root;
-        String threadId, model, accountFingerprint, authMode;
+        String threadId, model, accountFingerprint, authMode, effort;
         volatile boolean closed;
         boolean failed;
         volatile Session active;
@@ -41,6 +44,10 @@ public final class CodexAppServerBackend implements AiBackend {
         this(executable, (arguments, cwd) -> new ProcessBuilder(arguments).directory(cwd.toFile()).start());
     }
     public CodexAppServerBackend(String executable, ProcessLauncher launcher) {
+        this(executable, launcher, SHARED_CATALOG);
+    }
+    public CodexAppServerBackend(String executable, ProcessLauncher launcher, ModelCatalogCache catalogCache) {
+        this.catalogCache = Objects.requireNonNull(catalogCache);
         this.executable = executable == null || executable.isBlank() ? "codex" : executable.trim();
         this.launcher = Objects.requireNonNull(launcher);
     }
@@ -59,29 +66,76 @@ public final class CodexAppServerBackend implements AiBackend {
             return new BackendStatus(false, "unknown", e.getMessage(), "unknown");
         } finally { deleteRoot(root); }
     }
-    @Override public List<ModelDescriptor> models() throws AiApiException {
+    @Override public List<ModelDescriptor> models() throws AiApiException { return catalog(null, false).models(); }
+
+    /** Refreshes account status before using metadata; offline fallbacks remain explicitly stale. */
+    public ModelCatalogSnapshot catalog(BackendStatus reviewedStatus, boolean forceRefresh) throws AiApiException {
+        if (reviewedStatus != null && !SUPPORTED_VERSION.equals(reviewedStatus.version())) throw failure("Catalog status uses an unsupported or unknown Codex protocol version.");
         Path root = temporaryRoot();
+        ModelCatalogCache.Key key = reviewedStatus == null ? null : catalogKey(reviewedStatus.authMode(), reviewedStatus.accountFingerprint());
+        boolean accountVerified = false;
         try (Session session = open(root, Duration.ofSeconds(20), CancellationToken.NONE)) {
-            List<ModelDescriptor> result = new ArrayList<>();
-            String cursor = null;
-            for (int page = 0; page < 10; page++) {
-                JsonObject params = new JsonObject(); params.addProperty("limit", 100);
-                if (cursor != null) params.addProperty("cursor", cursor);
-                JsonObject response = session.rpc("model/list", params);
-                JsonArray data = array(response, "data");
-                for (JsonElement entry : data) {
-                    JsonObject model = entry.getAsJsonObject();
-                    result.add(new ModelDescriptor(string(model, "id"), string(model, "displayName"), optional(model, "description"), model.has("isDefault") && model.get("isDefault").getAsBoolean()));
-                }
-                cursor = optional(response, "nextCursor");
-                if (cursor == null) return List.copyOf(result);
+            AccountState account = session.account();
+            String mode = canonicalMode(account.mode());
+            if (reviewedStatus != null && (!mode.equals(reviewedStatus.authMode()) || !reviewedStatus.accountFingerprint().isBlank() && !reviewedStatus.accountFingerprint().equals(account.fingerprint()))) {
+                catalogCache.invalidateExecutable(executable);
+                throw failure("Codex catalog account changed after status review; refresh status and catalog.");
             }
-            throw failure("Codex model catalog exceeded the bounded pagination limit.");
-        } catch (RuntimeException e) { throw failure("Codex returned an incompatible model catalog."); }
-        finally { deleteRoot(root); }
+            key = catalogKey(mode, account.workspaceIdentityKnown() ? account.fingerprint() : "");
+            accountVerified = Set.of("chatgpt", "apikey").contains(mode);
+            if (!forceRefresh && accountVerified) {
+                var cached = catalogCache.fresh(key);
+                if (cached.isPresent()) return new ModelCatalogSnapshot(cached.get().models(), cached.get().fetchedAt(), false, true, "Cached model metadata within TTL; current account verified.");
+            }
+            ModelCatalogSnapshot fresh = new ModelCatalogSnapshot(readModels(session), catalogCache.clock().instant(), false, accountVerified,
+                    key.cacheable() ? "Fresh CLI model catalog." : "Fresh CLI model catalog; account identity unavailable, metadata is not cached.");
+            catalogCache.put(key, fresh);
+            return fresh;
+        } catch (AiApiException | RuntimeException failure) {
+            if (key != null) {
+                var cached = catalogCache.stale(key);
+                if (cached.isPresent()) return new ModelCatalogSnapshot(cached.get().models(), cached.get().fetchedAt(), true, accountVerified,
+                        accountVerified ? "Catalog refresh failed; cached suggestions only. Current account verified." : "Backend offline/unverified; cached suggestions only, execution selection is blocked.");
+            }
+            if (failure instanceof AiApiException api) throw api;
+            throw failure("Codex returned an incompatible model catalog.");
+        } finally { deleteRoot(root); }
+    }
+    private ModelCatalogCache.Key catalogKey(String mode, String fingerprint) { return new ModelCatalogCache.Key(executable, mode, fingerprint, SUPPORTED_VERSION); }
+    private static String canonicalMode(String mode) { return "apiKey".equals(mode) ? "apikey" : mode; }
+    private static List<ModelDescriptor> readModels(Session session) throws AiApiException {
+        List<ModelDescriptor> result = new ArrayList<>(); Set<String> seenCursors = new HashSet<>(); Set<String> ids = new HashSet<>();
+        String cursor = null;
+        for (int page = 0; page < 10; page++) {
+            JsonObject params = new JsonObject(); params.addProperty("limit", 100); if(cursor != null) params.addProperty("cursor", cursor);
+            JsonObject response = session.rpc("model/list", params);
+            for (JsonElement entry : array(response, "data")) {
+                JsonObject model = entry.getAsJsonObject(); String id = string(model, "id"), wire = string(model, "model");
+                if (id.isBlank() || wire.isBlank() || !ids.add(id)) throw failure("Codex returned duplicate or empty catalog identifiers.");
+                List<ReasoningEffortDescriptor> efforts = new ArrayList<>(); Set<String> effortIds = new HashSet<>();
+                for(JsonElement value : array(model, "supportedReasoningEfforts")) {
+                    JsonObject effort=value.getAsJsonObject(); String name=string(effort,"reasoningEffort");
+                    if(name.isBlank() || !effortIds.add(name)) throw failure("Codex returned duplicate or empty reasoning efforts.");
+                    efforts.add(new ReasoningEffortDescriptor(name,string(effort,"description")));
+                }
+                String defaultEffort = string(model, "defaultReasoningEffort");
+                if (!effortIds.contains(defaultEffort)) throw failure("Codex returned a default effort not supported by the selected model.");
+                CapabilitySupport text = CapabilitySupport.UNKNOWN;
+                if(model.has("inputModalities") && !model.get("inputModalities").isJsonNull()) {
+                    boolean supportsText=false; for(JsonElement modality:array(model,"inputModalities")) if("text".equals(modality.getAsString())) supportsText=true;
+                    text=supportsText ? CapabilitySupport.SUPPORTED : CapabilitySupport.UNSUPPORTED;
+                }
+                result.add(new ModelDescriptor(id,string(model,"displayName"),string(model,"description"),model.get("isDefault").getAsBoolean(),wire,efforts,defaultEffort,text));
+                if(result.size()>1000)throw failure("Codex model catalog exceeded its bounded size.");
+            }
+            cursor=optional(response,"nextCursor"); if(cursor==null)return List.copyOf(result);
+            if (!seenCursors.add(cursor)) throw failure("Codex returned a repeated catalog cursor.");
+        }
+        throw failure("Codex model catalog exceeded its bounded pagination limit.");
     }
     @Override public AiResult generate(AiRequest request, CancellationToken cancellation, Consumer<String> onDelta) throws AiApiException {
         Objects.requireNonNull(cancellation); Objects.requireNonNull(onDelta);
+        capabilities().require(request.requiredCapabilities());
         Path root = reviewedRoot(request);
         try (Session session = open(root, request.timeout(), cancellation)) {
             AccountState account = session.account();
@@ -95,13 +149,17 @@ public final class CodexAppServerBackend implements AiBackend {
     public AiResult generateConversation(AiRequest request, CancellationToken cancellation, Consumer<String> onDelta,
                                          String scopeKey, boolean newConversation) throws AiApiException {
         Objects.requireNonNull(scopeKey); Objects.requireNonNull(cancellation); Objects.requireNonNull(onDelta);
+        if (cancellation.isCancelled() || Thread.currentThread().isInterrupted()) throw failure("Codex conversation was cancelled before startup.");
         reviewedRoot(request);
+        capabilities().require(request.requiredCapabilities());
         if (!conversationBusy.compareAndSet(false, true)) throw failure("A Codex conversation turn is already running.");
         Conversation state = null;
+        boolean created = false;
         try {
             if (newConversation) closeConversation();
             synchronized (conversationLock) {
-                if (conversation == null) conversation = new Conversation(scopeKey, temporaryRoot());
+                if (cancellation.isCancelled() || Thread.currentThread().isInterrupted()) throw failure("Codex conversation was cancelled before startup.");
+                if (conversation == null) { conversation = new Conversation(scopeKey, temporaryRoot()); created = true; }
                 if (!conversation.scopeKey.equals(scopeKey)) throw failure("Conversation context/project/model/security scope changed; start a New conversation.");
                 if (conversation.failed) throw failure("Previous conversation turn failed or was cancelled; start a New conversation before continuing.");
                 state = conversation;
@@ -115,15 +173,16 @@ public final class CodexAppServerBackend implements AiBackend {
                 validateAccount(account, request); session.accountBaseline = account;
                 if (!"chatgpt".equals(account.mode()) || !account.workspaceIdentityKnown() || account.fingerprint().isBlank()) throw failure("Persistent Codex conversations require a CLI-reported ChatGPT account identity; this auth mode has no verifiable identity.");
                 if (current.threadId != null && (!account.mode().equals(current.authMode) || !account.fingerprint().equals(current.accountFingerprint))) throw failure("Codex conversation account changed; start a New conversation.");
+                if (current.threadId != null && !Objects.equals(current.effort, request.reasoningEffort())) throw failure("Conversation reasoning effort changed; start a New conversation.");
                 if (current.threadId != null && (request.model() == null || request.model().isBlank())) verifyDefaultModel(session, current.model);
                 JsonObject started = prepareThread(session, request, current.root, false, current.threadId, current.model);
                 current.threadId = session.threadId;
                 current.model = string(started, "model");
-                current.authMode = account.mode(); current.accountFingerprint = account.fingerprint();
+                current.authMode = account.mode(); current.accountFingerprint = account.fingerprint(); current.effort = request.reasoningEffort();
                 return runTurn(session, request, onDelta, current.model);
             } finally { current.active = null; }
-        } catch (AiApiException e) { if (state != null && state.threadId != null) state.failed = true; throw e; }
-        catch (RuntimeException e) { if (state != null && state.threadId != null) state.failed = true; throw failure("Codex returned an incompatible conversation protocol; no result was applied."); }
+        } catch (AiApiException e) { if (state != null) { state.failed = true; if (created) deleteRoot(state.root); } throw e; }
+        catch (RuntimeException e) { if (state != null) { state.failed = true; if (created) deleteRoot(state.root); } throw failure("Codex returned an incompatible conversation protocol; no result was applied."); }
         finally { conversationBusy.set(false); }
     }
     /** Explicit New conversation/disposal clears remembered history and stops any pending process. */
@@ -181,9 +240,15 @@ public final class CodexAppServerBackend implements AiBackend {
         return started;
     }
     private AiResult runTurn(Session session, AiRequest request, Consumer<String> onDelta, String model) throws AiApiException {
+            if (!request.reasoningEffort().isBlank()) {
+                ModelCatalogSnapshot fresh = new ModelCatalogSnapshot(readModels(session), catalogCache.clock().instant(), false, true, "Fresh turn capability negotiation.");
+                ModelSelection.Selection selected = ModelSelection.negotiate(fresh, model, request.reasoningEffort(), false);
+                if (!model.equals(selected.wireModel())) throw failure("Codex catalog model identifier changed before turn start.");
+            }
             JsonObject turnParams = new JsonObject(); turnParams.addProperty("threadId", session.threadId);
             JsonArray input = new JsonArray(); JsonObject text = new JsonObject(); text.addProperty("type", "text"); text.addProperty("text", request.prompt()); input.add(text); turnParams.add("input", input);
             if (request.outputSchema() != null) turnParams.add("outputSchema", request.outputSchema());
+            if (!request.reasoningEffort().isBlank()) turnParams.addProperty("effort", request.reasoningEffort());
             JsonObject turn = session.rpc("turn/start", turnParams);
             session.turnId = string(object(turn, "turn"), "id");
             int streamedCharacters = 0;
@@ -203,10 +268,11 @@ public final class CodexAppServerBackend implements AiBackend {
                 if ("turn/completed".equals(method)) {
                     JsonObject ended = object(params, "turn");
                     if (!session.turnId.equals(string(ended, "id"))) continue;
-                    if (!"completed".equals(string(ended, "status"))) throw failure("Codex turn failed or was interrupted; no result was applied.");
+                    if (!"completed".equals(string(ended, "status"))) { session.terminal.finish("interrupted".equals(string(ended, "status")) ? TurnTerminalState.Status.CANCELLED : TurnTerminalState.Status.FAILED, ""); throw failure("Codex turn failed or was interrupted; no result was applied."); }
                     session.check();
                     if (finalText == null || finalText.isBlank()) throw failure("Codex completed without a final assistant message.");
-                    return new AiResult(finalText, id(), model);
+                    session.terminal.finish(TurnTerminalState.Status.COMPLETED, finalText);
+                    return new AiResult(session.terminal.requireCompleted(), id(), model);
                 }
                 if (!session.turnId.equals(optional(params, "turnId"))) continue;
                 if ("item/agentMessage/delta".equals(method)) {
@@ -266,6 +332,7 @@ public final class CodexAppServerBackend implements AiBackend {
         private int sequence;
         private String threadId, turnId;
         private AccountState accountBaseline;
+        private final TurnTerminalState terminal = new TurnTerminalState();
         private volatile boolean closed, invalidStream;
         Session(Process process, Duration timeout, CancellationToken token) {
             this.process=process; this.token=token; this.deadline=System.nanoTime()+(timeout.compareTo(Duration.ofHours(1)) > 0 ? Duration.ofHours(1).toNanos() : timeout.toNanos());
@@ -358,13 +425,13 @@ public final class CodexAppServerBackend implements AiBackend {
             while(true) {
                 check();
                 try { Object event=incoming.poll(50,TimeUnit.MILLISECONDS);if(event instanceof JsonObject json)return json;if(event!=null)throw failure("Codex stream closed or violated the bounded JSON protocol."); }
-                catch(InterruptedException e) {Thread.currentThread().interrupt();throw failure("Codex operation cancelled.");}
+                catch(InterruptedException e) {terminal.finish(TurnTerminalState.Status.CANCELLED, "");Thread.currentThread().interrupt();throw failure("Codex operation cancelled.");}
             }
         }
         void check() throws AiApiException {
             if (invalidStream) throw failure("Codex stream violated the bounded JSON protocol; no result was applied.");
-            if(token.isCancelled()||Thread.currentThread().isInterrupted()) {interrupt();throw failure("Codex operation cancelled; no result was applied.");}
-            if(System.nanoTime()>=deadline) {interrupt();throw failure("Codex operation timed out; no result was applied.");}
+            if(token.isCancelled()||Thread.currentThread().isInterrupted()) {terminal.finish(TurnTerminalState.Status.CANCELLED, "");interrupt();throw failure("Codex operation cancelled; no result was applied.");}
+            if(System.nanoTime()>=deadline) {terminal.finish(TurnTerminalState.Status.TIMED_OUT, "");interrupt();throw failure("Codex operation timed out; no result was applied.");}
         }
         void interrupt() { if(threadId!=null&&turnId!=null)try {JsonObject params=new JsonObject();params.addProperty("threadId",threadId);params.addProperty("turnId",turnId);send(++sequence,"turn/interrupt",params);}catch(AiApiException ignored) {} }
         void send(Integer id,String method,JsonObject params) throws AiApiException {JsonObject value=new JsonObject();if(id!=null)value.addProperty("id",id);value.addProperty("method",method);if(params!=null)value.add("params",params);write(value);}
@@ -377,6 +444,7 @@ public final class CodexAppServerBackend implements AiBackend {
             });
             while (true) {
                 if (System.nanoTime() >= writeDeadline || (!interruption && (token.isCancelled() || Thread.currentThread().isInterrupted()))) {
+                    terminal.finish(System.nanoTime() >= writeDeadline ? TurnTerminalState.Status.TIMED_OUT : TurnTerminalState.Status.CANCELLED, "");
                     write.cancel(true); process.destroy();
                     throw failure("Codex input write cancelled or timed out; no result was applied.");
                 }
@@ -397,6 +465,7 @@ public final class CodexAppServerBackend implements AiBackend {
         }
         @Override public void close() {
             closed=true;
+            terminal.finish(TurnTerminalState.Status.FAILED, "");
             writes.shutdownNow();
             List<ProcessHandle> descendants = process.descendants().toList();
             descendants.forEach(ProcessHandle::destroy);

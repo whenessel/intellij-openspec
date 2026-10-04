@@ -75,6 +75,33 @@ class OpenSpecSettingsCodexTest {
     }
 
     @Test
+    void providerSwitchRestoresOnlyItsOwnManualModelAndKeepsRollbackFields() {
+        OpenSpecSettings.State legacy = new OpenSpecSettings.State();
+        legacy.aiProvider = "OPENAI";
+        legacy.aiModel = "legacy-openai";
+        legacy.preferredDeliveryMethod = "CLIPBOARD";
+        legacy.cliPath = "/tools/openspec";
+        OpenSpecSettings settings = new OpenSpecSettings();
+        settings.loadState(legacy);
+        assertEquals(1, settings.getState().aiSettingsVersion);
+        assertEquals("legacy-openai", settings.getAiModel());
+        assertEquals("", settings.getAiModel("GEMINI"));
+        settings.setAiProvider("GEMINI");
+        assertEquals("", settings.getAiModel());
+        settings.setAiModel("manual-gemini");
+        settings.setAiProvider("OPENAI");
+        assertEquals("legacy-openai", settings.getAiModel());
+        assertEquals("legacy-openai", settings.getState().aiModel);
+        assertEquals("manual-gemini", settings.getAiModel("GEMINI"));
+        assertEquals("CLIPBOARD", settings.getPreferredDeliveryMethod());
+        assertEquals("/tools/openspec", settings.getCliPath());
+        settings.setCodexReasoningEffort("medium");
+        assertEquals("medium", settings.getCodexReasoningEffort());
+        settings.setCodexReasoningEffort(null);
+        assertEquals("", settings.getCodexReasoningEffort());
+    }
+
+    @Test
     void billingAndUnknownAuthAreVisibleAndUntrustedDetailIsEscaped() {
         assertTrue(OpenSpecSettingsPanel.formatCodexStatus(new BackendStatus(true, "chatgpt", "Ready", "0.160.0"))
                 .contains("subscription; online inference and usage limits apply"));

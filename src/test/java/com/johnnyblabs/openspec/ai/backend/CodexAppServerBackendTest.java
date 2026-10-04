@@ -8,6 +8,9 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -36,6 +39,18 @@ class CodexAppServerBackendTest {
         List<ModelDescriptor> models=backend(catalog).models();
         JsonArray expected=captured(5).getAsJsonArray("data");
         assertEquals(expected.size(),models.size()); assertEquals(expected.get(0).getAsJsonObject().get("id").getAsString(),models.get(0).id());
+        for (int index=0; index<expected.size(); index++) {
+            JsonObject raw=expected.get(index).getAsJsonObject(); ModelDescriptor parsed=models.get(index);
+            assertEquals(raw.get("model").getAsString(),parsed.wireModel());
+            assertEquals(raw.get("defaultReasoningEffort").getAsString(),parsed.defaultReasoningEffort());
+            assertEquals(raw.getAsJsonArray("supportedReasoningEfforts").size(),parsed.reasoningEfforts().size());
+            for(int effort=0; effort<parsed.reasoningEfforts().size(); effort++) {
+                JsonObject option=raw.getAsJsonArray("supportedReasoningEfforts").get(effort).getAsJsonObject();
+                assertEquals(option.get("reasoningEffort").getAsString(),parsed.reasoningEfforts().get(effort).id());
+                assertEquals(option.get("description").getAsString(),parsed.reasoningEfforts().get(effort).description());
+            }
+            assertEquals(CapabilitySupport.SUPPORTED,parsed.textInput());
+        }
     }
     @Test void explicitApiBillingAndSubscriptionModeAreDistinguished() throws Exception {
         assertEquals("apikey",backend(new MockProcess(context,Mode.API_KEY)).probe().authMode());
@@ -186,6 +201,109 @@ class CodexAppServerBackendTest {
         assertEquals("final answer", backend(process).generate(request(), CancellationToken.NONE, ignored -> {}).text());
         assertEquals(2, process.accountReads); assertFalse(process.methods.contains("turn/interrupt")); assertTrue(process.destroyed.get());
     }
+    @Test void explicitAdvertisedEffortGoesToTurnStdinAndUnsupportedEffortCannotStartTurn() throws Exception {
+        JsonObject raw=captured(5).getAsJsonArray("data").get(0).getAsJsonObject();String wire=raw.get("model").getAsString();
+        String effort=raw.getAsJsonArray("supportedReasoningEfforts").get(0).getAsJsonObject().get("reasoningEffort").getAsString();
+        MockProcess process=new MockProcess(context,Mode.SUCCESS);
+        var request=new AiRequest("prompt",wire,context,Duration.ofSeconds(3),null,"chatgpt",null,effort);
+        assertEquals("final answer",backend(process).generate(request,CancellationToken.NONE,ignored->{}).text());
+        assertEquals(effort,process.turnParams.get("effort").getAsString());assertTrue(process.methods.contains("model/list"));
+        MockProcess unsupported=new MockProcess(context,Mode.SUCCESS);
+        assertThrows(AiApiException.class,()->backend(unsupported).generate(new AiRequest("prompt",wire,context,Duration.ofSeconds(3),null,"chatgpt",null,"quantum"),CancellationToken.NONE,ignored->{}));
+        assertTrue(unsupported.methods.contains("model/list"));assertFalse(unsupported.methods.contains("turn/start"));
+    }
+    @Test void resumedConversationRejectsChangedEffortBeforeResumeOrTurn() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,Mode.SUCCESS,Mode.SUCCESS);
+        String wire=captured(5).getAsJsonArray("data").get(0).getAsJsonObject().get("model").getAsString();
+        backend.generateConversation(new AiRequest("prompt",wire,context,Duration.ofSeconds(3),null,"chatgpt",null,"low"),CancellationToken.NONE,ignored->{},"scope",false);
+        assertThrows(AiApiException.class,()->backend.generateConversation(new AiRequest("prompt",wire,context,Duration.ofSeconds(3),null,"chatgpt",null,"high"),CancellationToken.NONE,ignored->{},"scope",false));
+        assertFalse(processes.get(1).methods.contains("thread/resume"));assertFalse(processes.get(1).methods.contains("turn/start"));backend.closeConversation();
+    }
+    @Test void requiredUnsupportedCapabilityRejectsBeforeLaunchingProcess() {
+        var backend=new CodexAppServerBackend("codex",(args,root)->{throw new AssertionError("unsupported capability launched process");});
+        assertThrows(AiApiException.class,()->backend.generate(new AiRequest("prompt",null,context,Duration.ofSeconds(1),null,null,null,"",Set.of(BackendCapability.WORKSPACE_WRITES)),CancellationToken.NONE,ignored->{}));
+    }
+    @Test void cancellationBeforeConversationStartupDoesNotCreateOrLaunchResources() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,Mode.SUCCESS);
+        assertThrows(AiApiException.class,()->backend.generateConversation(request(),()->true,ignored->{},"scope",false));assertTrue(processes.isEmpty());
+        backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false);assertEquals(1,processes.size());backend.closeConversation();
+    }
+    @Test void failedInitialConversationDeletesStableRootAndStillRequiresExplicitNew() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var backend=conversationBackend(processes,Mode.FAILED,Mode.SUCCESS);
+        assertThrows(AiApiException.class,()->backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false));
+        assertFalse(java.nio.file.Files.exists(processes.get(0).root));
+        assertThrows(AiApiException.class,()->backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",false));assertEquals(1,processes.size());
+        backend.generateConversation(request(),CancellationToken.NONE,ignored->{},"scope",true);backend.closeConversation();
+    }
+    @Test void duplicateTerminalNotificationsStillProduceOneAcceptedResult() throws Exception {
+        MockProcess process=new MockProcess(context,Mode.DUPLICATE_TERMINAL);List<String> delta=new ArrayList<>();
+        assertEquals("final answer",backend(process).generate(request(),CancellationToken.NONE,delta::add).text());assertEquals(List.of("final ","answer"),delta);assertTrue(process.destroyed.get());
+    }
+    @Test void catalogCacheReusesMetadataOnlyAfterFreshAccountCheckAndRefreshIsExplicit() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var cache=new ModelCatalogCache(Clock.fixed(Instant.EPOCH,ZoneOffset.UTC),Duration.ofMinutes(5),4);
+        var backend=catalogBackend(processes,cache,Mode.SUCCESS,Mode.SUCCESS,Mode.SUCCESS,Mode.CATALOG_ERROR,Mode.SUCCESS);
+        BackendStatus status=backend.probe();var first=backend.catalog(status,false);assertFalse(first.stale());assertTrue(first.accountVerified());
+        var cached=backend.catalog(status,false);assertEquals(first.fetchedAt(),cached.fetchedAt());assertFalse(processes.get(2).methods.contains("model/list"));assertTrue(processes.get(2).methods.contains("account/read"));
+        var unavailable=backend.catalog(status,true);assertTrue(unavailable.stale());assertTrue(unavailable.accountVerified());assertTrue(processes.get(3).methods.contains("model/list"));
+        assertThrows(AiApiException.class,()->ModelSelection.negotiate(unavailable,"","",false));
+        assertFalse(backend.catalog(status,true).stale());assertTrue(processes.get(4).methods.contains("model/list"));
+    }
+    @Test void paginatedCatalogPreservesAllCapturedModelsAndPassesCursor() throws Exception {
+        List<MockProcess> processes = new ArrayList<>();
+        var backend = catalogBackend(processes, new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2), Mode.PAGED_CATALOG);
+        var catalog = backend.catalog(null, true);
+        var capturedModels = captured(5).getAsJsonArray("data");
+        assertEquals(capturedModels.size(), catalog.models().size());
+        for (int i = 0; i < capturedModels.size(); i++) {
+            assertEquals(capturedModels.get(i).getAsJsonObject().get("model").getAsString(), catalog.models().get(i).wireModel());
+        }
+        assertEquals(2, Collections.frequency(processes.getFirst().methods, "model/list"));
+        assertFalse(processes.getFirst().methods.contains("turn/start"));
+    }
+    @Test void offlineCatalogIsScopedSuggestionOnlyAndCannotAuthorizeExecution() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var cache=new ModelCatalogCache(Clock.fixed(Instant.EPOCH,ZoneOffset.UTC),Duration.ofMinutes(5),4);
+        var backend=catalogBackend(processes,cache,Mode.SUCCESS,Mode.SUCCESS);BackendStatus status=backend.probe();backend.catalog(status,true);
+        var offline=new CodexAppServerBackend("codex",(args,root)->{throw new IOException("offline mock");},cache);
+        var suggestions=offline.catalog(status,false);assertTrue(suggestions.stale());assertFalse(suggestions.accountVerified());
+        assertThrows(AiApiException.class,()->ModelSelection.negotiate(suggestions,"manual","",false));
+        var otherAccount=new BackendStatus(true,"chatgpt","","0.160.0","","different-fingerprint");assertThrows(AiApiException.class,()->offline.catalog(otherAccount,false));
+    }
+    @Test void catalogWireNamesAndMissingModalityEvidenceMatchAuthoritativeMetadata() throws Exception {
+        List<MockProcess> aliasProcesses=new ArrayList<>();var aliasBackend=catalogBackend(aliasProcesses,new ModelCatalogCache(Clock.systemUTC(),Duration.ofMinutes(5),2),Mode.ID_WIRE);
+        var aliases=aliasBackend.catalog(null,true);var alias=aliases.models().get(0);assertEquals("catalog-alias",alias.id());assertNotEquals(alias.id(),alias.wireModel());
+        assertEquals(alias.wireModel(),ModelSelection.negotiate(aliases,alias.id(),"",false).wireModel());
+        List<MockProcess> unknownProcesses=new ArrayList<>();var unknownBackend=catalogBackend(unknownProcesses,new ModelCatalogCache(Clock.systemUTC(),Duration.ofMinutes(5),2),Mode.MISSING_MODALITY);
+        var unknown=unknownBackend.catalog(null,true);assertEquals(CapabilitySupport.UNKNOWN,unknown.models().get(0).textInput());
+        assertThrows(AiApiException.class,()->ModelSelection.negotiate(unknown,unknown.models().get(0).id(),"",true));
+    }
+    @Test void malformedCatalogIdsCursorsAndDefaultEffortFailClosedAfterModelResponse() throws Exception {
+        for(Mode mode:List.of(Mode.DUPLICATE_ID,Mode.DUPLICATE_CURSOR,Mode.INVALID_DEFAULT_EFFORT)) {
+            List<MockProcess> processes=new ArrayList<>();var backend=catalogBackend(processes,new ModelCatalogCache(Clock.systemUTC(),Duration.ofMinutes(5),2),mode);
+            assertThrows(AiApiException.class,()->backend.catalog(null,true));assertTrue(processes.get(0).methods.contains("model/list"));assertTrue(processes.get(0).destroyed.get());
+        }
+    }
+    @Test void catalogWithImageOnlyInputRejectsTextSelectionBeforeAnyTurn() throws Exception {
+        List<MockProcess> processes = new ArrayList<>();
+        var backend = catalogBackend(processes, new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2), Mode.IMAGE_ONLY_MODALITY);
+        var snapshot = backend.catalog(null, true);
+        var model = snapshot.models().get(0);
+        assertEquals(CapabilitySupport.UNSUPPORTED, model.textInput());
+        AiApiException error = assertThrows(AiApiException.class,
+                () -> ModelSelection.negotiate(snapshot, model.id(), "", false));
+        assertTrue(error.getMessage().contains("text input"));
+        assertTrue(processes.get(0).methods.contains("model/list"));
+        assertFalse(processes.get(0).methods.contains("turn/start"));
+    }
+    @Test void accountWithoutWorkspaceIdentityNeverReusesCachedMetadata() throws Exception {
+        List<MockProcess> processes=new ArrayList<>();var cache=new ModelCatalogCache(Clock.systemUTC(),Duration.ofMinutes(5),2);
+        var backend=catalogBackend(processes,cache,Mode.UNKNOWN_ACCOUNT_ID,Mode.UNKNOWN_ACCOUNT_ID);
+        var first=backend.catalog(null,false);var second=backend.catalog(null,false);
+        assertTrue(first.accountVerified());assertFalse(first.stale());assertTrue(second.accountVerified());
+        assertTrue(processes.get(0).methods.contains("model/list"));assertTrue(processes.get(1).methods.contains("model/list"));assertTrue(second.detail().contains("not cached"));
+    }
+    private CodexAppServerBackend catalogBackend(List<MockProcess> processes,ModelCatalogCache cache,Mode...modes) {
+        return new CodexAppServerBackend("codex",(args,root)->{MockProcess process=new MockProcess(root,modes[processes.size()]);processes.add(process);return process;},cache);
+    }
     @Test void generatedSchemasContainRequiredProtocolAndPermissionFields() throws Exception {
         for(String name:List.of("ThreadStartParams","ThreadStartResponse","TurnStartParams","TurnCompletedNotification","AgentMessageDeltaNotification","ItemCompletedNotification","GetAccountResponse","ModelListResponse","ThreadResumeParams","ThreadResumeResponse")) {
             try(InputStream stream=getClass().getResourceAsStream("/fixtures/codex/0.160.0/schema/"+name+".json")) {
@@ -196,7 +314,7 @@ class CodexAppServerBackendTest {
         }
     }
     private CodexAppServerBackend backend(MockProcess process) { return new CodexAppServerBackend("codex",(arguments,cwd)->{process.root=cwd;return process;}); }
-    private enum Mode {SIGNED_OUT, API_KEY, SUCCESS, FAILED, INTERRUPTED, NO_FINAL, APPROVAL, HANG, WRONG_VERSION, WINDOWS, BROAD_PROFILE, MCP_CONFIG, PLUGIN_CONFIG, MALFORMED, OVERSIZED, WRONG_ID, BLOCK_STDIN, EARLY_DELTA, BROAD_ENVIRONMENT, HANG_CHILD, OTHER_ACCOUNT, ROUTING_CHANGED, DEFAULT_CHANGED, ACCOUNT_UPDATED, SAME_ACCOUNT_UPDATED, CUSTOM_PROVIDER, CUSTOM_ENDPOINT}
+    private enum Mode {SIGNED_OUT, API_KEY, SUCCESS, FAILED, INTERRUPTED, NO_FINAL, APPROVAL, HANG, WRONG_VERSION, WINDOWS, BROAD_PROFILE, MCP_CONFIG, PLUGIN_CONFIG, MALFORMED, OVERSIZED, WRONG_ID, BLOCK_STDIN, EARLY_DELTA, BROAD_ENVIRONMENT, HANG_CHILD, OTHER_ACCOUNT, ROUTING_CHANGED, DEFAULT_CHANGED, ACCOUNT_UPDATED, SAME_ACCOUNT_UPDATED, CUSTOM_PROVIDER, CUSTOM_ENDPOINT, CATALOG_ERROR, PAGED_CATALOG, ID_WIRE, MISSING_MODALITY, IMAGE_ONLY_MODALITY, DUPLICATE_ID, DUPLICATE_CURSOR, INVALID_DEFAULT_EFFORT, DUPLICATE_TERMINAL, UNKNOWN_ACCOUNT_ID}
     /** Reactive mock uses real captured handshake/config/model shapes; turn events are deliberate adversarial fixtures. */
     private static final class MockProcess extends Process {
         private final PipedInputStream stdout=new PipedInputStream(1024*1024);
@@ -217,14 +335,32 @@ class CodexAppServerBackendTest {
             switch(method){
                 case "initialize" -> {result=captured(1);if(mode==Mode.WRONG_VERSION)result.addProperty("userAgent","openspec/9.0.0 bad");if(mode==Mode.WINDOWS)result.addProperty("platformOs","windows");}
                 case "config/read" -> {result=captured(3);JsonObject config=result.getAsJsonObject("config");JsonObject fs=config.getAsJsonObject("permissions").getAsJsonObject("openspec_reviewed").getAsJsonObject("filesystem");fs.remove("/reviewed/context");fs.addProperty(root.toString(),"read");if(mode==Mode.BROAD_PROFILE)fs.addProperty(":root","read");if(mode==Mode.MCP_CONFIG){JsonObject mcp=new JsonObject();mcp.add("server",new JsonObject());config.add("mcp_servers",mcp);}if(mode==Mode.CUSTOM_PROVIDER){JsonObject provider=new JsonObject();provider.addProperty("base_url","https://unreviewed.example.test");config.getAsJsonObject("model_providers").add("openai",provider);}if(mode==Mode.CUSTOM_ENDPOINT)config.addProperty("chatgpt_base_url","https://unreviewed.example.test");if(mode==Mode.PLUGIN_CONFIG){JsonObject plugin=new JsonObject();plugin.addProperty("enabled",true);config.getAsJsonObject("plugins").add("extra",plugin);}}
-                case "account/read" -> {accountReads++;result=captured(2);if(mode!=Mode.SIGNED_OUT){JsonObject account=new JsonObject();account.addProperty("type",mode==Mode.API_KEY?"apiKey":"chatgpt");account.addProperty("planType","plus");if(mode==Mode.API_KEY)account.add("email",JsonNull.INSTANCE);else account.addProperty("email",mode==Mode.OTHER_ACCOUNT?"other@example.test":"fixture@example.test");result.add("account",account);if(mode!=Mode.API_KEY){JsonObject routing=new JsonObject();routing.addProperty("chatgptAccountId",(mode==Mode.OTHER_ACCOUNT || mode==Mode.ACCOUNT_UPDATED && accountReads>1)?"other-account":"fixture-account");routing.addProperty("backendOrigin",mode==Mode.ROUTING_CHANGED?"https://another-route.example.test":"https://chatgpt.com");routing.addProperty("accountRoutingOverride","NO_CONSTRAINT");result.add("workspaceRouting",routing);}}}
-                case "model/list" -> {result=captured(5);if(mode==Mode.DEFAULT_CHANGED){for(JsonElement entry:result.getAsJsonArray("data")){JsonObject model=entry.getAsJsonObject();if(model.get("isDefault").getAsBoolean()){model.addProperty("id","changed-default");model.addProperty("model","changed-default");}}}}
+                case "account/read" -> {accountReads++;result=captured(2);if(mode!=Mode.SIGNED_OUT){JsonObject account=new JsonObject();account.addProperty("type",mode==Mode.API_KEY?"apiKey":"chatgpt");account.addProperty("planType","plus");if(mode==Mode.API_KEY)account.add("email",JsonNull.INSTANCE);else account.addProperty("email",mode==Mode.OTHER_ACCOUNT?"other@example.test":"fixture@example.test");result.add("account",account);if(mode!=Mode.API_KEY){JsonObject routing=new JsonObject();routing.addProperty("chatgptAccountId",(mode==Mode.OTHER_ACCOUNT || mode==Mode.ACCOUNT_UPDATED && accountReads>1)?"other-account":"fixture-account");routing.addProperty("backendOrigin",mode==Mode.ROUTING_CHANGED?"https://another-route.example.test":"https://chatgpt.com");routing.addProperty("accountRoutingOverride","NO_CONSTRAINT");if(mode!=Mode.UNKNOWN_ACCOUNT_ID)result.add("workspaceRouting",routing);}}}
+                case "model/list" -> {result=captured(5);
+                    if (mode == Mode.PAGED_CATALOG) {
+                        JsonArray all = result.getAsJsonArray("data"), page = new JsonArray();
+                        JsonObject params = req.getAsJsonObject("params");
+                        boolean second = params.has("cursor");
+                        if (second) assertEquals("captured-page-2", params.get("cursor").getAsString());
+                        int split = all.size() / 2;
+                        for (int i = second ? split : 0; i < (second ? all.size() : split); i++) page.add(all.get(i));
+                        result.add("data", page);
+                        if (second) result.add("nextCursor", JsonNull.INSTANCE);
+                        else result.addProperty("nextCursor", "captured-page-2");
+                    }
+                    if(mode==Mode.ID_WIRE)result.getAsJsonArray("data").get(0).getAsJsonObject().addProperty("id","catalog-alias");
+                    if(mode==Mode.MISSING_MODALITY)for(JsonElement entry:result.getAsJsonArray("data"))entry.getAsJsonObject().remove("inputModalities");
+                    if(mode==Mode.IMAGE_ONLY_MODALITY){JsonArray modalities=new JsonArray();modalities.add("image");result.getAsJsonArray("data").get(0).getAsJsonObject().add("inputModalities",modalities);}
+                    if(mode==Mode.DUPLICATE_ID)result.getAsJsonArray("data").add(result.getAsJsonArray("data").get(0).deepCopy());
+                    if(mode==Mode.DUPLICATE_CURSOR)result.addProperty("nextCursor","repeated-cursor");
+                    if(mode==Mode.INVALID_DEFAULT_EFFORT)result.getAsJsonArray("data").get(0).getAsJsonObject().addProperty("defaultReasoningEffort","quantum");if(mode==Mode.DEFAULT_CHANGED){for(JsonElement entry:result.getAsJsonArray("data")){JsonObject model=entry.getAsJsonObject();if(model.get("isDefault").getAsBoolean()){model.addProperty("id","changed-default");model.addProperty("model","changed-default");}}}}
                 case "thread/start", "thread/resume" -> {threadParams=req.getAsJsonObject("params").deepCopy();result=captured(4);result.getAsJsonObject("thread").addProperty("id","thread-test");result.addProperty("cwd",root.toString());if(threadParams.has("model"))result.add("model",threadParams.get("model"));if(method.equals("thread/resume"))result.getAsJsonObject("thread").add("id",threadParams.get("threadId"));if(mode==Mode.BROAD_ENVIRONMENT){JsonObject environment=new JsonObject();environment.addProperty("environmentId","local");result.getAsJsonObject("thread").getAsJsonArray("environments").add(environment);}}
                 case "turn/start" -> {turnParams=req.getAsJsonObject("params").deepCopy();JsonObject turn=new JsonObject();turn.addProperty("id","turn-test");turn.addProperty("status","inProgress");turn.add("items",new JsonArray());turn.add("error",JsonNull.INSTANCE);result.add("turn",turn);}
             }
             JsonObject response=new JsonObject();response.add("id",req.get("id"));response.add("result",result);
             if(mode==Mode.WRONG_ID&&method.equals("turn/start"))response.addProperty("id",999);
             if (mode == Mode.EARLY_DELTA && method.equals("turn/start")) {JsonObject early=params();early.addProperty("itemId","message-1");early.addProperty("delta","early ");event("item/agentMessage/delta",early);}
+            if(mode==Mode.CATALOG_ERROR&&method.equals("model/list")){response.remove("result");JsonObject error=new JsonObject();error.addProperty("code",-32000);error.addProperty("message","mock metadata unavailable");response.add("error",error);}
             emit(response);
             if(method.equals("turn/start"))turnEvents();
         }
@@ -237,7 +373,7 @@ class CodexAppServerBackendTest {
             JsonObject wrong=params();wrong.addProperty("turnId","other-turn");wrong.addProperty("itemId","ignored");wrong.addProperty("delta","WRONG");event("item/agentMessage/delta",wrong);
             for(String delta:List.of("final ","answer")){JsonObject p=params();p.addProperty("itemId","message-1");p.addProperty("delta",delta);event("item/agentMessage/delta",p);}
             if(mode!=Mode.NO_FINAL){JsonObject p=params(),item=new JsonObject();item.addProperty("type","agentMessage");item.addProperty("id","message-1");item.addProperty("text","final answer");item.addProperty("phase","final_answer");p.add("item",item);p.addProperty("completedAtMs",0);event("item/completed",p);}
-            JsonObject p=new JsonObject();p.addProperty("threadId","thread-test");JsonObject turn=new JsonObject();turn.addProperty("id","turn-test");turn.addProperty("status",mode==Mode.FAILED?"failed":mode==Mode.INTERRUPTED?"interrupted":"completed");turn.add("items",new JsonArray());turn.add("error",JsonNull.INSTANCE);p.add("turn",turn);event("turn/completed",p);
+            JsonObject p=new JsonObject();p.addProperty("threadId","thread-test");JsonObject turn=new JsonObject();turn.addProperty("id","turn-test");turn.addProperty("status",mode==Mode.FAILED?"failed":mode==Mode.INTERRUPTED?"interrupted":"completed");turn.add("items",new JsonArray());turn.add("error",JsonNull.INSTANCE);p.add("turn",turn);event("turn/completed",p);if(mode==Mode.DUPLICATE_TERMINAL)event("turn/completed",p);
         }
         private JsonObject params(){JsonObject p=new JsonObject();p.addProperty("threadId","thread-test");p.addProperty("turnId","turn-test");return p;}
         private void event(String method,JsonObject params)throws IOException {JsonObject e=new JsonObject();e.addProperty("method",method);e.add("params",params);emit(e);}
