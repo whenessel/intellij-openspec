@@ -106,7 +106,7 @@ public class OpenSpecSettingsPanel {
     private JPanel codexSettingsPanel;
     private JButton apiTestButton;
     private SwingWorker<CodexProbe, Void> codexProbeWorker;
-    private boolean disposed;
+    private volatile boolean disposed;
     private JComboBox<String> aiProviderCombo;
     private JPasswordField apiKeyField;
     private JComboBox<String> aiModelCombo;
@@ -750,6 +750,16 @@ public class OpenSpecSettingsPanel {
         codexExecutableField.addBrowseFolderListener(new TextBrowseFolderListener(
                 FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor(), project));
         codexExecutableField.setToolTipText("Installed native Codex executable or PATH command; no shell command or arguments. Windows .cmd wrappers are unsupported.");
+        codexExecutableField.getTextField().getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            private void changed() {
+                if (codexProbeWorker != null) codexProbeWorker.cancel(true);
+                if (codexRefreshButton != null) codexRefreshButton.setEnabled(!disposed);
+                if (codexStatusLabel != null) codexStatusLabel.setText("Executable changed — refresh status again");
+            }
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { changed(); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { changed(); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { changed(); }
+        });
         codexModelCombo = new JComboBox<>(new String[]{""});
         codexModelCombo.setEditable(true);
         codexModelCombo.setToolTipText("Blank uses the CLI default. Refresh the catalog or enter a model ID manually.");
@@ -798,6 +808,7 @@ public class OpenSpecSettingsPanel {
     }
 
     private void refreshCodexStatus() {
+        if (disposed) return;
         if (codexProbeWorker != null) codexProbeWorker.cancel(true);
         String executable = getCodexExecutable();
         codexStatusLabel.setText("Checking CLI account and model catalog...");
@@ -806,9 +817,12 @@ public class OpenSpecSettingsPanel {
             @Override
             protected CodexProbe doInBackground() throws Exception {
                 CodexAppServerBackend backend = new CodexAppServerBackend(executable);
-                BackendStatus status = backend.probe();
+                com.johnnyblabs.openspec.ai.backend.CancellationToken token = () -> isCancelled() || disposed;
+                BackendStatus status = backend.probe(token);
+                if (token.isCancelled()) throw new java.util.concurrent.CancellationException();
                 if (!status.available()) return new CodexProbe(status, List.of(), "Catalog unavailable until CLI compatibility and login are verified");
-                var catalog = backend.catalog(status, true);
+                var catalog = backend.catalog(status, true, token);
+                if (token.isCancelled()) throw new java.util.concurrent.CancellationException();
                 return new CodexProbe(status, catalog.models(), (catalog.stale() ? "STALE — " : "") + catalog.detail());
             }
 

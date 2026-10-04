@@ -301,6 +301,139 @@ class CodexAppServerBackendTest {
         assertTrue(first.accountVerified());assertFalse(first.stale());assertTrue(second.accountVerified());
         assertTrue(processes.get(0).methods.contains("model/list"));assertTrue(processes.get(1).methods.contains("model/list"));assertTrue(second.detail().contains("not cached"));
     }
+    @Test void cancelledProbeAndCatalogDoNotAllocateOrLaunchBeforeStartup() {
+        var backend = new CodexAppServerBackend("codex", (args, root) -> { throw new AssertionError("cancelled operation launched"); });
+        assertThrows(AiOperationCancelledException.class, () -> backend.probe(() -> true));
+        assertThrows(AiOperationCancelledException.class, () -> backend.catalog(null, true, () -> true));
+    }
+    @Test void cancellationInterruptsEveryProbeAndCatalogReadStageIncludingBlockedStdin() throws Exception {
+        for (String method : List.of("initialize", "account/read", "account/rateLimits/read", "model/list", "blocked-stdin")) {
+            AtomicBoolean cancelled = new AtomicBoolean();
+            CountDownLatch reached = new CountDownLatch(1);
+            MockProcess process = new MockProcess(context, method.equals("blocked-stdin") ? Mode.BLOCK_STDIN : Mode.SUCCESS);
+            process.childBeforeParentExit = method.equals("blocked-stdin");
+            process.hangMethod = method;
+            process.requestReached = reached;
+            if (method.equals("blocked-stdin")) process.onBlockedWrite = reached::countDown;
+            var backend = new CodexAppServerBackend("codex", (args, root) -> { process.root = root; return process; });
+            ExecutorService worker = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> result = worker.submit(() -> assertThrows(AiOperationCancelledException.class, () -> {
+                    if (method.equals("model/list")) backend.catalog(null, true, cancelled::get);
+                    else backend.probe(cancelled::get);
+                }));
+                assertTrue(reached.await(2, TimeUnit.SECONDS), method);
+                cancelled.set(true);
+                result.get(2, TimeUnit.SECONDS);
+                assertTrue(process.destroyed.get(), method);
+                if (process.childBeforeParentExit) assertTrue(process.childForced.get(), "Capture descendants before terminating the parent");
+                assertFalse(java.nio.file.Files.exists(process.root), method);
+            } finally { cancelled.set(true); worker.shutdownNow(); }
+        }
+    }
+    @Test void interruptedDiscoveryWithBlockedStdinCleansOwnedChildAndPreservesInterrupt() throws Exception {
+        MockProcess process = new MockProcess(context, Mode.BLOCK_STDIN);
+        process.childBeforeParentExit = true;
+        CountDownLatch writing = new CountDownLatch(1);
+        process.onBlockedWrite = writing::countDown;
+        CompletableFuture<Boolean> outcome = new CompletableFuture<>();
+        Thread caller = new Thread(() -> {
+            try {
+                backend(process).probe(CancellationToken.NONE);
+                outcome.completeExceptionally(new AssertionError("Interrupted probe returned success"));
+            } catch (AiOperationCancelledException cancelled) {
+                outcome.complete(Thread.currentThread().isInterrupted());
+            } catch (Throwable error) { outcome.completeExceptionally(error); }
+        }, "mock-probe-interrupt");
+        caller.start();
+        try {
+            assertTrue(writing.await(2, TimeUnit.SECONDS));
+            caller.interrupt();
+            assertTrue(outcome.get(2, TimeUnit.SECONDS), "Cancellation must preserve the caller's interrupt");
+            assertTrue(process.destroyed.get());
+            assertTrue(process.childForced.get());
+            assertFalse(java.nio.file.Files.exists(process.root));
+        } finally {
+            caller.interrupt(); caller.join(2000);
+            assertFalse(caller.isAlive());
+        }
+    }
+    @Test void cancelledLateValidRepliesAndCachePublicationCannotSucceed() throws Exception {
+        for (String method : List.of("account/read", "account/rateLimits/read", "model/list")) {
+            AtomicBoolean cancelled = new AtomicBoolean();
+            MockProcess process = new MockProcess(context, Mode.SUCCESS);
+            process.onRequest = name -> { if (name.equals(method)) cancelled.set(true); };
+            var backend = backend(process);
+            assertThrows(AiOperationCancelledException.class, () -> {
+                if (method.equals("model/list")) backend.catalog(null, true, cancelled::get);
+                else backend.probe(cancelled::get);
+            });
+            assertTrue(process.methods.contains(method)); assertTrue(process.destroyed.get());
+        }
+        AtomicBoolean cancelled = new AtomicBoolean();
+        Clock cancelAtPublication = new Clock() {
+            public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+            public Clock withZone(java.time.ZoneId zone) { return this; }
+            public Instant instant() { cancelled.set(true); return Instant.EPOCH; }
+        };
+        var cache = new ModelCatalogCache(cancelAtPublication, Duration.ofMinutes(5), 2);
+        List<MockProcess> processes = new ArrayList<>();
+        var backend = catalogBackend(processes, cache, Mode.SUCCESS);
+        assertThrows(AiOperationCancelledException.class, () -> backend.catalog(null, true, cancelled::get));
+        var offline = new CodexAppServerBackend("codex", (args, root) -> { throw new IOException("offline"); }, cache);
+        cancelled.set(false);
+        BackendStatus status = backend(new MockProcess(context, Mode.SUCCESS)).probe();
+        assertThrows(AiApiException.class, () -> offline.catalog(status, false));
+    }
+    @Test void cancellationCannotBecomeCachedOrOfflineFallbackAndLaunchRaceCleansUp() throws Exception {
+        var cache = new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2);
+        List<MockProcess> processes = new ArrayList<>();
+        var backend = catalogBackend(processes, cache, Mode.SUCCESS, Mode.SUCCESS);
+        BackendStatus status = backend.probe(); backend.catalog(status, true);
+        AtomicBoolean cancelled = new AtomicBoolean();
+        MockProcess cached = new MockProcess(context, Mode.SUCCESS);
+        cached.onRequest = method -> { if (method.equals("account/read")) cancelled.set(true); };
+        var cachedBackend = new CodexAppServerBackend("codex", (args, root) -> { cached.root = root; return cached; }, cache);
+        assertThrows(AiOperationCancelledException.class, () -> cachedBackend.catalog(status, false, cancelled::get));
+        cancelled.set(false);
+        var offline = new CodexAppServerBackend("codex", (args, root) -> { cancelled.set(true); throw new IOException("offline"); }, cache);
+        assertThrows(AiOperationCancelledException.class, () -> offline.catalog(status, false, cancelled::get));
+        cancelled.set(false);
+        MockProcess started = new MockProcess(context, Mode.SUCCESS);
+        var launchRace = new CodexAppServerBackend("codex", (args, root) -> { started.root = root; cancelled.set(true); return started; });
+        assertThrows(AiOperationCancelledException.class, () -> launchRace.probe(cancelled::get));
+        assertTrue(started.destroyed.get()); assertTrue(started.methods.isEmpty()); assertFalse(java.nio.file.Files.exists(started.root));
+    }
+    @Test void cancellationDuringCleanupRejectsLateSuccessAndRetractsCachePublication() throws Exception {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        MockProcess probe = new MockProcess(context, Mode.SUCCESS);
+        probe.onDestroy = () -> cancelled.set(true);
+        assertThrows(AiOperationCancelledException.class, () -> backend(probe).probe(cancelled::get));
+        cancelled.set(false);
+        var cache = new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2);
+        MockProcess catalog = new MockProcess(context, Mode.SUCCESS);
+        catalog.onDestroy = () -> cancelled.set(true);
+        var backend = new CodexAppServerBackend("codex", (args, root) -> { catalog.root = root; return catalog; }, cache);
+        assertThrows(AiOperationCancelledException.class, () -> backend.catalog(null, true, cancelled::get));
+        cancelled.set(false);
+        BackendStatus status = backend(new MockProcess(context, Mode.SUCCESS)).probe();
+        var offline = new CodexAppServerBackend("codex", (args, root) -> { throw new IOException("offline"); }, cache);
+        assertThrows(AiApiException.class, () -> offline.catalog(status, false));
+    }
+    @Test void cancellationOnSecondCatalogPageRejectsLateValidPageWithoutCaching() throws Exception {
+        AtomicBoolean cancelled = new AtomicBoolean();
+        java.util.concurrent.atomic.AtomicInteger pages = new java.util.concurrent.atomic.AtomicInteger();
+        MockProcess process = new MockProcess(context, Mode.PAGED_CATALOG);
+        process.onRequest = method -> { if (method.equals("model/list") && pages.incrementAndGet() == 2) cancelled.set(true); };
+        var cache = new ModelCatalogCache(Clock.systemUTC(), Duration.ofMinutes(5), 2);
+        var backend = new CodexAppServerBackend("codex", (args, root) -> { process.root = root; return process; }, cache);
+        assertThrows(AiOperationCancelledException.class, () -> backend.catalog(null, true, cancelled::get));
+        assertEquals(2, pages.get()); assertTrue(process.destroyed.get());
+        cancelled.set(false);
+        BackendStatus status = backend(new MockProcess(context, Mode.SUCCESS)).probe();
+        var offline = new CodexAppServerBackend("codex", (args, root) -> { throw new IOException("offline"); }, cache);
+        assertThrows(AiApiException.class, () -> offline.catalog(status, false));
+    }
     private CodexAppServerBackend catalogBackend(List<MockProcess> processes,ModelCatalogCache cache,Mode...modes) {
         return new CodexAppServerBackend("codex",(args,root)->{MockProcess process=new MockProcess(root,modes[processes.size()]);processes.add(process);return process;},cache);
     }
@@ -322,14 +455,20 @@ class CodexAppServerBackendTest {
         private final ByteArrayOutputStream stdin=new ByteArrayOutputStream();
         final List<String> methods=new CopyOnWriteArrayList<>();
         final AtomicBoolean destroyed=new AtomicBoolean(),deniedRequest=new AtomicBoolean(),childForced=new AtomicBoolean();
+        Runnable onDestroy = () -> {};
+        Runnable onBlockedWrite = () -> {};
+        boolean childBeforeParentExit;
+        String hangMethod; CountDownLatch requestReached; java.util.function.Consumer<String> onRequest = ignored -> {};
         private final Mode mode; private int accountReads; Path root; JsonObject threadParams,turnParams;
         MockProcess(Path root,Mode mode) throws IOException {this.root=root;this.mode=mode;server=new PipedOutputStream(stdout);}
         @Override public OutputStream getOutputStream(){return new OutputStream(){
-            @Override public void write(int b)throws IOException {if(mode==Mode.BLOCK_STDIN){while(!destroyed.get())try{Thread.sleep(5);}catch(InterruptedException ignored){}throw new IOException("closed");}synchronized(stdin){if(b=='\n'){String line=stdin.toString(StandardCharsets.UTF_8);stdin.reset();respond(JsonParser.parseString(line).getAsJsonObject());}else stdin.write(b);}}
+            @Override public void write(int b)throws IOException {if(mode==Mode.BLOCK_STDIN){onBlockedWrite.run();while(!destroyed.get())try{Thread.sleep(5);}catch(InterruptedException ignored){}throw new IOException("closed");}synchronized(stdin){if(b=='\n'){String line=stdin.toString(StandardCharsets.UTF_8);stdin.reset();respond(JsonParser.parseString(line).getAsJsonObject());}else stdin.write(b);}}
         };}
         private void respond(JsonObject req)throws IOException {
             if(!req.has("method")){deniedRequest.set(req.has("error"));return;}
             String method=req.get("method").getAsString();methods.add(method);
+            if (method.equals(hangMethod)) { requestReached.countDown(); return; }
+            onRequest.accept(method);
             if(!req.has("id"))return;
             JsonObject result=new JsonObject();
             switch(method){
@@ -383,11 +522,11 @@ class CodexAppServerBackendTest {
         @Override public int waitFor(){return 0;}
         @Override public boolean waitFor(long timeout,TimeUnit unit){return destroyed.get();}
         @Override public int exitValue(){if(!destroyed.get())throw new IllegalThreadStateException();return 0;}
-        @Override public void destroy(){destroyed.set(true);try{server.close();}catch(IOException ignored){}}
+        @Override public void destroy(){destroyed.set(true);onDestroy.run();try{server.close();}catch(IOException ignored){}}
         @Override public Process destroyForcibly(){destroy();return this;}
         @Override public boolean isAlive(){return !destroyed.get();}
         @Override public java.util.stream.Stream<ProcessHandle> descendants(){
-            if(mode!=Mode.HANG_CHILD)return java.util.stream.Stream.empty();
+            if (childBeforeParentExit && destroyed.get() || !childBeforeParentExit && mode != Mode.HANG_CHILD) return java.util.stream.Stream.empty();
             ProcessHandle child=(ProcessHandle)java.lang.reflect.Proxy.newProxyInstance(ProcessHandle.class.getClassLoader(),new Class<?>[]{ProcessHandle.class},(proxy,method,args)->switch(method.getName()) {
                 case "destroy" -> false;
                 case "destroyForcibly" -> {childForced.set(true);yield true;}

@@ -77,13 +77,15 @@ public final class AiExecutionService implements Disposable {
 
     public void refreshStatus() {
         if (disposed || ApplicationManager.getApplication() == null || !probing.compareAndSet(false, true)) return;
-        String executable = OpenSpecSettings.getInstance(project).getCodexExecutable();
+        OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
+        String executable = settings.getCodexExecutable();
+        CancellationToken token = () -> disposed || !executable.equals(settings.getCodexExecutable());
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             try {
-                BackendStatus status = new CodexAppServerBackend(executable).probe();
-                if (!disposed) { codexStatus = status; statusExecutable = executable; }
+                BackendStatus status = new CodexAppServerBackend(executable).probe(token);
+                if (!token.isCancelled()) { codexStatus = status; statusExecutable = executable; }
             } catch (AiApiException ex) {
-                if (!disposed) {
+                if (!(ex instanceof AiOperationCancelledException) && !token.isCancelled()) {
                     codexStatus = new BackendStatus(false, "unknown", ex.getMessage(), "");
                     statusExecutable = executable;
                 }
@@ -156,6 +158,8 @@ public final class AiExecutionService implements Disposable {
     private String execute(String prompt, JsonObject outputSchema, Consumer<String> onDelta, AtomicBoolean canceled,
                            String contextScope, long conversationEpoch) throws AiApiException {
         ProgressIndicator indicator = ProgressManager.getInstance().getProgressIndicator();
+        CancellationToken token = () -> canceled.get() || disposed || indicator != null && indicator.isCanceled()
+                || contextScope != null && conversationEpoch != exploreEpoch.get();
         try {
             OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
             String backend = settings.getAiBackend();
@@ -172,7 +176,10 @@ public final class AiExecutionService implements Disposable {
             ModelSelection.Selection selection = null;
             if ("LOCAL_CODEX".equals(backend)) {
                 local = new CodexAppServerBackend(executable);
-                executionStatus = local.probe();
+                CancellationToken discoveryToken = () -> token.isCancelled()
+                        || !executable.equals(settings.getCodexExecutable()) || !backend.equals(settings.getAiBackend());
+                executionStatus = local.probe(discoveryToken);
+                if (discoveryToken.isCancelled()) throw new ProcessCanceledException();
                 codexStatus = executionStatus;
                 statusExecutable = executable;
                 if (!executionStatus.available()) throw new AiApiException(executionStatus.detail());
@@ -182,7 +189,8 @@ public final class AiExecutionService implements Disposable {
                 if (!"chatgpt".equals(executionStatus.authMode()) && !"apikey".equals(executionStatus.authMode())) {
                     throw new AiApiException("Codex authentication mode is unknown or unsupported; check CLI login.");
                 }
-                selection = ModelSelection.negotiate(local.catalog(executionStatus, false), codexModel, codexEffort, false);
+                selection = ModelSelection.negotiate(local.catalog(executionStatus, false, discoveryToken), codexModel, codexEffort, false);
+                if (discoveryToken.isCancelled()) throw new ProcessCanceledException();
             }
             String expectedAuth = executionStatus == null ? "apikey" : executionStatus.authMode();
             String expectedAccount = executionStatus == null ? null : executionStatus.accountFingerprint();
@@ -209,8 +217,6 @@ public final class AiExecutionService implements Disposable {
                             : Set.of(BackendCapability.CANCELLATION, BackendCapability.STRUCTURED_OUTPUT);
                     AiRequest request = new AiRequest(context.prompt(), selection.wireModel(), context.root(),
                             Duration.ofSeconds(timeout), outputSchema, expectedAuth, expectedAccount, selection.effort(), required);
-                    CancellationToken token = () -> canceled.get() || disposed || indicator != null && indicator.isCanceled()
-                            || contextScope != null && conversationEpoch != exploreEpoch.get();
                     AiResult response;
                     if (contextScope != null) {
                         CodexAppServerBackend conversation;
@@ -241,7 +247,7 @@ public final class AiExecutionService implements Disposable {
                 return result;
             } catch (IOException ex) { throw new AiApiException("Context review failed: " + ex.getMessage(), ex); }
         } catch (AiApiException ex) {
-            if (canceled.get() || disposed || Thread.currentThread().isInterrupted()
+            if (ex instanceof AiOperationCancelledException || canceled.get() || disposed || Thread.currentThread().isInterrupted()
                     || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
             throw ex;
         }

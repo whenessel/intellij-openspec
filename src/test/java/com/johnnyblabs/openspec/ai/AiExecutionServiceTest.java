@@ -8,6 +8,8 @@ import com.johnnyblabs.openspec.ai.backend.AiResult;
 import com.johnnyblabs.openspec.ai.backend.CodexAppServerBackend;
 import com.johnnyblabs.openspec.ai.backend.ModelCatalogSnapshot;
 import com.johnnyblabs.openspec.ai.backend.ModelDescriptor;
+import com.johnnyblabs.openspec.ai.backend.CancellationToken;
+import com.johnnyblabs.openspec.ai.backend.AiOperationCancelledException;
 import com.johnnyblabs.openspec.ai.safety.ContextReviewService;
 import com.johnnyblabs.openspec.ai.safety.ReviewedContext;
 import com.johnnyblabs.openspec.settings.OpenSpecSettings;
@@ -49,7 +51,7 @@ class AiExecutionServiceTest {
             AiApiException error = assertThrows(AiApiException.class, () -> execution.generateRaw("private prompt"));
             assertTrue(error.getMessage().contains("API billing"));
             assertEquals(1, local.constructed().size());
-            verify(local.constructed().getFirst()).probe();
+            verify(local.constructed().getFirst()).probe(any());
             verify(local.constructed().getFirst(), never()).generate(any(), any(), any());
             verifyNoInteractions(review, rest);
         }
@@ -125,7 +127,7 @@ class AiExecutionServiceTest {
         });
         try (MockedStatic<ProgressManager> progress = platformProgress();
              MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
-                 when(backend.probe()).thenReturn(new BackendStatus(true, "chatgpt", "Mock", "fixture"));
+                 when(backend.probe(any())).thenReturn(new BackendStatus(true, "chatgpt", "Mock", "fixture"));
                  catalog(backend);
                  when(backend.generate(any(), any(), any())).thenReturn(new AiResult("answer", "local-codex", "model"));
              })) {
@@ -175,13 +177,13 @@ class AiExecutionServiceTest {
 
     private static MockedConstruction<CodexAppServerBackend> localBackend(String auth) {
         return mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
-                when(backend.probe()).thenReturn(new BackendStatus(true, auth, "Mock account status", "fixture"));
+                when(backend.probe(any())).thenReturn(new BackendStatus(true, auth, "Mock account status", "fixture"));
                 catalog(backend);
         });
     }
 
     private static void catalog(CodexAppServerBackend backend) throws AiApiException {
-        when(backend.catalog(any(), anyBoolean())).thenReturn(new ModelCatalogSnapshot(
+        when(backend.catalog(any(), anyBoolean(), any())).thenReturn(new ModelCatalogSnapshot(
                 java.util.List.of(new ModelDescriptor("fixture-model", "Fixture model", "Synthetic service mock", true)),
                 java.time.Instant.now(), false, true, "Synthetic service mock"));
     }
@@ -211,7 +213,7 @@ class AiExecutionServiceTest {
         when(review.review(anyString(), anyString(), anyInt())).thenReturn(context);
         try (MockedStatic<ProgressManager> progress = platformProgress();
              MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
-                 when(backend.probe()).thenReturn(new BackendStatus(true, "chatgpt", "Mock", "fixture"));
+                 when(backend.probe(any())).thenReturn(new BackendStatus(true, "chatgpt", "Mock", "fixture"));
                  catalog(backend);
                  when(backend.generate(any(), any(), any())).thenReturn(new AiResult("answer", "local-codex", "fixture-model"));
              })) {
@@ -221,4 +223,47 @@ class AiExecutionServiceTest {
             verifyNoInteractions(rest);
         }
     }
+    @Test
+    void stopDuringProbeOrCatalogPreventsReviewAndInference() throws Exception {
+        for (boolean cancelProbe : new boolean[]{true, false}) {
+            try (MockedStatic<ProgressManager> progress = platformProgress();
+                 MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
+                     when(backend.probe(any())).thenAnswer(call -> {
+                         if (cancelProbe) {
+                             execution.cancelActive();
+                             assertTrue(((CancellationToken) call.getArgument(0)).isCancelled());
+                             throw new AiOperationCancelledException();
+                         }
+                         return new BackendStatus(true, "chatgpt", "Mock", "fixture");
+                     });
+                     when(backend.catalog(any(), anyBoolean(), any())).thenAnswer(call -> {
+                         execution.cancelActive();
+                         assertTrue(((CancellationToken) call.getArgument(2)).isCancelled());
+                         throw new AiOperationCancelledException();
+                     });
+                 })) {
+                assertThrows(ProcessCanceledException.class, () -> execution.generateRaw("prompt"));
+                verify(local.constructed().getFirst(), never()).generate(any(), any(), any());
+                verifyNoInteractions(review, rest);
+            }
+        }
+    }
+
+    @Test
+    void executableChangeDuringDiscoveryCancelsBeforeReview() throws Exception {
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class, (backend, construction) -> {
+                 when(backend.probe(any())).thenAnswer(call -> {
+                     settings.setCodexExecutable("/different/mock-codex");
+                     assertTrue(((CancellationToken) call.getArgument(0)).isCancelled());
+                     throw new AiOperationCancelledException();
+                 });
+             })) {
+            assertThrows(ProcessCanceledException.class, () -> execution.generateRaw("prompt"));
+            verify(local.constructed().getFirst(), never()).catalog(any(), anyBoolean(), any());
+            verify(local.constructed().getFirst(), never()).generate(any(), any(), any());
+            verifyNoInteractions(review, rest);
+        }
+    }
+
 }
