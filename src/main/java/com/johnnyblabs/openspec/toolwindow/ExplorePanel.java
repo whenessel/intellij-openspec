@@ -35,6 +35,15 @@ public class ExplorePanel extends JPanel implements Disposable {
     private final JButton sendButton;
     private final JButton copyButton;
     private final JButton clearButton;
+    private final JButton newConversationButton;
+    private final java.util.concurrent.atomic.AtomicLong requestEpoch = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicReference<com.intellij.openapi.progress.ProgressIndicator> runIndicator =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    private final JButton cancelButton;
+    private final StringBuilder streamedResponse = new StringBuilder();
+    private final java.util.concurrent.ConcurrentLinkedQueue<StreamDelta> pendingDeltas = new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private final Timer streamTimer = new Timer(75, e -> renderPendingDeltas());
+    private volatile boolean disposed;
 
     private String lastTopic;
     private String lastResponse;
@@ -52,9 +61,26 @@ public class ExplorePanel extends JPanel implements Disposable {
         copyButton.addActionListener(e -> copyResponse());
         toolbar.add(copyButton);
 
-        clearButton = new JButton("Clear", AllIcons.Actions.GC);
+        clearButton = new JButton("Clear display", AllIcons.Actions.GC);
         clearButton.addActionListener(e -> clearPanel());
         toolbar.add(clearButton);
+        clearButton.setToolTipText("Clear the displayed response; backend conversation history is retained.");
+        newConversationButton = new JButton("New conversation");
+        newConversationButton.addActionListener(e -> {
+            invalidateRequest();
+            project.getService(com.johnnyblabs.openspec.ai.AiExecutionService.class).resetExploreConversation();
+            clearPanel();
+        });
+        toolbar.add(newConversationButton);
+        cancelButton = new JButton("Cancel");
+        cancelButton.setEnabled(false);
+        cancelButton.addActionListener(e -> {
+            project.getService(com.johnnyblabs.openspec.ai.AiExecutionService.class).cancelExplore();
+            long epoch = invalidateRequest();
+            showError(epoch, lastTopic, "Exploration cancelled. Start a New conversation before continuing.");
+        });
+        toolbar.add(cancelButton);
+        toolbar.add(new JBLabel("Codex: conversation history retained; API-key sessions unsupported"));
 
         // --- Topic header ---
         topicLabel = new JBLabel();
@@ -84,7 +110,8 @@ public class ExplorePanel extends JPanel implements Disposable {
 
         // Ctrl+Enter / Cmd+Enter submits
         KeyStroke submitKey = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER,
-                Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
+                GraphicsEnvironment.isHeadless() ? java.awt.event.InputEvent.CTRL_DOWN_MASK
+                        : Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx());
         inputArea.getInputMap(JComponent.WHEN_FOCUSED)
                 .put(submitKey, "submitExplore");
         inputArea.getActionMap().put("submitExplore", new AbstractAction() {
@@ -117,6 +144,11 @@ public class ExplorePanel extends JPanel implements Disposable {
     /**
      * Displays the invitation empty state in the response pane.
      */
+    private static void onEdt(Runnable action) {
+        if (SwingUtilities.isEventDispatchThread()) action.run();
+        else SwingUtilities.invokeLater(action);
+    }
+
     private void showInvitation() {
         String css = MarkdownHtmlRenderer.buildThemeStylesheet();
         String muted = colorToHex(JBColor.GRAY);
@@ -133,23 +165,24 @@ public class ExplorePanel extends JPanel implements Disposable {
      */
     private void submitTopic() {
         String topic = inputArea.getText() == null ? "" : inputArea.getText().trim();
-        setInputEnabled(false);
         ExploreContextAction.runExploreDirect(project, topic);
     }
 
     /**
      * Displays a successful explore result with markdown rendering.
      */
-    public void showResult(String topic, String response) {
-        this.lastTopic = topic;
-        this.lastResponse = response;
+    public void showResult(long epoch, String topic, String response) {
 
-        SwingUtilities.invokeLater(() -> {
+        onEdt(() -> {
+            if (!isCurrent(epoch)) return;
+            this.lastTopic = topic;
+            stopStreaming();
             setTopicHeader(topic);
             topicLabel.setForeground(JBColor.foreground());
 
             String css = MarkdownHtmlRenderer.buildThemeStylesheet();
-            String htmlFragment = MarkdownHtmlRenderer.render(response);
+            this.lastResponse = response;
+            String htmlFragment = com.johnnyblabs.openspec.ai.safety.SafeResponseMarkdown.render(response);
             responsePane.setText(MarkdownHtmlRenderer.wrapInHtml(css, htmlFragment));
             responsePane.setCaretPosition(0);
 
@@ -161,12 +194,14 @@ public class ExplorePanel extends JPanel implements Disposable {
     /**
      * Displays an error from the explore API call.
      */
-    public void showError(String topic, String error) {
-        this.lastTopic = topic;
-        this.lastResponse = null;
+    public void showError(long epoch, String topic, String error) {
 
-        SwingUtilities.invokeLater(() -> {
+        onEdt(() -> {
+            if (!isCurrent(epoch)) return;
+            this.lastTopic = topic;
+            stopStreaming();
             setTopicHeader(topic);
+            this.lastResponse = null;
             topicLabel.setForeground(JBColor.RED);
 
             String css = MarkdownHtmlRenderer.buildThemeStylesheet();
@@ -183,10 +218,14 @@ public class ExplorePanel extends JPanel implements Disposable {
     /**
      * Shows a loading state while the API call is in progress.
      */
-    public void showLoading(String topic) {
-        this.lastTopic = topic;
+    public void showLoading(long epoch, String topic) {
 
-        SwingUtilities.invokeLater(() -> {
+        onEdt(() -> {
+            if (!isCurrent(epoch)) return;
+            this.lastTopic = topic;
+            stopStreaming();
+            streamedResponse.setLength(0);
+            streamTimer.start();
             setTopicHeader(topic);
             topicLabel.setForeground(JBColor.foreground());
 
@@ -217,6 +256,8 @@ public class ExplorePanel extends JPanel implements Disposable {
     }
 
     private void clearPanel() {
+        invalidateRequest();
+        stopStreaming();
         lastTopic = null;
         lastResponse = null;
         inputArea.setText("");
@@ -236,9 +277,58 @@ public class ExplorePanel extends JPanel implements Disposable {
         topicLabel.setVisible(true);
     }
 
+    private synchronized long invalidateRequest() {
+        long epoch = requestEpoch.incrementAndGet();
+        var indicator = runIndicator.getAndSet(null);
+        if (indicator != null) indicator.cancel();
+        return epoch;
+    }
+
+    public synchronized void attachIndicator(long epoch, com.intellij.openapi.progress.ProgressIndicator indicator) {
+        if (!isCurrent(epoch)) { indicator.cancel(); return; }
+        runIndicator.set(indicator);
+        if (!isCurrent(epoch)) indicator.cancel();
+    }
+
+    public long beginRequest() {
+        long epoch = invalidateRequest();
+        onEdt(() -> { if (isCurrent(epoch)) setInputEnabled(false); });
+        return epoch;
+    }
+
+    public boolean isCurrent(long epoch) { return !disposed && requestEpoch.get() == epoch; }
+
+    public void restoreInput(long epoch) {
+        onEdt(() -> { if (isCurrent(epoch)) setInputEnabled(true); });
+    }
+
+    private record StreamDelta(long epoch, String text) {}
+
+    public void appendDelta(long epoch, String delta) {
+        if (isCurrent(epoch)) pendingDeltas.add(new StreamDelta(epoch, delta));
+    }
+
+    private void renderPendingDeltas() {
+        if (disposed || pendingDeltas.isEmpty()) return;
+        StreamDelta delta;
+        boolean changed = false;
+        while ((delta = pendingDeltas.poll()) != null) {
+            if (isCurrent(delta.epoch())) { streamedResponse.append(delta.text()); changed = true; }
+        }
+        if (changed) responsePane.setText(MarkdownHtmlRenderer.wrapInHtml(MarkdownHtmlRenderer.buildThemeStylesheet(),
+                com.johnnyblabs.openspec.ai.safety.SafeResponseMarkdown.render(streamedResponse.toString())));
+    }
+
+    private void stopStreaming() {
+        streamTimer.stop();
+        pendingDeltas.clear();
+    }
+
     private void setInputEnabled(boolean enabled) {
         inputArea.setEnabled(enabled);
         sendButton.setEnabled(enabled);
+        cancelButton.setEnabled(!enabled);
+        clearButton.setEnabled(enabled);
     }
 
     private static String escapeHtml(String text) {
@@ -252,6 +342,9 @@ public class ExplorePanel extends JPanel implements Disposable {
 
     @Override
     public void dispose() {
-        // No resources to clean up
+        disposed = true;
+        invalidateRequest();
+        SwingUtilities.invokeLater(this::stopStreaming);
+        project.getService(com.johnnyblabs.openspec.ai.AiExecutionService.class).resetExploreConversation();
     }
 }

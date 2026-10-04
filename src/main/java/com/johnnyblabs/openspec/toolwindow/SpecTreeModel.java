@@ -205,6 +205,7 @@ public class SpecTreeModel {
     private String buildArtifactTooltip(ArtifactInfo artifact, String filePath) {
         return switch (artifact.status()) {
             case DONE -> "Complete" + (filePath != null ? " — " + filePath : "");
+            case SKIPPED -> "Skipped by CLI workflow";
             case READY -> "Ready to generate";
             case BLOCKED -> "Blocked by: " + String.join(", ", artifact.missingDeps());
             default -> filePath != null ? filePath : artifact.id();

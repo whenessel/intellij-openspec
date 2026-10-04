@@ -125,6 +125,41 @@ class DeliveryMethodResolverTest {
         }
     }
 
+    @Test
+    void explicitCodexUsesIntegratedExecutionWithoutRestOverride() {
+        try (MockedStatic<OpenSpecSettings> statics = mockStatic(OpenSpecSettings.class)) {
+            statics.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
+            when(settings.getPreferredDeliveryMethod()).thenReturn("DIRECT_API");
+            when(settings.getAiBackend()).thenReturn("LOCAL_CODEX");
+            assertEquals(new DeliveryMethodResolver.ResolvedMethod(DeliveryMode.DIRECT_API,
+                    "Generate via Local Codex [integrated]"), resolver.resolve());
+            verify(settings, never()).getAiProvider();
+            verifyNoInteractions(project);
+        }
+    }
+
+    @Test
+    void codexSelectionDefaultsToIntegratedBackend() {
+        try (MockedStatic<OpenSpecSettings> statics = mockStatic(OpenSpecSettings.class)) {
+            statics.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
+            when(settings.getAiBackend()).thenReturn("LOCAL_CODEX");
+            assertEquals(DeliveryMode.DIRECT_API, resolver.resolve().mode());
+            verify(settings, never()).getAiProvider();
+        }
+    }
+
+    @Test
+    void explicitManualDeliveryDoesNotInspectOrExecuteBackend() {
+        try (MockedStatic<OpenSpecSettings> statics = mockStatic(OpenSpecSettings.class)) {
+            statics.when(() -> OpenSpecSettings.getInstance(project)).thenReturn(settings);
+            when(settings.getPreferredDeliveryMethod()).thenReturn("CLIPBOARD");
+            assertEquals(DeliveryMode.CLIPBOARD, resolver.resolve().mode());
+            verify(settings, never()).getAiBackend();
+            verify(settings, never()).getAiProvider();
+            verifyNoInteractions(project);
+        }
+    }
+
     @Nested
     class NullDetectionService {
 

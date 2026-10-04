@@ -13,6 +13,12 @@ How this plugin maps to the [OpenSpec](https://github.com/fission-ai/openspec) c
 - `1.4.x` — exists only in the `[1.4.0, 1.5.0)` window (the command was removed in 1.5.0)
 - `delegated` — runs against the CLI at runtime; degrades to a built-in path / guidance below the floor
 
+## Integrated AI backends
+
+These are plugin-owned delivery features, independent of the OpenSpec CLI version matrix below. REST generation continues to support Claude, OpenAI and Gemini. Installed Codex adds artifact generation, Explore and Verify through a backend-neutral execution boundary; manual Clipboard/Editor choices take precedence for all these actions. Manual Fast-Forward scaffolds and hands off the first artifact prompt.
+
+Codex uses CLI-owned login/refresh, an account model catalog with manual overrides, context review capped at 48 KiB, a prompt-only execution profile without native filesystem/execution tools, and validated artifact batch preview/application. Generation and Verify are one-shot; Explore resumes CLI-owned conversation history in a fresh process per turn, guarded by ChatGPT workspace/account identity and unchanged scope. New conversation discards reuse without deleting CLI history. Persistent Explore is unavailable in API key mode; acknowledged one-shot requests remain supported. [The local Codex guide](local-codex.md) specifies the exact accepted CLI/OS baseline, unsupported configurations, billing distinctions and current build/IDE acceptance blockers. This adapter does not provide autonomous workspace-writing Apply or an OpenRouter provider; those remain later phases. It does not change OpenSpec's upstream schema or lifecycle model.
+
 <a id="version-support"></a>
 ## Version support
 

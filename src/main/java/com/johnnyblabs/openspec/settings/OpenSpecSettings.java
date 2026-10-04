@@ -96,6 +96,20 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         return false;
     }
 
+    /** Empty legacy state keeps the existing REST route; selecting Codex is explicit. */
+    public String getAiBackend() { return state.aiBackend == null || state.aiBackend.isBlank() ? "REST" : state.aiBackend; }
+    public void setAiBackend(String backend) { state.aiBackend = backend; }
+    public String getCodexExecutable() { return state.codexExecutable == null || state.codexExecutable.isBlank() ? "codex" : state.codexExecutable; }
+    public void setCodexExecutable(String executable) { state.codexExecutable = executable; }
+    public String getCodexModel() { return state.codexModel == null ? "" : state.codexModel; }
+    public void setCodexModel(String model) { state.codexModel = model; }
+    public int getCodexTimeoutSeconds() { return state.codexTimeoutSeconds > 0 ? state.codexTimeoutSeconds : 180; }
+    public void setCodexTimeoutSeconds(int timeout) { state.codexTimeoutSeconds = timeout; }
+    public boolean isCodexApiBillingAcknowledged() { return state.codexApiBillingAcknowledged; }
+    public void setCodexApiBillingAcknowledged(boolean acknowledged) { state.codexApiBillingAcknowledged = acknowledged; }
+    public int getAiContextMaxBytes() { return state.aiContextMaxBytes > 0 ? state.aiContextMaxBytes : 262144; }
+    public void setAiContextMaxBytes(int maxBytes) { state.aiContextMaxBytes = maxBytes; }
+
     public String getAiProvider() {
         return state.aiProvider;
     }
@@ -235,6 +249,13 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         public boolean strictValidation = false;
         /** Guards the one-time strict-removal migration notice; see {@code consumeStrictMigrationNotice()}. */
         public boolean migratedStrictNotice = false;
+        // Plugin routing preferences, independent of the OpenSpec CLI configuration.
+        public String aiBackend = "";
+        public String codexExecutable = "codex";
+        public String codexModel = "";
+        public int codexTimeoutSeconds = 180;
+        public boolean codexApiBillingAcknowledged = false;
+        public int aiContextMaxBytes = 262144;
         public String aiProvider = "NONE";
         public String aiModel = "";
         public String preferredDeliveryMethod = "";

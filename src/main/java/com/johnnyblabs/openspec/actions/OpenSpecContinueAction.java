@@ -6,7 +6,9 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.Project;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
+import com.johnnyblabs.openspec.ai.DeliveryMode;
+import com.johnnyblabs.openspec.services.DeliveryMethodResolver;
 import com.johnnyblabs.openspec.model.ArtifactInfo;
 import com.johnnyblabs.openspec.model.ArtifactInstruction;
 import com.johnnyblabs.openspec.model.ChangeArtifactDag;
@@ -38,7 +40,18 @@ public class OpenSpecContinueAction extends OpenSpecBaseAction {
 
         String changeName = activeChanges.getFirst().getName();
 
-        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Continue: " + changeName, false) {
+        DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
+        if (resolver == null || resolver.resolve().mode() != DeliveryMode.DIRECT_API) {
+            var toolWindow = com.intellij.openapi.wm.ToolWindowManager.getInstance(project).getToolWindow("OpenSpec");
+            if (toolWindow != null) toolWindow.activate(() -> {
+                var content = toolWindow.getContentManager().findContent("Browse");
+                var panel = content == null ? null : OpenSpecFfAction.findWorkflowPanel(content.getComponent());
+                if (panel != null) panel.selectChangeAndGenerate(changeName);
+            });
+            return;
+        }
+
+        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Continue: " + changeName, true) {
             @Override
             public void run(@NotNull ProgressIndicator indicator) {
                 ArtifactOrchestrationService orchestration =
@@ -61,18 +74,18 @@ public class OpenSpecContinueAction extends OpenSpecBaseAction {
                 }
 
                 indicator.setText("Generating " + nextArtifact.id() + "...");
-                DirectApiService apiService = project.getService(DirectApiService.class);
-                if (apiService == null) {
+                AiExecutionService apiService = project.getService(AiExecutionService.class);
+                if (apiService == null || !apiService.isConfigured()) {
                     ApplicationManager.getApplication().invokeLater(() ->
-                            OpenSpecNotifier.error(project, "API not configured",
+                            OpenSpecNotifier.error(project, "AI backend not ready",
                                     "Configure an AI provider in Settings to use Continue."));
                     return;
                 }
 
                 try {
                     ArtifactInstruction instruction = orchestration.getInstruction(changeName, nextArtifact.id());
-                    String result = apiService.generate(instruction);
-                    orchestration.writeArtifactResult(instruction, result);
+                    apiService.generateAndApply(instruction);
+                    indicator.checkCanceled();
                     orchestration.invalidateCache(changeName);
 
                     ApplicationManager.getApplication().invokeLater(() -> {
@@ -80,6 +93,9 @@ public class OpenSpecContinueAction extends OpenSpecBaseAction {
                                 "Created " + nextArtifact.id() + " for '" + changeName + "'.");
                         refreshToolWindow(project);
                     });
+                } catch (com.intellij.openapi.progress.ProcessCanceledException ex) {
+                    apiService.cancelActive();
+                    throw ex;
                 } catch (Exception ex) {
                     ApplicationManager.getApplication().invokeLater(() ->
                             OpenSpecNotifier.error(project, "Generation failed",

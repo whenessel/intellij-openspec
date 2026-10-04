@@ -736,19 +736,15 @@ class CliContractTest {
 
         /**
          * A 1.7 {@code skip_specs: true} change reports its specs artifact as {@code skipped} and the
-         * change {@code isComplete: true}. The plugin's {@link ArtifactStatus} enum has no SKIPPED
-         * value, so {@code skipped} degrades to {@link ArtifactStatus#UNKNOWN} — this is graceful, not
-         * a breach of the never-stricter-than-the-CLI invariant, because completeness is read from the
-         * CLI's own {@code isComplete} flag, never re-derived from artifact statuses. This locks that
-         * contract: a future change that makes {@code skipped} throw, or that re-derives completeness
-         * and thereby blocks a genuinely-complete skip-specs change, fails here.
+         * change {@code isComplete: true}. Preserve SKIPPED explicitly so full required-closure
+         * orchestration can distinguish intentional omission from unknown/incompatible statuses.
          */
         @Test
-        void skipSpecsChangeStatusDegradesGracefully() {
+        void skipSpecsChangeStatusPreservesIntentionalOmission() {
             ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture17("status-skipped.json"));
             assertNotNull(dag);
-            assertEquals(ArtifactStatus.UNKNOWN, byId(dag, "specs").status(),
-                    "1.7 'skipped' has no plugin enum value and degrades to UNKNOWN (graceful)");
+            assertEquals(ArtifactStatus.SKIPPED, byId(dag, "specs").status(),
+                    "captured CLI skipped status must remain distinguishable from UNKNOWN");
             assertTrue(dag.isComplete(),
                     "a complete skip_specs change is complete regardless of the skipped specs artifact");
         }

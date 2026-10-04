@@ -6,6 +6,7 @@ import com.intellij.openapi.options.Configurable;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiCredentialStore;
 import com.johnnyblabs.openspec.ai.AiProvider;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import com.johnnyblabs.openspec.services.WorkflowProfileSwitchService;
 import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.Nullable;
@@ -50,6 +51,12 @@ public class OpenSpecConfigurable implements Configurable {
                 || !panel.getProfile().equals(safe(settings.getProfile()))
                 || panel.isAutoRefresh() != settings.isAutoRefresh()
                 || panel.getCliTimeout() != settings.getCliTimeoutSeconds()
+                || !panel.getAiBackend().equals(settings.getAiBackend())
+                || !panel.getCodexExecutable().equals(settings.getCodexExecutable())
+                || !panel.getCodexModel().equals(settings.getCodexModel())
+                || panel.getCodexTimeoutSeconds() != settings.getCodexTimeoutSeconds()
+                || panel.isCodexApiBillingAcknowledged() != settings.isCodexApiBillingAcknowledged()
+                || panel.getAiContextMaxBytes() != settings.getAiContextMaxBytes()
                 || !panel.getAiProvider().equals(safe(settings.getAiProvider(), "NONE"))
                 || !panel.getAiModel().equals(safe(settings.getAiModel()))
                 || !panel.getDefaultSchema().equals(safe(settings.getDefaultSchema()))
@@ -78,6 +85,12 @@ public class OpenSpecConfigurable implements Configurable {
         settings.setCliPath(panel.getCliPath());
         settings.setAutoRefresh(panel.isAutoRefresh());
         settings.setCliTimeoutSeconds(panel.getCliTimeout());
+        settings.setAiBackend(panel.getAiBackend());
+        settings.setCodexExecutable(panel.getCodexExecutable());
+        settings.setCodexModel(panel.getCodexModel());
+        settings.setCodexTimeoutSeconds(panel.getCodexTimeoutSeconds());
+        settings.setCodexApiBillingAcknowledged(panel.isCodexApiBillingAcknowledged());
+        settings.setAiContextMaxBytes(panel.getAiContextMaxBytes());
         settings.setAiProvider(panel.getAiProvider());
         settings.setAiModel(panel.getAiModel());
         settings.setDefaultSchema(panel.getDefaultSchema());
@@ -90,6 +103,9 @@ public class OpenSpecConfigurable implements Configurable {
             ApplicationManager.getApplication().executeOnPooledThread(
                     () -> AiCredentialStore.storeApiKey(provider, apiKey));
         }
+
+        AiExecutionService execution = project.getService(AiExecutionService.class);
+        if (execution != null) execution.refreshStatus();
 
         // D3 fallback refresh: a Settings apply is a likely moment for the user's CLI
         // state to have drifted from cached state (manual CLI switch in another terminal,
@@ -136,6 +152,12 @@ public class OpenSpecConfigurable implements Configurable {
         panel.setProfile(settings.getProfile());
         panel.setAutoRefresh(settings.isAutoRefresh());
         panel.setCliTimeout(settings.getCliTimeoutSeconds());
+        panel.setAiBackend(settings.getAiBackend());
+        panel.setCodexExecutable(settings.getCodexExecutable());
+        panel.setCodexModel(settings.getCodexModel());
+        panel.setCodexTimeoutSeconds(settings.getCodexTimeoutSeconds());
+        panel.setCodexApiBillingAcknowledged(settings.isCodexApiBillingAcknowledged());
+        panel.setAiContextMaxBytes(settings.getAiContextMaxBytes());
         panel.setAiProvider(settings.getAiProvider());
         panel.setAiModel(settings.getAiModel());
         panel.setDefaultSchema(settings.getDefaultSchema());
@@ -161,6 +183,7 @@ public class OpenSpecConfigurable implements Configurable {
 
     @Override
     public void disposeUIResources() {
+        if (panel != null) panel.dispose();
         panel = null;
     }
 

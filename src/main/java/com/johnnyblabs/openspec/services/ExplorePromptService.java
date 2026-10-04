@@ -1,12 +1,17 @@
 package com.johnnyblabs.openspec.services;
 
 import com.intellij.openapi.components.Service;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.LinkOption;
+import java.nio.file.StandardOpenOption;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 
 /**
  * Builds the full explore prompt by combining skill instructions, project context, and topic.
@@ -14,7 +19,6 @@ import java.nio.file.Path;
  */
 @Service(Service.Level.PROJECT)
 public final class ExplorePromptService {
-    private static final Logger LOG = Logger.getInstance(ExplorePromptService.class);
 
     /**
      * Skill file paths to search, in priority order.
@@ -79,42 +83,60 @@ public final class ExplorePromptService {
      * @param topic the user's explore topic, or empty/null for open exploration
      * @return the assembled prompt string
      */
-    public String buildPrompt(String topic) {
-        String instructions = loadSkillInstructions();
-        String context = assembleContext();
-        String topicSection = buildTopicSection(topic);
+    public String buildPrompt(String topic) { return buildRequest(topic).prompt(); }
 
-        return instructions + "\n\n---\n\n" + context + "\n\n---\n\n" + topicSection;
+    /** One context read per turn; topic changes preserve the conversation scope. */
+    public ExploreRequest buildRequest(String topic) {
+        String prefix = loadSkillInstructions() + "\n\n---\n\n" + assembleContext();
+        String scope;
+        try {
+            scope = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(prefix.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        return new ExploreRequest(prefix + "\n\n---\n\n" + buildTopicSection(topic), scope);
     }
 
-    /**
-     * Reads the explore skill file from the project, falling back to the built-in default.
-     */
+    public record ExploreRequest(String prompt, String contextScope) {}
+
+    static final int MAX_SKILL_BYTES = 32768;
+    static final String SKILL_OMISSION = "\n\n**Context omission:** An unsafe, unreadable or oversized project Explore skill was omitted; safe instructions are used.";
+
+    /** Rejects symlink ancestors and bounds the read even if the file grows after its size check. */
     String loadSkillInstructions() {
         String basePath = project.getBasePath();
+        boolean omitted = false;
         if (basePath != null) {
+            Path root = Path.of(basePath).toAbsolutePath().normalize();
             for (String skillPath : SKILL_FILE_PATHS) {
-                Path path = Path.of(basePath, skillPath);
-                if (Files.isRegularFile(path)) {
-                    try {
-                        String content = Files.readString(path);
-                        // Strip YAML frontmatter if present
-                        if (content.startsWith("---")) {
-                            int endOfFrontmatter = content.indexOf("---", 3);
-                            if (endOfFrontmatter != -1) {
-                                content = content.substring(endOfFrontmatter + 3).strip();
-                            }
-                        }
-                        LOG.info("Loaded explore skill from: " + path);
-                        return content;
-                    } catch (IOException e) {
-                        LOG.warn("Failed to read explore skill file: " + path, e);
+                Path path = root.resolve(skillPath).normalize();
+                if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) continue;
+                try {
+                    requireSafeSkill(root, path);
+                    if (Files.size(path) > MAX_SKILL_BYTES) throw new IOException("Skill exceeds limit");
+                    byte[] bytes;
+                    try (var input = Files.newInputStream(path, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+                        bytes = input.readNBytes(MAX_SKILL_BYTES + 1);
                     }
-                }
+                    if (bytes.length > MAX_SKILL_BYTES) throw new IOException("Skill exceeds limit");
+                    requireSafeSkill(root, path);
+                    String content = new String(bytes, StandardCharsets.UTF_8);
+                    if (content.startsWith("---")) {
+                        int end = content.indexOf("---", 3);
+                        if (end != -1) content = content.substring(end + 3).strip();
+                    }
+                    return content + (omitted ? SKILL_OMISSION : "");
+                } catch (IOException | SecurityException ex) { omitted = true; }
             }
         }
-        LOG.info("No explore skill file found, using built-in default");
-        return DEFAULT_EXPLORE_PROMPT;
+        return DEFAULT_EXPLORE_PROMPT + (omitted ? SKILL_OMISSION : "");
+    }
+
+    private static void requireSafeSkill(Path root, Path path) throws IOException {
+        if (!path.startsWith(root) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("Unsafe skill file");
+        for (Path ancestor = path; ancestor != null; ancestor = ancestor.getParent()) {
+            if (Files.isSymbolicLink(ancestor)) throw new IOException("Symlinked skill path");
+        }
     }
 
     private String assembleContext() {

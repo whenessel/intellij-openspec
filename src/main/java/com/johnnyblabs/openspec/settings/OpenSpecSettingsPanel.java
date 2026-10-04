@@ -18,6 +18,9 @@ import com.intellij.util.ui.JBUI;
 import com.johnnyblabs.openspec.ai.AiCredentialStore;
 import com.johnnyblabs.openspec.ai.AiProvider;
 import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.backend.BackendStatus;
+import com.johnnyblabs.openspec.ai.backend.CodexAppServerBackend;
+import com.johnnyblabs.openspec.ai.backend.ModelDescriptor;
 import com.johnnyblabs.openspec.dialogs.NewSchemaDialog;
 import com.johnnyblabs.openspec.model.SchemaInfo;
 import com.johnnyblabs.openspec.services.CliDetectionService;
@@ -86,6 +89,19 @@ public class OpenSpecSettingsPanel {
             java.util.List.of("", "core");
 
     // Direct API section
+    private JComboBox<String> aiBackendCombo;
+    private TextFieldWithBrowseButton codexExecutableField;
+    private JComboBox<String> codexModelCombo;
+    private JSpinner codexTimeoutSpinner;
+    private JSpinner aiContextMaxBytesSpinner;
+    private JBCheckBox codexApiBillingCheckbox;
+    private JBLabel codexStatusLabel;
+    private JButton codexRefreshButton;
+    private JPanel restSettingsPanel;
+    private JPanel codexSettingsPanel;
+    private JButton apiTestButton;
+    private SwingWorker<CodexProbe, Void> codexProbeWorker;
+    private boolean disposed;
     private JComboBox<String> aiProviderCombo;
     private JPasswordField apiKeyField;
     private JComboBox<String> aiModelCombo;
@@ -689,14 +705,15 @@ public class OpenSpecSettingsPanel {
 
         // API key + test button
         apiKeyField = new JPasswordField(30);
-        JButton testButton = new JButton("Test");
-        testButton.addActionListener(e -> testApiConnection());
+        apiTestButton = new JButton("Test (API billed)");
+        apiTestButton.setToolTipText("Sends a live request to the selected REST provider using your API key.");
+        apiTestButton.addActionListener(e -> testApiConnection());
 
         JPanel apiKeyRow = new JPanel();
         apiKeyRow.setLayout(new BoxLayout(apiKeyRow, BoxLayout.X_AXIS));
         apiKeyRow.add(apiKeyField);
         apiKeyRow.add(Box.createHorizontalStrut(4));
-        apiKeyRow.add(testButton);
+        apiKeyRow.add(apiTestButton);
 
         // Model dropdown
         aiModelCombo = new JComboBox<>();
@@ -704,16 +721,134 @@ public class OpenSpecSettingsPanel {
 
         aiTestResultLabel = new JBLabel(" ");
 
-        JPanel panel = FormBuilder.createFormBuilder()
+        restSettingsPanel = FormBuilder.createFormBuilder()
                 .addComponent(helpLabel)
-                .addVerticalGap(8)
-                .addLabeledComponent(new JBLabel("Provider:"), aiProviderCombo)
+                .addLabeledComponent(new JBLabel("REST provider:"), aiProviderCombo)
                 .addLabeledComponent(new JBLabel("API key:"), apiKeyRow)
-                .addLabeledComponent(new JBLabel("Model:"), aiModelCombo)
+                .addLabeledComponent(new JBLabel("REST model:"), aiModelCombo)
                 .addComponent(aiTestResultLabel)
                 .getPanel();
-        panel.setBorder(IdeBorderFactory.createTitledBorder("Direct API"));
+
+        aiBackendCombo = new JComboBox<>(new String[]{"REST", "LOCAL_CODEX"});
+        aiBackendCombo.setRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                                                          boolean selected, boolean focused) {
+                String label = "LOCAL_CODEX".equals(value) ? "Installed Codex CLI" :
+                        "REST".equals(value) ? "REST API (API billed)" : String.valueOf(value);
+                return super.getListCellRendererComponent(list, label, index, selected, focused);
+            }
+        });
+        aiBackendCombo.addActionListener(e -> updateBackendControls());
+        codexExecutableField = new TextFieldWithBrowseButton();
+        codexExecutableField.setText("codex");
+        codexExecutableField.addBrowseFolderListener(new TextBrowseFolderListener(
+                FileChooserDescriptorFactory.createSingleFileNoJarsDescriptor(), project));
+        codexExecutableField.setToolTipText("Installed native Codex executable or PATH command; no shell command or arguments. Windows .cmd wrappers are unsupported.");
+        codexModelCombo = new JComboBox<>(new String[]{""});
+        codexModelCombo.setEditable(true);
+        codexModelCombo.setToolTipText("Blank uses the CLI default. Refresh the catalog or enter a model ID manually.");
+        codexTimeoutSpinner = new JSpinner(new SpinnerNumberModel(180, 1, 3600, 10));
+        aiContextMaxBytesSpinner = new JSpinner(new SpinnerNumberModel(262144, 1024, 16777216, 1024));
+        codexApiBillingCheckbox = new JBCheckBox("Allow API billed Codex requests when the CLI reports API key auth");
+        codexStatusLabel = new JBLabel("Auth: unknown — refresh status before use");
+        codexRefreshButton = new JButton("Refresh status and models (no inference)");
+        codexRefreshButton.addActionListener(e -> refreshCodexStatus());
+        JBLabel codexHelp = new JBLabel("<html>Codex owns login and refresh; use <code>codex login</code> in your terminal.<br>"
+                + "ChatGPT login uses subscription limits and online inference. API key login is API billed.<br>"
+                + "Generation, Explore and Verify require a compatible restricted CLI profile; Apply is not supported.</html>");
+        codexHelp.setForeground(JBUI.CurrentTheme.ContextHelp.FOREGROUND);
+        codexSettingsPanel = FormBuilder.createFormBuilder()
+                .addComponent(codexHelp)
+                .addLabeledComponent(new JBLabel("Codex executable:"), codexExecutableField)
+                .addLabeledComponent(new JBLabel("Codex model override:"), codexModelCombo)
+                .addLabeledComponent(new JBLabel("Codex timeout (seconds):"), codexTimeoutSpinner)
+                .addComponent(codexRefreshButton)
+                .addComponent(codexStatusLabel)
+                .addComponent(codexApiBillingCheckbox)
+                .getPanel();
+        JPanel panel = FormBuilder.createFormBuilder()
+                .addLabeledComponent(new JBLabel("AI backend:"), aiBackendCombo)
+                .addLabeledComponent(new JBLabel("Maximum context (UTF-8 bytes):"), aiContextMaxBytesSpinner)
+                .addComponent(restSettingsPanel)
+                .addComponent(codexSettingsPanel)
+                .getPanel();
+        panel.setBorder(IdeBorderFactory.createTitledBorder("AI generation"));
+        updateBackendControls();
         return panel;
+    }
+
+    private void updateBackendControls() {
+        if (restSettingsPanel == null || codexSettingsPanel == null) return;
+        boolean codex = "LOCAL_CODEX".equals(getAiBackend());
+        restSettingsPanel.setVisible(!codex);
+        codexSettingsPanel.setVisible(codex);
+    }
+
+    private void refreshCodexStatus() {
+        if (codexProbeWorker != null) codexProbeWorker.cancel(true);
+        String executable = getCodexExecutable();
+        codexStatusLabel.setText("Checking CLI account and model catalog...");
+        codexRefreshButton.setEnabled(false);
+        codexProbeWorker = new SwingWorker<>() {
+            @Override
+            protected CodexProbe doInBackground() throws Exception {
+                CodexAppServerBackend backend = new CodexAppServerBackend(executable);
+                BackendStatus status = backend.probe();
+                return new CodexProbe(status, status.available() ? backend.models() : List.of());
+            }
+
+            @Override
+            protected void done() {
+                if (disposed || isCancelled() || codexProbeWorker != this) return;
+                codexRefreshButton.setEnabled(true);
+                // Discard stale results when the executable changed during the probe.
+                if (!executable.equals(getCodexExecutable())) {
+                    codexStatusLabel.setText("Executable changed — refresh status again");
+                    return;
+                }
+                try {
+                    CodexProbe result = get();
+                    codexStatusLabel.setText(formatCodexStatus(result.status()));
+                    codexStatusLabel.setForeground(result.status().available() ? JBColor.GRAY : JBColor.RED);
+                    // Preserve the latest draft override, including text being edited during refresh.
+                    String currentModel = getCodexModel();
+                    codexModelCombo.removeAllItems();
+                    for (String id : catalogModelIds(result.models())) codexModelCombo.addItem(id);
+                    codexModelCombo.setSelectedItem(currentModel);
+                } catch (Exception failure) {
+                    codexStatusLabel.setText("Codex unavailable — check executable and run codex login; no REST fallback");
+                    codexStatusLabel.setForeground(JBColor.RED);
+                }
+            }
+        };
+        codexProbeWorker.execute();
+    }
+
+    static String formatCodexStatus(BackendStatus status) {
+        String authMode = status.authMode() == null ? "unknown" : status.authMode();
+        String billing = switch (authMode) {
+            case "chatgpt" -> "ChatGPT subscription; online inference and usage limits apply";
+            case "apikey" -> "API billed; explicit billing acknowledgement required";
+            default -> "unknown; authenticate with codex login before generation";
+        };
+        return "<html>Codex " + escapeHtml(status.version() == null ? "unknown version" : status.version())
+                + " — Auth: " + escapeHtml(authMode) + "<br>" + billing
+                + "<br>" + escapeHtml(status.detail() == null ? "" : status.detail()) + "</html>";
+    }
+
+    static List<String> catalogModelIds(List<ModelDescriptor> models) {
+        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+        ids.add("");
+        for (ModelDescriptor model : models) if (model.id() != null && !model.id().isBlank()) ids.add(model.id());
+        return List.copyOf(ids);
+    }
+
+    private record CodexProbe(BackendStatus status, List<ModelDescriptor> models) {}
+
+    public void dispose() {
+        disposed = true;
+        if (codexProbeWorker != null) codexProbeWorker.cancel(true);
     }
 
     // --- CLI detection ---
@@ -961,6 +1096,22 @@ public class OpenSpecSettingsPanel {
         aiProviderCombo.setSelectedItem(p.getDisplayName());
         onProviderChanged();
     }
+
+    public String getAiBackend() { return String.valueOf(aiBackendCombo.getSelectedItem()); }
+    public void setAiBackend(String backend) { aiBackendCombo.setSelectedItem(backend == null || backend.isBlank() ? "REST" : backend); updateBackendControls(); }
+    public String getCodexExecutable() { String value = codexExecutableField.getText().trim(); return value.isBlank() ? "codex" : value; }
+    public void setCodexExecutable(String executable) { codexExecutableField.setText(executable == null || executable.isBlank() ? "codex" : executable); }
+    public String getCodexModel() {
+        Object value = codexModelCombo.isEditable() ? codexModelCombo.getEditor().getItem() : codexModelCombo.getSelectedItem();
+        return value == null ? "" : value.toString().trim();
+    }
+    public void setCodexModel(String model) { codexModelCombo.setSelectedItem(model == null ? "" : model); }
+    public int getCodexTimeoutSeconds() { return ((Number) codexTimeoutSpinner.getValue()).intValue(); }
+    public void setCodexTimeoutSeconds(int timeout) { codexTimeoutSpinner.setValue(timeout > 0 ? timeout : 180); }
+    public boolean isCodexApiBillingAcknowledged() { return codexApiBillingCheckbox.isSelected(); }
+    public void setCodexApiBillingAcknowledged(boolean acknowledged) { codexApiBillingCheckbox.setSelected(acknowledged); }
+    public int getAiContextMaxBytes() { return ((Number) aiContextMaxBytesSpinner.getValue()).intValue(); }
+    public void setAiContextMaxBytes(int bytes) { aiContextMaxBytesSpinner.setValue(bytes > 0 ? bytes : 262144); }
 
     public String getApiKey() {
         return new String(apiKeyField.getPassword());

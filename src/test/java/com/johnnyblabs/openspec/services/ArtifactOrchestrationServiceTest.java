@@ -2,7 +2,7 @@ package com.johnnyblabs.openspec.services;
 
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiApiException;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import com.johnnyblabs.openspec.model.ArtifactInfo;
 import com.johnnyblabs.openspec.model.ArtifactInstruction;
 import com.johnnyblabs.openspec.model.ArtifactStatus;
@@ -254,7 +254,7 @@ class ArtifactOrchestrationServiceTest {
     @Nested
     class GenerateAllLoop {
 
-        @Mock DirectApiService apiService;
+        @Mock AiExecutionService apiService;
 
         @TempDir
         Path tempDir;
@@ -352,7 +352,7 @@ class ArtifactOrchestrationServiceTest {
                         .thenReturn(new CliRunner.CliResult(0, "{\"changeName\":\"c\",\"artifactId\":\"tasks\",\"changeDir\":\"" + jsonEscapedPath(changeDir) + "\",\"outputPath\":\"tasks.md\",\"instruction\":\"write tasks\"}", ""));
 
                 // Mock API generate
-                when(apiService.generate(any())).thenReturn("generated content");
+                when(apiService.generateAndApply(any())).thenReturn(List.of());
 
                 service.generateAllRemaining("c", apiService, listener);
             }
@@ -367,10 +367,13 @@ class ArtifactOrchestrationServiceTest {
             assertEquals("completed:tasks", calls.get(5));
             assertEquals("allComplete", calls.get(6));
 
-            // Verify files written
-            assertTrue(Files.exists(tempDir.resolve("openspec/changes/c/proposal.md")));
-            assertTrue(Files.exists(tempDir.resolve("openspec/changes/c/design.md")));
-            assertTrue(Files.exists(tempDir.resolve("openspec/changes/c/tasks.md")));
+            // The execution service owns validated writes; orchestration submits instructions in order.
+            org.mockito.ArgumentCaptor<ArtifactInstruction> instructions =
+                    org.mockito.ArgumentCaptor.forClass(ArtifactInstruction.class);
+            verify(apiService, times(3)).generateAndApply(instructions.capture());
+            assertEquals(List.of("proposal", "design", "tasks"), instructions.getAllValues().stream()
+                    .map(ArtifactInstruction::artifactId).toList());
+            verifyNoMoreInteractions(apiService);
         }
 
         @Test
@@ -427,8 +430,8 @@ class ArtifactOrchestrationServiceTest {
                         .thenReturn(new CliRunner.CliResult(0, "{\"changeName\":\"c\",\"artifactId\":\"design\",\"changeDir\":\"" + jsonEscapedPath(changeDir) + "\",\"outputPath\":\"design.md\",\"instruction\":\"x\"}", ""));
 
                 // First generate succeeds, second throws
-                when(apiService.generate(any()))
-                        .thenReturn("content")
+                when(apiService.generateAndApply(any()))
+                        .thenReturn(List.of())
                         .thenThrow(new AiApiException("API rate limit (HTTP 429)"));
 
                 service.generateAllRemaining("c", apiService, listener);
@@ -440,8 +443,8 @@ class ArtifactOrchestrationServiceTest {
             assertTrue(calls.contains("error:design:API rate limit (HTTP 429)"));
             assertFalse(calls.contains("allComplete"));
 
-            // First artifact file was written before error
-            assertTrue(Files.exists(tempDir.resolve("openspec/changes/c/proposal.md")));
+            verify(apiService, times(2)).generateAndApply(any());
+            verifyNoMoreInteractions(apiService);
         }
 
         @Test
@@ -493,7 +496,7 @@ class ArtifactOrchestrationServiceTest {
                 cli.when(() -> CliRunner.run(eq(project), eq("instructions"), eq("proposal"), eq("--change"), eq("c"), eq("--json")))
                         .thenReturn(new CliRunner.CliResult(0, "{\"changeName\":\"c\",\"artifactId\":\"proposal\",\"changeDir\":\"" + jsonEscapedPath(changeDir) + "\",\"outputPath\":\"proposal.md\",\"instruction\":\"x\"}", ""));
 
-                when(apiService.generate(any())).thenReturn("content");
+                when(apiService.generateAndApply(any())).thenReturn(List.of());
 
                 service.generateAllRemaining("c", apiService, listener);
             }
@@ -505,8 +508,8 @@ class ArtifactOrchestrationServiceTest {
             // Second artifact was never started
             assertFalse(calls.contains("started:design"));
 
-            // First artifact file preserved
-            assertTrue(Files.exists(tempDir.resolve("openspec/changes/c/proposal.md")));
+            verify(apiService).generateAndApply(argThat(instruction -> instruction.artifactId().equals("proposal")));
+            verifyNoMoreInteractions(apiService);
         }
     }
 
@@ -526,6 +529,100 @@ class ArtifactOrchestrationServiceTest {
             return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
         } catch (java.io.IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    @Nested
+    class RequiredClosure {
+        @Test
+        void capturedCliDoneRootStillIncludesIncompleteDependencies() {
+            ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture("1.7.0/status.json"));
+            List<ArtifactInfo> required = ArtifactOrchestrationService.requiredArtifacts(dag);
+            assertEquals(List.of("proposal", "specs", "design", "tasks"),
+                    required.stream().map(ArtifactInfo::id).toList());
+            assertEquals(ArtifactStatus.DONE, required.getLast().status());
+            assertTrue(required.stream().anyMatch(a -> a.status() == ArtifactStatus.READY));
+        }
+
+        @Test
+        void nonDefaultDagFollowsEdgesIndependentOfOrderAndExcludesOptionalBranches() {
+            // Domain objects deliberately exercise a custom schema, not an inferred CLI JSON shape.
+            ChangeArtifactDag dag = new ChangeArtifactDag();
+            dag.setApplyRequires(List.of("release-note"));
+            dag.setArtifacts(List.of(
+                    new ArtifactInfo("release-note", "release.md", ArtifactStatus.DONE, List.of(), List.of("analysis")),
+                    new ArtifactInfo("optional-diagram", "diagram.md", ArtifactStatus.READY, List.of(), List.of("brief")),
+                    new ArtifactInfo("analysis", "analysis.md", ArtifactStatus.BLOCKED, List.of("brief"), List.of("brief")),
+                    new ArtifactInfo("brief", "brief.md", ArtifactStatus.READY, List.of(), List.of())));
+            assertEquals(List.of("release-note", "analysis", "brief"),
+                    ArtifactOrchestrationService.requiredArtifacts(dag).stream().map(ArtifactInfo::id).toList());
+        }
+
+        @Test
+        void unknownDependencyDoesNotSilentlyComplete() {
+            ChangeArtifactDag dag = new ChangeArtifactDag();
+            dag.setApplyRequires(List.of("final"));
+            dag.setArtifacts(List.of(new ArtifactInfo("final", "final.md", ArtifactStatus.DONE,
+                    List.of(), List.of("missing"))));
+            assertThrows(IllegalStateException.class, () -> ArtifactOrchestrationService.requiredArtifacts(dag));
+        }
+
+        @Test
+        void realSkippedFixtureCompletesWithoutExecution() {
+            try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
+                cli.when(() -> CliRunner.run(project, "status", "--change", "demo-change", "--json"))
+                        .thenReturn(new CliRunner.CliResult(0, fixture("1.7.0/status-skipped.json"), ""));
+                AiExecutionService execution = mock(AiExecutionService.class);
+                GenerateAllListener listener = mock(GenerateAllListener.class);
+                service.generateAllRemaining("demo-change", execution, listener);
+                verify(listener).onAllComplete();
+                verifyNoMoreInteractions(listener);
+                verifyNoInteractions(execution);
+            }
+        }
+
+        @Test
+        void generatesMissingDependencyEvenWhenCliApplyGateIsComplete() throws Exception {
+            var optimistic = com.google.gson.JsonParser.parseString(fixture("1.7.0/status.json")).getAsJsonObject();
+            optimistic.addProperty("isComplete", true);
+            try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
+                cli.when(() -> CliRunner.run(project, "status", "--change", "demo-change", "--json"))
+                        .thenReturn(new CliRunner.CliResult(0, optimistic.toString(), ""),
+                                new CliRunner.CliResult(0, optimistic.toString(), ""),
+                                new CliRunner.CliResult(0, fixture("1.7.0/status-skipped.json"), ""));
+                cli.when(() -> CliRunner.run(project, "instructions", "specs", "--change", "demo-change", "--json"))
+                        .thenReturn(new CliRunner.CliResult(0, fixture("1.7.0/instructions-specs.json"), ""));
+                AiExecutionService execution = mock(AiExecutionService.class);
+                GenerateAllListener listener = mock(GenerateAllListener.class);
+                service.generateAllRemaining("demo-change", execution, listener);
+                var order = inOrder(listener, execution);
+                order.verify(listener).onArtifactStarted("specs", 1, 1);
+                order.verify(execution).generateAndApply(argThat(i -> i.artifactId().equals("specs")));
+                order.verify(listener).onArtifactCompleted("specs");
+                order.verify(listener).onAllComplete();
+                verifyNoMoreInteractions(listener, execution);
+            }
+        }
+
+        @Test
+        void blockedRequiredClosureNeverReportsCompletion() {
+            // Mutate the parsed real fixture to model an incompatible/blocked dependency state.
+            var json = com.google.gson.JsonParser.parseString(fixture("1.7.0/status.json")).getAsJsonObject();
+            json.addProperty("isComplete", true); // optimistic CLI apply gate cannot decide full completion
+            for (var artifact : json.getAsJsonArray("artifacts")) {
+                if (artifact.getAsJsonObject().get("id").getAsString().equals("specs"))
+                    artifact.getAsJsonObject().addProperty("status", "blocked");
+            }
+            try (MockedStatic<CliRunner> cli = mockStatic(CliRunner.class)) {
+                cli.when(() -> CliRunner.run(project, "status", "--change", "demo-change", "--json"))
+                        .thenReturn(new CliRunner.CliResult(0, json.toString(), ""));
+                AiExecutionService execution = mock(AiExecutionService.class);
+                GenerateAllListener listener = mock(GenerateAllListener.class);
+                service.generateAllRemaining("demo-change", execution, listener);
+                verify(listener).onError(isNull(), isA(IllegalStateException.class));
+                verify(listener, never()).onAllComplete();
+                verifyNoInteractions(execution);
+            }
         }
     }
 

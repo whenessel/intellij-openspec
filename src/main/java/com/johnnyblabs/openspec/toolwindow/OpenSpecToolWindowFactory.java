@@ -7,7 +7,7 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowFactory;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.openapi.wm.ex.ToolWindowManagerListener;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import com.johnnyblabs.openspec.coordination.CoordinationData;
 import com.johnnyblabs.openspec.coordination.CoordinationService;
 import com.johnnyblabs.openspec.coordination.CoordinationTier;
@@ -109,7 +109,7 @@ public class OpenSpecToolWindowFactory implements ToolWindowFactory, DumbAware {
         toolWindow.getContentManager().addContent(consoleContent);
 
         // Explore tab — only when Direct API is configured (inline input requires it)
-        DirectApiService apiService = project.getService(DirectApiService.class);
+        AiExecutionService apiService = project.getService(AiExecutionService.class);
         if (apiService != null && apiService.isConfigured()) {
             ExplorePanel explorePanel = new ExplorePanel(project);
             Content exploreContent = contentFactory.createContent(explorePanel, "Explore", false);

@@ -2,7 +2,8 @@ package com.johnnyblabs.openspec.services;
 
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiApiException;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
+import com.johnnyblabs.openspec.ai.DeliveryMode;
 import com.johnnyblabs.openspec.model.ArtifactInfo;
 import com.johnnyblabs.openspec.model.ArtifactStatus;
 import com.johnnyblabs.openspec.model.ChangeArtifactDag;
@@ -28,12 +29,15 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class VerificationServiceTest {
 
     @Mock Project project;
-    @Mock DirectApiService aiService;
+    @Mock AiExecutionService aiService;
+    @Mock DeliveryMethodResolver deliveryResolver;
     @Mock WorkflowSchemaContextService schemaContextService;
     @Mock ArtifactOrchestrationService orchestrationService;
     @TempDir Path tempDir;
@@ -44,6 +48,9 @@ class VerificationServiceTest {
     void setUp() {
         service = new VerificationService(project);
         lenient().when(project.getBasePath()).thenReturn(tempDir.toString());
+        lenient().when(project.getService(DeliveryMethodResolver.class)).thenReturn(deliveryResolver);
+        lenient().when(deliveryResolver.resolve()).thenReturn(
+                new DeliveryMethodResolver.ResolvedMethod(DeliveryMode.DIRECT_API, "Integrated backend"));
     }
 
     private Path createChangeDir(String name) throws IOException {
@@ -391,7 +398,7 @@ class VerificationServiceTest {
         @Test
         void no_ai_provider_degrades_to_not_assessed() throws IOException {
             changeWithRequirement("my-change", "auth", "Authentication service");
-            lenient().when(project.getService(DirectApiService.class)).thenReturn(aiService);
+            lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
             when(aiService.isConfigured()).thenReturn(false);
 
             VerificationReport report = service.verify("my-change");
@@ -404,7 +411,7 @@ class VerificationServiceTest {
         @Test
         void ai_ok_response_no_findings() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
-            lenient().when(project.getService(DirectApiService.class)).thenReturn(aiService);
+            lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
             when(aiService.isConfigured()).thenReturn(true);
             when(aiService.generateRaw(anyString())).thenReturn("OK");
 
@@ -415,7 +422,7 @@ class VerificationServiceTest {
         @Test
         void ai_gap_lines_become_warnings() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
-            lenient().when(project.getService(DirectApiService.class)).thenReturn(aiService);
+            lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
             when(aiService.isConfigured()).thenReturn(true);
             when(aiService.generateRaw(anyString())).thenReturn(
                     "GAP: Authentication service — no token validation described\nnoise line");
@@ -430,7 +437,7 @@ class VerificationServiceTest {
         @Test
         void ai_failure_degrades_to_suggestion() throws Exception {
             changeWithRequirement("my-change", "auth", "Authentication service");
-            lenient().when(project.getService(DirectApiService.class)).thenReturn(aiService);
+            lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
             when(aiService.isConfigured()).thenReturn(true);
             when(aiService.generateRaw(anyString())).thenThrow(new AiApiException("rate limited"));
 
@@ -449,12 +456,32 @@ class VerificationServiceTest {
             Path srcDir = tempDir.resolve("src/main/kotlin");
             Files.createDirectories(srcDir);
             Files.writeString(srcDir.resolve("AuthService.kt"), "class AuthService { /* auth */ }");
-            lenient().when(project.getService(DirectApiService.class)).thenReturn(aiService);
+            lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
             when(aiService.isConfigured()).thenReturn(true);
             when(aiService.generateRaw(anyString())).thenReturn("OK");
 
             VerificationReport report = service.verify("kt-change");
             assertEquals(0, report.getFindings(Dimension.CORRECTNESS).size());
+        }
+
+        @Test
+        void manualClipboardDoesNotCallConfiguredBackend() throws Exception {
+            changeWithRequirement("my-change", "auth", "Authentication service");
+            lenient().when(project.getService(AiExecutionService.class)).thenReturn(aiService);
+            lenient().when(aiService.isConfigured()).thenReturn(true);
+            when(deliveryResolver.resolve()).thenReturn(new DeliveryMethodResolver.ResolvedMethod(
+                    DeliveryMode.CLIPBOARD, "Clipboard"));
+
+            VerificationReport report = service.verify("my-change");
+
+            List<VerificationFinding> correctness = report.getFindings(Dimension.CORRECTNESS);
+            assertEquals(1, correctness.size());
+            assertEquals(Severity.SUGGESTION, correctness.getFirst().severity());
+            assertTrue(correctness.getFirst().description().contains("not assessed"));
+            assertTrue(correctness.getFirst().description().contains("no AI request sent"));
+            verify(project, never()).getService(AiExecutionService.class);
+            verify(aiService, never()).generateRaw(anyString());
+            verify(aiService, never()).isConfigured();
         }
 
         @Test

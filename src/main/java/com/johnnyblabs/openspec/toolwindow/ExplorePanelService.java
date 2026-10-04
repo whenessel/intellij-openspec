@@ -6,7 +6,7 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.openapi.wm.ToolWindowManager;
 import com.intellij.ui.content.Content;
 import com.intellij.ui.content.ContentFactory;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import org.jetbrains.annotations.Nullable;
 
 @Service(Service.Level.PROJECT)
@@ -40,7 +40,7 @@ public final class ExplorePanelService {
 
         // Lazy creation: if no panel yet but Direct API is now configured, create the tab
         if (explorePanel == null) {
-            DirectApiService apiService = project.getService(DirectApiService.class);
+            AiExecutionService apiService = project.getService(AiExecutionService.class);
             if (apiService == null || !apiService.isConfigured()) return null;
 
             ExplorePanel panel = new ExplorePanel(project);

@@ -9,7 +9,7 @@ All OpenSpec actions are available from the **OpenSpec** top-level menu and from
 | **Init** | OpenSpec → Init | *(none)* | ScaffoldingService creates structure | — |
 | **Propose** | OpenSpec → Propose... | `propose` | ScaffoldingService + dialog | Toolbar |
 | **Fast-Forward** | OpenSpec → Fast-Forward... | `ff` | Delegates to WorkflowActionPanel | — |
-| **Explore** | OpenSpec → Explore... | `explore` | Topic dialog + delivery routing. Explore tab requires Direct API. | — |
+| **Explore** | OpenSpec → Explore... | `explore` | Topic dialog + delivery routing. Explore tab requires integrated delivery and a configured backend. | — |
 | **Continue** | OpenSpec → Continue | `continue` | DirectApiService artifact generation | — |
 | **Apply** | OpenSpec → Apply | `apply` | Focuses workflow panel for apply | Change node |
 | **Verify** | OpenSpec → Verify | `verify` | VerificationService report dialog | — |

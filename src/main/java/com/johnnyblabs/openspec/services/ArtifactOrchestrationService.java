@@ -4,7 +4,7 @@ import com.intellij.openapi.components.Service;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiApiException;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import com.johnnyblabs.openspec.model.ArtifactInfo;
 import com.johnnyblabs.openspec.model.ArtifactInstruction;
 import com.johnnyblabs.openspec.model.ArtifactStatus;
@@ -116,26 +116,35 @@ public final class ArtifactOrchestrationService {
                 continue;
             }
 
-            // Check if any earlier artifacts in the list are also scaffolded
+            // Prefer actual schema edges; array position is only a legacy fallback.
             List<String> blockedBy = new ArrayList<>();
-            for (ArtifactInfo earlier : artifacts) {
-                if (earlier.id().equals(artifact.id())) break;
-                if (scaffoldedIds.contains(earlier.id())) {
-                    blockedBy.add(earlier.id());
+            if (artifacts.stream().anyMatch(a -> !a.requires().isEmpty())) {
+                for (String dependency : artifact.requires()) {
+                    if (scaffoldedIds.contains(dependency) || artifacts.stream().noneMatch(a ->
+                            a.id().equals(dependency) && isSatisfied(a.status()))) {
+                        blockedBy.add(dependency);
+                    }
+                }
+            } else {
+                for (ArtifactInfo earlier : artifacts) {
+                    if (earlier.id().equals(artifact.id())) break;
+                    if (scaffoldedIds.contains(earlier.id())) blockedBy.add(earlier.id());
                 }
             }
 
             if (blockedBy.isEmpty()) {
-                updatedArtifacts.add(new ArtifactInfo(artifact.id(), artifact.outputPath(), ArtifactStatus.READY, List.of()));
+                updatedArtifacts.add(new ArtifactInfo(artifact.id(), artifact.outputPath(), ArtifactStatus.READY,
+                        List.of(), artifact.requires()));
             } else {
-                updatedArtifacts.add(new ArtifactInfo(artifact.id(), artifact.outputPath(), ArtifactStatus.BLOCKED, blockedBy));
+                updatedArtifacts.add(new ArtifactInfo(artifact.id(), artifact.outputPath(), ArtifactStatus.BLOCKED,
+                        blockedBy, artifact.requires()));
             }
         }
         dag.setArtifacts(updatedArtifacts);
 
         // Recalculate isComplete
         boolean allDone = updatedArtifacts.stream()
-                .allMatch(a -> a.status() == ArtifactStatus.DONE);
+                .allMatch(a -> isSatisfied(a.status()));
         dag.setComplete(allDone);
     }
 
@@ -258,13 +267,13 @@ public final class ArtifactOrchestrationService {
 
     /**
      * Generates all remaining artifacts for a change in dependency order.
-     * Calls the DirectApiService for each artifact, writes the result to disk,
+     * Calls the AiExecutionService for each artifact, writes the result to disk,
      * and fires listener callbacks at each stage. Checks the cancellation flag
      * between artifacts.
      *
      * Must be called from a background thread.
      */
-    public void generateAllRemaining(String changeName, DirectApiService apiService,
+    public void generateAllRemaining(String changeName, AiExecutionService apiService,
                                      GenerateAllListener listener) {
         generateAllCancelled.set(false);
 
@@ -274,10 +283,15 @@ public final class ArtifactOrchestrationService {
             listener.onError(null, new RuntimeException("Failed to load artifact status"));
             return;
         }
-        int total = (int) dag.getArtifacts().stream()
-                .filter(a -> a.status() != ArtifactStatus.DONE)
-                .count();
+        int total;
+        try {
+            total = (int) requiredArtifacts(dag).stream().filter(a -> !isSatisfied(a.status())).count();
+        } catch (IllegalStateException e) {
+            listener.onError(null, e);
+            return;
+        }
         int index = 0;
+        Set<String> attempted = new HashSet<>();
 
         while (true) {
             if (generateAllCancelled.get()) {
@@ -294,15 +308,29 @@ public final class ArtifactOrchestrationService {
                 return;
             }
 
-            if (dag.isComplete()) {
+            List<ArtifactInfo> required;
+            try {
+                required = requiredArtifacts(dag);
+            } catch (IllegalStateException e) {
+                listener.onError(null, e);
+                return;
+            }
+            if (required.stream().allMatch(a -> isSatisfied(a.status()))) {
                 listener.onAllComplete();
                 return;
             }
 
-            String artifactId = findNextReadyArtifactId(dag);
+            String artifactId = required.stream().filter(a -> a.status() == ArtifactStatus.READY)
+                    .map(ArtifactInfo::id).findFirst().orElse(null);
             if (artifactId == null) {
-                // No ready artifacts but not complete — shouldn't happen, but handle gracefully
-                listener.onAllComplete();
+                listener.onError(null, new IllegalStateException("Required artifacts remain incomplete but none are ready: "
+                        + required.stream().filter(a -> !isSatisfied(a.status())).map(ArtifactInfo::id).toList()
+                        + ". Review blocked or conditional artifacts and refresh status."));
+                return;
+            }
+            if (!attempted.add(artifactId)) {
+                listener.onError(artifactId, new IllegalStateException("Artifact remains incomplete after generation: "
+                        + artifactId + ". Review the accepted output and refresh status."));
                 return;
             }
 
@@ -311,12 +339,14 @@ public final class ArtifactOrchestrationService {
 
             try {
                 ArtifactInstruction instruction = getInstruction(changeName, artifactId);
-                String result = apiService.generate(instruction);
-                writeArtifactResult(instruction, result);
+                apiService.generateAndApply(instruction);
                 invalidateCache(changeName);
                 listener.onArtifactCompleted(artifactId);
             } catch (AiApiException e) {
                 listener.onError(artifactId, e);
+                return;
+            } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+                listener.onCancelled(artifactId);
                 return;
             } catch (Exception e) {
                 listener.onError(artifactId, e);
@@ -331,6 +361,7 @@ public final class ArtifactOrchestrationService {
      */
     public void cancelGenerateAll() {
         generateAllCancelled.set(true);
+        project.getService(AiExecutionService.class).cancelActive();
     }
 
     private String findNextReadyArtifactId(ChangeArtifactDag dag) {
@@ -338,42 +369,39 @@ public final class ArtifactOrchestrationService {
         return ready.isEmpty() ? null : ready.getFirst().id();
     }
 
+    private static boolean isSatisfied(ArtifactStatus status) {
+        return status == ArtifactStatus.DONE || status == ArtifactStatus.SKIPPED;
+    }
+
+    /** Full apply-required closure, including dependencies of artifacts already marked done.
+     * Older CLI output has no edges; conservatively retain all artifacts in that case. */
+    static List<ArtifactInfo> requiredArtifacts(ChangeArtifactDag dag) {
+        List<ArtifactInfo> artifacts = dag.getArtifacts();
+        for (String root : dag.getApplyRequires()) {
+            if (artifacts.stream().noneMatch(a -> a.id().equals(root)))
+                throw new IllegalStateException("Required artifact missing from CLI status: " + root);
+        }
+        if (dag.getApplyRequires().isEmpty() || artifacts.stream().allMatch(a -> a.requires().isEmpty())) {
+            return artifacts;
+        }
+        Map<String, ArtifactInfo> byId = artifacts.stream().collect(Collectors.toMap(ArtifactInfo::id, a -> a));
+        Set<String> required = new HashSet<>();
+        Deque<String> frontier = new ArrayDeque<>(dag.getApplyRequires());
+        while (!frontier.isEmpty()) {
+            String id = frontier.removeFirst();
+            if (!required.add(id)) continue;
+            ArtifactInfo artifact = byId.get(id);
+            if (artifact == null) throw new IllegalStateException("Required artifact missing from CLI status: " + id);
+            frontier.addAll(artifact.requires());
+        }
+        return artifacts.stream().filter(a -> required.contains(a.id())).toList();
+    }
+
     /**
      * Writes generated artifact content to the file specified by the instruction.
      */
     public void writeArtifactResult(ArtifactInstruction instruction, String content) throws IOException {
-        String changeDir = instruction.changeDir();
-        String outputPath = instruction.outputPath();
-        if (changeDir == null || outputPath == null) {
-            throw new IOException("Missing changeDir or outputPath in instruction");
-        }
-
-        Path filePath = Path.of(changeDir, outputPath);
-        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-
-        if (ApplicationManager.getApplication() == null) {
-            // Fallback for unit test context (no IntelliJ Application)
-            Files.createDirectories(filePath.getParent());
-            Files.writeString(filePath, content, StandardCharsets.UTF_8);
-            return;
-        }
-
-        String parentPath = filePath.getParent().toString();
-        WriteAction.runAndWait(() -> {
-            VirtualFile parentDir = VfsUtil.createDirectoryIfMissing(parentPath);
-            if (parentDir == null) {
-                throw new IOException("Failed to create directory: " + parentPath);
-            }
-            String fileName = filePath.getFileName().toString();
-            VirtualFile file = parentDir.findChild(fileName);
-            if (file == null) {
-                file = parentDir.createChildData(this, fileName);
-            }
-            file.setBinaryContent(bytes);
-        });
-
-        // Safety net: ensure parent directory is fully indexed
-        VfsUtil.markDirtyAndRefresh(false, true, true,
-                LocalFileSystem.getInstance().findFileByPath(parentPath));
+        var writer = project.getService(com.johnnyblabs.openspec.ai.safety.SafeArtifactService.class);
+        writer.apply(writer.prepare(instruction, content));
     }
 }

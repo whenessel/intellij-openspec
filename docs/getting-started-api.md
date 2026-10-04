@@ -20,16 +20,18 @@ The OpenSpec CLI is optional — the plugin has built-in scaffolding that handle
 
 ## How It Works
 
-In this workflow, the plugin handles **everything**: proposing changes, calling the AI API, writing responses to disk, and advancing the pipeline. You don't need a separate AI tool, CLI, or clipboard. The plugin assembles prompts, sends them to your chosen API provider, and writes the generated artifacts directly.
+In this workflow, the plugin handles **everything**: proposing changes, calling the AI API, writing responses to disk, and advancing the pipeline. You don't need a separate AI tool, CLI, or clipboard. The plugin assembles prompts, shows an editable context review, sends approved context to your chosen API provider, and previews validated artifact batches before writing.
 
 ---
 
-## Step 1: Configure Direct API
+## Step 1: Configure REST API generation
 
-Go to **Settings > Tools > OpenSpec > Direct API**.
+Choose **REST API (API billed)** as the backend. For installed Codex with an existing CLI login, use the [local Codex guide](local-codex.md).
+
+Go to **Settings > Tools > OpenSpec > AI generation**.
 
 1. **Provider** — Select `Claude`, `OpenAI`, or `Gemini`
-2. **API key** — Enter your key. It's stored in your OS keychain via IntelliJ's PasswordSafe — never in project files. See [Direct API settings](feature-reference.md#direct-api) for key format details.
+2. **API key** — Enter your key. It's stored in your OS keychain via IntelliJ's PasswordSafe — never in project files. See [AI generation settings](feature-reference.md#ai-generation) for key format details.
 3. **Model** — Pre-populated for your provider. Edit if you want a specific model.
 4. **Test** — Click to verify your key and connection
 

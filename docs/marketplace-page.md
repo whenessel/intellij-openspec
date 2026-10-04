@@ -53,7 +53,7 @@ Paste this HTML into the "Description" field on the plugin edit page:
     <td><strong>Standalone API User</strong></td>
     <td>Have an API key but no external AI tool? The plugin provides the
       complete workflow &mdash; Fast-Forward from idea to fully generated
-      artifacts in one click via Direct API (Claude, OpenAI, or Gemini).</td>
+      artifacts through a selected integrated backend with context and result review. Manual delivery hands off the first artifact prompt.</td>
   </tr>
 </table>
 
@@ -66,12 +66,12 @@ Paste this HTML into the "Description" field on the plugin edit page:
   <li><strong>Workflow orchestrator</strong> &mdash; Walk through Init, Propose, Generate,
     Apply, and Archive from menus and toolbar buttons. A visual artifact
     pipeline shows what&rsquo;s done, what&rsquo;s ready, and what&rsquo;s blocked.
-    Fast-Forward creates a change and generates all artifacts in one click.
+    Fast-Forward creates a change and generates reviewed artifacts with integrated delivery, or hands off the first artifact prompt with manual delivery.
     Continue advances one artifact at a time. Verify checks completeness.</li>
   <li><strong>AI bridge</strong> &mdash; Route generation prompts to your preferred AI tool:
     <em>Clipboard</em> (paste into Copilot, Cursor, Claude Code, etc.),
-    <em>Editor Tab</em> (review before sending), or <em>Direct API</em>
-    (call Claude, OpenAI, or Gemini and write the result automatically).</li>
+    <em>Editor Tab</em> (review before sending), or <em>Integrated generation</em>
+    (REST providers or supported installed Codex, with context and artifact review).</li>
   <li><strong>Works with or without the CLI</strong> &mdash; When the OpenSpec CLI is
     installed, the plugin delegates to it. When it isn&rsquo;t, built-in
     scaffolding handles project init and change creation so you can work
@@ -91,7 +91,7 @@ Paste this HTML into the "Description" field on the plugin edit page:
   <li>Visual artifact pipeline with status chips (done / ready / blocked)</li>
   <li>Fast-Forward: one-click change creation + artifact generation</li>
   <li>Generate All: walk the full artifact DAG with progress reporting</li>
-  <li>Direct API support for Claude, OpenAI, and Gemini with secure credential storage</li>
+  <li>REST support for Claude, OpenAI, and Gemini with secure credential storage; installed Codex CLI backend with existing login, model selection and context review</li>
   <li>Detects AI tool configuration in your project and provides tool-specific delivery guidance</li>
   <li>Real-time editor inspections for spec format, RFC 2119 keywords, and delta spec structure</li>
   <li>Delta spec sync: merge ADDED / MODIFIED / REMOVED sections into main specs with preview</li>
@@ -146,14 +146,16 @@ Paste this HTML into the "Getting Started" field:
   <li><strong>Archive</strong> — Merge delta specs into your main specs and archive the change.</li>
 </ol>
 
-<p>The plugin works with any AI tool — GitHub Copilot, Claude Code, Cursor, or direct API calls to Claude, OpenAI, and Gemini.</p>
+<p><strong>Installed Codex MVP:</strong> requires Codex 0.160.0 on Linux/macOS and a compatible restricted profile. Codex owns login and refresh; ChatGPT usage is online and subject to plan limits, while API key mode requires billing opt-in. Prompt text is supplied through stdin without native filesystem/execution tools, extra context or autonomous writes. Explore resumes CLI-owned history under ChatGPT workspace/account identity and scope guards; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify, while persistent Explore requires verifiable ChatGPT identity. Unsupported configurations fail without REST fallback. OpenRouter and autonomous Apply remain planned.</p>
+<p><strong>Development status:</strong> this source description includes the branch implementation; full build, Plugin Verifier and IDE acceptance are pending because SDK downloads are blocked. Live Codex inference has not been validated in this environment.</p>
+<p>The plugin hands prompts to GitHub Copilot, Claude Code, Cursor and other tools, or generates through REST providers and a supported installed Codex CLI.</p>
 
 <h2>Delivery Modes</h2>
 
 <ul>
   <li><strong>Clipboard</strong> — Copy prompts and paste into your AI tool's chat (Copilot, Cursor, etc.)</li>
   <li><strong>Editor Tab</strong> — Open prompts in a temporary editor tab for review</li>
-  <li><strong>Direct API</strong> — Send prompts directly to Claude, OpenAI, or Gemini and write responses automatically</li>
+  <li><strong>Integrated generation</strong> — Use REST providers or your supported installed Codex CLI, review context before sending, then review validated artifact batches before writing</li>
 </ul>
 
 <p>For a complete walkthrough, see the <a href="https://github.com/fission-ai/openspec">OpenSpec documentation</a>.</p>

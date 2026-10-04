@@ -29,6 +29,9 @@
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.ScaffoldingDetectionService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.AiToolDetectionService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.ai.DirectApiService"/>
+        <projectService serviceImplementation="com.johnnyblabs.openspec.ai.AiExecutionService"/>
+        <projectService serviceImplementation="com.johnnyblabs.openspec.ai.safety.SafeArtifactService"/>
+        <projectService serviceImplementation="com.johnnyblabs.openspec.ai.safety.ContextReviewService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.services.DeliveryMethodResolver"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.toolwindow.OpenSpecConsoleService"/>
         <projectService serviceImplementation="com.johnnyblabs.openspec.toolwindow.ExplorePanelService"/>

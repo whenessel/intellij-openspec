@@ -1,7 +1,9 @@
 # Planning validation — 2026-10-04
 
+This records the original planning-only checkpoint before later implementation/publication authorization. For current implementation evidence and blockers, see [implementation-status.md](implementation-status.md).
+
 Branch: `plan/local-codex-provider-architecture`.
-Base/current HEAD: `27adb08d7ce197e998bfb897ecce6d7d49a2a609`.
+Planning baseline HEAD: `27adb08d7ce197e998bfb897ecce6d7d49a2a609`.
 
 ## Executed checks
 

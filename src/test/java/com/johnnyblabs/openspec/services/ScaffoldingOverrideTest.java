@@ -99,6 +99,22 @@ class ScaffoldingOverrideTest {
     }
 
     @Test
+    void overridesPreserveRealRequiresEdgesRatherThanArrayOrder() throws IOException {
+        ChangeArtifactDag dag = CliOutputParser.parseChangeStatus(fixture("1.7.0/status.json"));
+        setupChangeDir("test-change", "proposal.md", REAL_CONTENT,
+                "design.md", SCAFFOLDED_DESIGN, "tasks.md", SCAFFOLDED_TASKS);
+        List<String> designRequires = findArtifact(dag, "design").requires();
+        List<String> tasksRequires = findArtifact(dag, "tasks").requires();
+        runRealOverrides(dag, "test-change");
+        assertEquals(ArtifactStatus.READY, findArtifact(dag, "design").status(),
+                "ready specs sibling does not block design, which requires only proposal");
+        assertEquals(ArtifactStatus.BLOCKED, findArtifact(dag, "tasks").status());
+        assertEquals(designRequires, findArtifact(dag, "design").requires());
+        assertEquals(tasksRequires, findArtifact(dag, "tasks").requires());
+        assertTrue(findArtifact(dag, "tasks").missingDeps().containsAll(List.of("specs", "design")));
+    }
+
+    @Test
     void noneScaffolded_noChanges() throws IOException {
         setupChangeDir("test-change",
                 "proposal.md", REAL_CONTENT,
@@ -175,8 +191,10 @@ class ScaffoldingOverrideTest {
     /**
      * Pins reorder-invariance: run the real override over the SAME scaffolded files using the two
      * real captured artifact orderings (1.6 {@code [proposal, design, specs, tasks]} vs 1.7
-     * {@code [proposal, specs, design, tasks]}) and assert identical derived status + missingDeps
-     * per id. A guard first proves the two orderings actually differ, so this can never degrade to
+     * {@code [proposal, specs, design, tasks]}) and assert identical derived status per id.
+     * The edge-aware generation additionally reports a ready non-scaffold dependency;
+     * the legacy positional fallback only knows scaffolded predecessors.
+     * A guard first proves the two orderings actually differ, so this can never degrade to
      * a tautology if the fixtures ever converge.
      */
     @Test
@@ -198,8 +216,10 @@ class ScaffoldingOverrideTest {
 
         assertEquals(statusById(dag16), statusById(dag17),
                 "the schema-order reorder must not change any artifact's overridden status");
-        assertEquals(missingDepsById(dag16), missingDepsById(dag17),
-                "the schema-order reorder must not change any artifact's blocked-by list");
+        assertEquals(List.of("design"), findArtifact(dag16, "tasks").missingDeps(),
+                "legacy fallback retains scaffolded predecessor behavior");
+        assertEquals(List.of("specs", "design"), findArtifact(dag17, "tasks").missingDeps(),
+                "actual schema edges report every incomplete direct dependency");
     }
 
     // --- Helpers ---

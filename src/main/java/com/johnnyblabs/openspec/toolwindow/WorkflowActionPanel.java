@@ -24,7 +24,7 @@ import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
 import com.johnnyblabs.openspec.ai.AiApiException;
 import com.johnnyblabs.openspec.ai.DeliveryMode;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import com.johnnyblabs.openspec.validation.BuiltInValidator;
 import com.johnnyblabs.openspec.validation.ValidationIssue;
 import com.johnnyblabs.openspec.validation.ValidationResult;
@@ -185,7 +185,7 @@ public class WorkflowActionPanel extends JPanel {
             if (ffInputActive) onFfCancel();
             String selected = (String) changeCombo.getSelectedItem();
             if (selected != null && !selected.equals(activeChangeName)) {
-                activeChangeName = selected;
+                setSelectedChange(selected);
                 resetVerifyStatus();
                 disposeWatcher();
                 refreshForChange(selected);
@@ -398,11 +398,21 @@ public class WorkflowActionPanel extends JPanel {
         return btn;
     }
 
+    private void setSelectedChange(String changeName) {
+        activeChangeName = changeName;
+        com.johnnyblabs.openspec.services.ExploreContextService context =
+                project.getService(com.johnnyblabs.openspec.services.ExploreContextService.class);
+        if (context != null) context.setSelectedChange(changeName);
+    }
+
     public void setOnRefreshRequested(Runnable callback) {
         this.onRefreshRequested = callback;
     }
 
     public void refresh() {
+        ApplicationManager.getApplication().invokeLater(() -> {
+            if (!project.isDisposed()) populateToolSelector();
+        });
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             ChangeService changeService = project.getService(ChangeService.class);
             List<Change> active = changeService.getActiveChanges();
@@ -431,9 +441,14 @@ public class WorkflowActionPanel extends JPanel {
      * Selects the given change and triggers generation.
      */
     public void selectChangeAndGenerate(String changeName) {
-        activeChangeName = changeName;
-        refresh();
-        ApplicationManager.getApplication().invokeLater(this::onGenerate);
+        setSelectedChange(changeName);
+        populateToolSelector();
+        ApplicationManager.getApplication().executeOnPooledThread(() -> {
+            refreshForChangeOnPool(changeName);
+            ApplicationManager.getApplication().invokeLater(() -> {
+                if (!project.isDisposed() && changeName.equals(activeChangeName)) onGenerate();
+            });
+        });
     }
 
     /**
@@ -441,7 +456,7 @@ public class WorkflowActionPanel extends JPanel {
      * Used by ProposeAction to auto-focus a newly created change.
      */
     public void selectChange(String changeName) {
-        activeChangeName = changeName;
+        setSelectedChange(changeName);
         refresh();
     }
 
@@ -451,7 +466,7 @@ public class WorkflowActionPanel extends JPanel {
      */
     public void setActiveChange(String changeName) {
         if (changeName == null || changeName.equals(activeChangeName)) return;
-        activeChangeName = changeName;
+        setSelectedChange(changeName);
         if (changeCombo != null && changeCombo.isVisible()) {
             changeCombo.setSelectedItem(changeName);
         }
@@ -475,14 +490,17 @@ public class WorkflowActionPanel extends JPanel {
             }
         }
 
-        DirectApiService apiService = project.getService(DirectApiService.class);
-        boolean hasApi = apiService != null && apiService.isConfigured();
+        AiExecutionService apiService = project.getService(AiExecutionService.class);
+        boolean hasApi = "LOCAL_CODEX".equals(OpenSpecSettings.getInstance(project).getAiBackend())
+                || "DIRECT_API".equals(OpenSpecSettings.getInstance(project).getPreferredDeliveryMethod())
+                || (apiService != null && apiService.isConfigured());
 
         if (hasApi) {
             if (toolSelector.getItemCount() > 0) {
                 toolSelector.addItem(SEPARATOR_ITEM);
             }
-            toolSelector.addItem("Direct API  [API]");
+            toolSelector.addItem("LOCAL_CODEX".equals(OpenSpecSettings.getInstance(project).getAiBackend())
+                    ? "Local Codex  [integrated]" : "Direct API  [API]");
         }
 
         if (toolSelector.getItemCount() > 0) {
@@ -519,7 +537,7 @@ public class WorkflowActionPanel extends JPanel {
         // Try to match by delivery method
         if (savedMethod != null && !savedMethod.isBlank()) {
             String match = switch (savedMethod) {
-                case "DIRECT_API" -> "Direct API";
+                case "DIRECT_API" -> "LOCAL_CODEX".equals(settings.getAiBackend()) ? "Local Codex" : "Direct API";
                 case "EDITOR_TAB" -> "Editor Tab";
                 case "CLIPBOARD" -> "Clipboard";
                 default -> null;
@@ -535,10 +553,17 @@ public class WorkflowActionPanel extends JPanel {
             }
         }
 
-        // Default: first non-separator item
-        if (toolSelector.getItemCount() > 0) {
-            toolSelector.setSelectedIndex(0);
+        // Defaults follow the same resolver as menu actions; detected tools do not override a backend.
+        com.johnnyblabs.openspec.services.DeliveryMethodResolver resolver =
+                project.getService(com.johnnyblabs.openspec.services.DeliveryMethodResolver.class);
+        DeliveryMode mode = resolver == null ? DeliveryMode.CLIPBOARD : resolver.resolve().mode();
+        String prefix = mode == DeliveryMode.DIRECT_API
+                ? ("LOCAL_CODEX".equals(settings.getAiBackend()) ? "Local Codex" : "Direct API")
+                : mode == DeliveryMode.EDITOR_TAB ? "Editor Tab" : "Clipboard";
+        for (int i = 0; i < toolSelector.getItemCount(); i++) {
+            if (toolSelector.getItemAt(i).startsWith(prefix)) { toolSelector.setSelectedIndex(i); return; }
         }
+        if (toolSelector.getItemCount() > 0) toolSelector.setSelectedIndex(0);
     }
 
     private void onToolSelectionChanged() {
@@ -562,7 +587,7 @@ public class WorkflowActionPanel extends JPanel {
         if (selectorItem == null || selectorItem.equals(SEPARATOR_ITEM)) {
             return new ToolSelection("", DeliveryMode.CLIPBOARD);
         }
-        if (selectorItem.startsWith("Direct API")) {
+        if (selectorItem.startsWith("Direct API") || selectorItem.startsWith("Local Codex")) {
             return new ToolSelection("", DeliveryMode.DIRECT_API);
         }
         if (selectorItem.equals("Editor Tab")) {
@@ -590,7 +615,7 @@ public class WorkflowActionPanel extends JPanel {
         String selected = (String) toolSelector.getSelectedItem();
         ToolSelection ts = parseToolSelection(selected);
         return switch (ts.mode) {
-            case DIRECT_API -> "Direct API";
+            case DIRECT_API -> project.getService(AiExecutionService.class).getBackendLabel();
             case EDITOR_TAB -> "Editor Tab";
             case CLIPBOARD -> ts.toolName.isBlank() ? "Clipboard" : "Clipboard: " + ts.toolName;
         };
@@ -614,7 +639,7 @@ public class WorkflowActionPanel extends JPanel {
                 singleChangeLabel.setText(names[0]);
                 singleChangeLabel.setFont(singleChangeLabel.getFont().deriveFont(Font.BOLD));
                 ((CardLayout) changeSelectorPanel.getLayout()).show(changeSelectorPanel, "label");
-                activeChangeName = names[0];
+                setSelectedChange(names[0]);
             } else {
                 updatingCombo = true;
                 changeCombo.removeAllItems();
@@ -669,7 +694,7 @@ public class WorkflowActionPanel extends JPanel {
             pipelinePanel.removeAll();
 
             if (dag == null) {
-                activeChangeName = null;
+                setSelectedChange(null);
                 allArtifactsComplete = false;
                 hasTasksRemaining = false;
                 hasDeltaSpecs = false;
@@ -679,7 +704,7 @@ public class WorkflowActionPanel extends JPanel {
                 return;
             }
 
-            activeChangeName = dag.getChangeName();
+            setSelectedChange(dag.getChangeName());
             contentCardLayout.show(contentCards, CARD_PIPELINE);
 
             // Build interactive pipeline chips
@@ -823,6 +848,7 @@ public class WorkflowActionPanel extends JPanel {
             case READY -> chip.setToolTipText("Click to generate \u00B7 Right-click for options");
             case DONE -> chip.setToolTipText("Click to open \u00B7 Right-click for options");
             case GENERATING -> chip.setToolTipText("Generating...");
+            case SKIPPED -> chip.setToolTipText("Skipped by CLI workflow");
             case BLOCKED -> {
                 String desc = ARTIFACT_DESCRIPTIONS.getOrDefault(artifact.id(), artifact.id());
                 String deps = artifact.missingDeps() != null && !artifact.missingDeps().isEmpty()
@@ -1003,6 +1029,7 @@ public class WorkflowActionPanel extends JPanel {
         com.intellij.openapi.progress.ProgressIndicator ind = activeGenerations.get(artifactId);
         if (ind != null) {
             ind.cancel();
+            project.getService(AiExecutionService.class).cancelActive();
         }
     }
 
@@ -1012,7 +1039,7 @@ public class WorkflowActionPanel extends JPanel {
      * Selects the given change and triggers apply.
      */
     public void selectChangeAndApply(String changeName) {
-        activeChangeName = changeName;
+        setSelectedChange(changeName);
         refresh();
         ApplicationManager.getApplication().invokeLater(this::onApplyTasks);
     }
@@ -1245,14 +1272,13 @@ public class WorkflowActionPanel extends JPanel {
         });
         card.add(proposeLink);
 
-        DirectApiService apiService = project.getService(DirectApiService.class);
-        if (apiService != null && apiService.isConfigured()) {
+        {
             JBLabel orLabel = new JBLabel(" or ");
             orLabel.setForeground(JBColor.GRAY);
             card.add(orLabel);
 
             com.intellij.ui.HyperlinkLabel ffLink = new com.intellij.ui.HyperlinkLabel("Fast-Forward");
-            ffLink.setToolTipText("Create a change and generate all artifacts in one step");
+            ffLink.setToolTipText("Create a change; generate all with an integrated backend or deliver the first prompt manually");
             ffLink.addHyperlinkListener(ev -> activateFfInput());
             card.add(ffLink);
         }
@@ -1326,16 +1352,6 @@ public class WorkflowActionPanel extends JPanel {
      * (e.g., from OpenSpecFfAction) to show the FF form without opening a dialog.
      */
     public void activateFfInput() {
-        DirectApiService apiService = project.getService(DirectApiService.class);
-        if (apiService == null || !apiService.isConfigured()) {
-            ffStatusLabel.setText("Requires AI provider. Configure in Settings \u2192 Tools \u2192 OpenSpec.");
-            ffStatusLabel.setForeground(COLOR_ERROR);
-            contentCardLayout.show(contentCards, CARD_FF_INPUT);
-            ffGoButton.setEnabled(false);
-            ffCancelButton.setEnabled(true);
-            return;
-        }
-
         ffInputActive = true;
         ffDescriptionField.setText("");
         ffNameOverrideField.setText("");
@@ -1431,7 +1447,7 @@ public class WorkflowActionPanel extends JPanel {
 
                     // Success: switch to pipeline and trigger generation
                     ApplicationManager.getApplication().invokeLater(() -> {
-                        activeChangeName = finalChangeName;
+                        setSelectedChange(finalChangeName);
 
                         // Reset FF form for next use
                         ffDescriptionField.setEnabled(true);
@@ -1686,46 +1702,20 @@ public class WorkflowActionPanel extends JPanel {
                             }
                         });
                         case DIRECT_API -> {
-                            DirectApiService apiService = project.getService(DirectApiService.class);
-                            String result = apiService.generate(instruction);
-                            // Honor cancellation: the blocking HTTP call isn't interruptible, but a
-                            // cancelled run must not write the artifact or show a success notification.
-                            if (indicator.isCanceled()) return;
-                            String outputPath = instruction.changeDir() + "/" + instruction.outputPath();
+                            AiExecutionService apiService = project.getService(AiExecutionService.class);
+                            if (apiService == null || !apiService.isConfigured()) {
+                                throw new IllegalStateException("Selected AI backend is not ready. Check OpenSpec settings.");
+                            }
+                            List<java.nio.file.Path> written = apiService.generateAndApply(instruction);
+                            indicator.checkCanceled();
+                            orchestration.invalidateCache(changeName);
                             ApplicationManager.getApplication().invokeLater(() -> {
-                                try {
-                                    com.intellij.openapi.application.WriteAction.run(() -> {
-                                        VirtualFile outFile = LocalFileSystem.getInstance().findFileByPath(outputPath);
-                                        if (outFile == null) {
-                                            VirtualFile parent = LocalFileSystem.getInstance()
-                                                    .findFileByPath(instruction.changeDir());
-                                            if (parent != null) {
-                                                outFile = parent.createChildData(this, instruction.outputPath());
-                                            }
-                                        }
-                                        if (outFile != null) {
-                                            outFile.setBinaryContent(result.getBytes(StandardCharsets.UTF_8));
-                                        }
-                                    });
-                                    VirtualFile generatedFile = LocalFileSystem.getInstance().findFileByPath(outputPath);
-                                    if (generatedFile != null) {
-                                        OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_GENERATION, "Generate",
-                                                "Generated " + artifactId, com.intellij.notification.NotificationType.INFORMATION,
-                                                OpenSpecNotifier.openFileAction(generatedFile));
-                                    } else {
-                                        OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_GENERATION, "Generate",
-                                                "Generated " + artifactId, com.intellij.notification.NotificationType.INFORMATION);
-                                    }
-                                    showGuidancePopover(chipAnchor,
-                                            "\u2713 Generated " + artifactId,
-                                            "Saved to: " + outputPath, null);
-                                    orchestration.invalidateCache(changeName);
-                                    refresh();
-                                    if (onRefreshRequested != null) onRefreshRequested.run();
-                                } catch (IOException ex) {
-                                    OpenSpecNotifier.notify(project, OpenSpecNotifier.GROUP_GENERATION, "Generate",
-                                            "Failed to write artifact: " + ex.getMessage(), com.intellij.notification.NotificationType.ERROR);
-                                }
+                                if (project.isDisposed()) return;
+                                OpenSpecNotifier.info(project, "Generate", "Generated " + artifactId);
+                                showGuidancePopover(chipAnchor, "\u2713 Generated " + artifactId,
+                                        "Saved: " + written, null);
+                                refresh();
+                                if (onRefreshRequested != null) onRefreshRequested.run();
                             });
                         }
                     }
@@ -1844,6 +1834,11 @@ public class WorkflowActionPanel extends JPanel {
 
     private void onGenerateAll() {
         if (activeChangeName == null) return;
+        AiExecutionService service = project.getService(AiExecutionService.class);
+        if (getSelectedDeliveryMode() != DeliveryMode.DIRECT_API || service == null || !service.isConfigured()) {
+            OpenSpecNotifier.warn(project, "Generate All", "Choose a ready integrated backend for automatic generation. Manual delivery generates one prompt at a time.");
+            return;
+        }
 
         String changeName = activeChangeName;
 
@@ -1857,7 +1852,7 @@ public class WorkflowActionPanel extends JPanel {
         ArtifactOrchestrationService orch = project.getService(ArtifactOrchestrationService.class);
         ChangeArtifactDag currentDag = orch.getCachedArtifactStatus(changeName);
         int totalRemaining = currentDag != null
-                ? (int) currentDag.getArtifacts().stream().filter(a -> a.status() != ArtifactStatus.DONE).count()
+                ? (int) currentDag.getArtifacts().stream().filter(a -> a.status() != ArtifactStatus.DONE && a.status() != ArtifactStatus.SKIPPED).count()
                 : 4;
 
         // Start elapsed timer
@@ -1987,7 +1982,7 @@ public class WorkflowActionPanel extends JPanel {
 
         ApplicationManager.getApplication().executeOnPooledThread(() -> {
             ArtifactOrchestrationService orchestration = project.getService(ArtifactOrchestrationService.class);
-            DirectApiService apiService = project.getService(DirectApiService.class);
+            AiExecutionService apiService = project.getService(AiExecutionService.class);
             orchestration.generateAllRemaining(changeName, apiService, listener);
         });
     }
@@ -1998,7 +1993,7 @@ public class WorkflowActionPanel extends JPanel {
         // Status strip is already being updated by the listener callbacks
         // Just update the elapsed time portion
         long elapsed = (System.nanoTime() - generateAllStartNanos) / 1_000_000_000L;
-        deliveryModeStatusLabel.setText(" \u00B7 " + formatElapsed(elapsed) + " \u00B7 Direct API");
+        deliveryModeStatusLabel.setText(" \u00B7 " + formatElapsed(elapsed) + " \u00B7 " + getDeliveryModeLabel());
     }
 
     private void updateGenerateAllStatusText(int completed, int total) {
@@ -2006,7 +2001,7 @@ public class WorkflowActionPanel extends JPanel {
         verifyStatusLabel.setText("Generating " + (completed + 1) + "/" + total + "...");
         verifyStatusLabel.setForeground(COLOR_GENERATING);
         taskProgressStatusLabel.setVisible(false);
-        deliveryModeStatusLabel.setText(" \u00B7 " + formatElapsed(elapsed) + " \u00B7 Direct API");
+        deliveryModeStatusLabel.setText(" \u00B7 " + formatElapsed(elapsed) + " \u00B7 " + getDeliveryModeLabel());
     }
 
     private String formatElapsed(long seconds) {
@@ -2017,6 +2012,7 @@ public class WorkflowActionPanel extends JPanel {
     private void onCancelGenerateAll() {
         ArtifactOrchestrationService orchestration = project.getService(ArtifactOrchestrationService.class);
         orchestration.cancelGenerateAll();
+        project.getService(AiExecutionService.class).cancelActive();
     }
 
     private void refreshPipelineChips(ChangeArtifactDag dag) {

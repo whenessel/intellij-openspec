@@ -30,6 +30,29 @@ public final class DirectApiService {
     private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/";
 
     private final Project project;
+    private final ThreadLocal<java.util.function.BooleanSupplier> cancellation = new ThreadLocal<>();
+
+    public String generateRaw(String prompt, java.util.function.BooleanSupplier canceled) throws AiApiException {
+        cancellation.set(canceled);
+        try { return generateRaw(prompt); } finally { cancellation.remove(); }
+    }
+
+    private HttpResponse<String> sendRequest(HttpRequest request) throws Exception {
+        var future = createHttpClient().sendAsync(request, HttpResponse.BodyHandlers.ofString());
+        long deadline = System.nanoTime() + TIMEOUT.toNanos();
+        try {
+            while (true) {
+                com.intellij.openapi.progress.ProgressManager.checkCanceled();
+                var token = cancellation.get();
+                if (Thread.currentThread().isInterrupted() || token != null && token.getAsBoolean()) {
+                    throw new com.intellij.openapi.progress.ProcessCanceledException();
+                }
+                if (System.nanoTime() > deadline) throw new java.util.concurrent.TimeoutException("AI request timed out");
+                try { return future.get(100, java.util.concurrent.TimeUnit.MILLISECONDS); }
+                catch (java.util.concurrent.TimeoutException ignored) { /* poll cancellation */ }
+            }
+        } finally { if (!future.isDone()) future.cancel(true); }
+    }
 
     public DirectApiService(Project project) {
         this.project = project;
@@ -202,13 +225,15 @@ public final class DirectApiService {
     private String callClaude(String apiKey, String model, String prompt) throws AiApiException {
         try {
             HttpRequest request = buildClaudeRequest(model, apiKey, prompt);
-            HttpResponse<String> response = createHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = sendRequest(request);
 
             if (response.statusCode() != 200) {
                 throw buildApiError("Claude", response.statusCode(), response.body());
             }
             return parseClaudeResponse(response.body());
         } catch (AiApiException e) {
+            throw e;
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
             throw e;
         } catch (Exception e) {
             throw new AiApiException("Claude API call failed: " + e.getMessage(), e);
@@ -274,13 +299,15 @@ public final class DirectApiService {
     private String callOpenAi(String apiKey, String model, String prompt) throws AiApiException {
         try {
             HttpRequest request = buildOpenAiRequest(model, apiKey, prompt);
-            HttpResponse<String> response = createHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = sendRequest(request);
 
             if (response.statusCode() != 200) {
                 throw buildApiError("OpenAI", response.statusCode(), response.body());
             }
             return parseOpenAiResponse(response.body());
         } catch (AiApiException e) {
+            throw e;
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
             throw e;
         } catch (Exception e) {
             throw new AiApiException("OpenAI API call failed: " + e.getMessage(), e);
@@ -338,7 +365,7 @@ public final class DirectApiService {
     private String callGemini(String apiKey, String model, String prompt) throws AiApiException {
         try {
             HttpRequest request = buildGeminiRequest(model, apiKey, prompt);
-            HttpResponse<String> response = createHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = sendRequest(request);
 
             if (response.statusCode() != 200) {
                 throw buildApiError("Gemini", response.statusCode(), response.body());
@@ -346,13 +373,15 @@ public final class DirectApiService {
             return parseGeminiResponse(response.body());
         } catch (AiApiException e) {
             throw e;
+        } catch (com.intellij.openapi.progress.ProcessCanceledException e) {
+            throw e;
         } catch (Exception e) {
             throw new AiApiException("Gemini API call failed: " + e.getMessage(), e);
         }
     }
 
     private AiApiException buildApiError(String providerName, int statusCode, String responseBody) {
-        LOG.warn(providerName + " API error (HTTP " + statusCode + "): " + responseBody);
+        LOG.warn(providerName + " API error (HTTP " + statusCode + ")");
         String errorMessage = extractErrorMessage(responseBody);
         String suggestion = suggestionForStatus(statusCode);
         String userMessage = providerName + " API error: " + errorMessage;

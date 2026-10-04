@@ -30,10 +30,15 @@ public final class DeliveryMethodResolver {
         if (preferred != null && !preferred.isBlank()) {
             try {
                 DeliveryMode mode = DeliveryMode.valueOf(preferred);
-                return new ResolvedMethod(mode, mode.getDisplayName());
+                return new ResolvedMethod(mode, mode == DeliveryMode.DIRECT_API
+                        ? backendLabel(settings) : mode.getDisplayName());
             } catch (IllegalArgumentException ignored) {
                 // Invalid saved value, fall through
             }
+        }
+
+        if ("LOCAL_CODEX".equals(settings.getAiBackend())) {
+            return new ResolvedMethod(DeliveryMode.DIRECT_API, "Generate via Local Codex [integrated]");
         }
 
         // 2. Configured API provider
@@ -68,6 +73,11 @@ public final class DeliveryMethodResolver {
     public boolean hasPreference() {
         String preferred = OpenSpecSettings.getInstance(project).getPreferredDeliveryMethod();
         return preferred != null && !preferred.isBlank();
+    }
+
+    private static String backendLabel(OpenSpecSettings settings) {
+        return "LOCAL_CODEX".equals(settings.getAiBackend())
+                ? "Generate via Local Codex [integrated]" : "Generate via " + AiProvider.fromString(settings.getAiProvider()).getDisplayName();
     }
 
     public record ResolvedMethod(DeliveryMode mode, String label) {

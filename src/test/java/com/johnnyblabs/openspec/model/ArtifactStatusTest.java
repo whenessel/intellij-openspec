@@ -14,6 +14,8 @@ class ArtifactStatusTest {
     @CsvSource({
             "done, DONE",
             "DONE, DONE",
+            "skipped, SKIPPED",
+            "SKIPPED, SKIPPED",
             "ready, READY",
             "READY, READY",
             "blocked, BLOCKED",
@@ -25,7 +27,7 @@ class ArtifactStatusTest {
             "unknown, UNKNOWN",
             "UNKNOWN, UNKNOWN"
     })
-    void fromString_parsesAllSixStatuses(String input, ArtifactStatus expected) {
+    void fromString_parsesAllSevenStatuses(String input, ArtifactStatus expected) {
         assertEquals(expected, ArtifactStatus.fromString(input));
     }
 
@@ -37,7 +39,7 @@ class ArtifactStatusTest {
     }
 
     @Test
-    void allSixStatusesExist() {
-        assertEquals(6, ArtifactStatus.values().length);
+    void allSevenStatusesExist() {
+        assertEquals(7, ArtifactStatus.values().length);
     }
 }

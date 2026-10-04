@@ -7,7 +7,7 @@ import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
 import com.intellij.openapi.project.Project;
 import com.johnnyblabs.openspec.ai.AiApiException;
-import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.AiExecutionService;
 import com.johnnyblabs.openspec.model.ArtifactInfo;
 import com.johnnyblabs.openspec.model.ArtifactStatus;
 import com.johnnyblabs.openspec.model.ChangeArtifactDag;
@@ -158,7 +158,7 @@ public final class VerificationService {
         Path tasksPath = changeDir.resolve("tasks.md");
         if (Files.exists(tasksPath)) {
             try {
-                String content = Files.readString(tasksPath, StandardCharsets.UTF_8);
+                String content = readPlanningFile(tasksPath);
                 Matcher incomplete = TASK_INCOMPLETE.matcher(content);
                 Matcher complete = TASK_COMPLETE.matcher(content);
                 Matcher inProgress = TASK_IN_PROGRESS.matcher(content);
@@ -202,7 +202,7 @@ public final class VerificationService {
                 Path specFile = domain.resolve("spec.md");
                 if (!Files.exists(specFile)) continue;
 
-                String content = Files.readString(specFile, StandardCharsets.UTF_8);
+                String content = readPlanningFile(specFile);
                 Matcher matcher = REQUIREMENT_HEADER.matcher(content);
                 while (matcher.find()) {
                     requirementNames.add(matcher.group(1).trim());
@@ -210,11 +210,20 @@ public final class VerificationService {
             }
         } catch (IOException e) {
             LOG.warn("Failed to scan delta specs", e);
+            report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
+                    "Correctness/coherence not assessed (unsafe or unavailable specification context)"));
+            return;
         }
 
         if (requirementNames.isEmpty()) return;
 
-        DirectApiService ai = project.getService(DirectApiService.class);
+        DeliveryMethodResolver resolver = project.getService(DeliveryMethodResolver.class);
+        if (resolver == null || resolver.resolve().mode() != com.johnnyblabs.openspec.ai.DeliveryMode.DIRECT_API) {
+            report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
+                    "Correctness/coherence not assessed (manual delivery selected; no AI request sent)"));
+            return;
+        }
+        AiExecutionService ai = project.getService(AiExecutionService.class);
         if (ai == null || !ai.isConfigured()) {
             report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
                     "Correctness/coherence not assessed (AI provider not configured)"));
@@ -237,10 +246,13 @@ public final class VerificationService {
         } catch (AiApiException e) {
             report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
                     "Correctness/coherence check unavailable: " + e.getMessage()));
+        } catch (IOException e) {
+            report.addFinding(new VerificationFinding(Severity.SUGGESTION, Dimension.CORRECTNESS,
+                    "Correctness/coherence not assessed (unsafe or unavailable design/task context)"));
         }
     }
 
-    private String buildCorrectnessPrompt(List<String> requirementNames, Path changeDir) {
+    private String buildCorrectnessPrompt(List<String> requirementNames, Path changeDir) throws IOException {
         String design = readOrEmpty(changeDir.resolve("design.md"));
         String tasks = readOrEmpty(changeDir.resolve("tasks.md"));
         StringBuilder reqs = new StringBuilder();
@@ -258,12 +270,18 @@ public final class VerificationService {
                 + "Tasks:\n" + tasks + "\n";
     }
 
-    private String readOrEmpty(Path path) {
-        try {
-            return Files.exists(path) ? Files.readString(path, StandardCharsets.UTF_8) : "";
-        } catch (IOException e) {
-            return "";
+    private static String readPlanningFile(Path path) throws IOException {
+        for (Path current = path.toAbsolutePath().normalize(); current != null; current = current.getParent()) {
+            if (Files.isSymbolicLink(current)) throw new IOException("Symlink verification context is unsupported");
         }
+        if (!Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS) || Files.size(path) > 32 * 1024) {
+            throw new IOException("Verification context is missing, unsafe or exceeds the per-file budget");
+        }
+        return Files.readString(path, StandardCharsets.UTF_8);
+    }
+
+    private String readOrEmpty(Path path) throws IOException {
+        return Files.exists(path) ? readPlanningFile(path) : "";
     }
 
     /**
@@ -282,7 +300,7 @@ public final class VerificationService {
         if (!Files.exists(designPath)) return;
 
         try {
-            String design = Files.readString(designPath, StandardCharsets.UTF_8);
+            String design = readPlanningFile(designPath);
 
             // Check for unresolved open questions
             if (design.contains("## Open Questions") || design.contains("## open questions")) {

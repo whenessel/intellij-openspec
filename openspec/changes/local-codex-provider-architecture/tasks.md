@@ -12,14 +12,14 @@
 - [ ] 2.2 Add byte/file/token budgets, exclusions and redaction with essential-content overflow errors; verify boundary tests for large files, unknown tokenizer/model bounds, secrets, binary/ignored files and visible omissions.
 - [ ] 2.3 Implement shared context preview and acceptance bound to action/backend/model/account/security/content; verify UI/controller tests invalidate approval on expanded scope or changed billing destination and do not send before review.
 - [ ] 2.4 Define result envelope v1 for concrete create/replace/patch operations with allowed root/pattern and base versions; verify parser fixtures reject malformed/unknown envelopes and two-domain specs result passes without treating specs/**/*.md as a filename.
-- [ ] 2.5 Implement full-batch path/scope validation; verify adversarial fixtures for ../, absolute/UNC/drive paths, separators/streams/NUL, wildcard concrete names, symlink escapes, case collisions, duplicates and targets outside resolved store roots.
+- [x] 2.5 Implement full-batch path/scope validation; verify adversarial fixtures for ../, absolute/UNC/drive paths, separators/streams/NUL, wildcard concrete names, symlink escapes, case collisions, duplicates and targets outside resolved store roots.
 - [ ] 2.6 Add base-hash/document-conflict checks and diff preview; verify edits after preview, unsaved documents, forbidden deletion and changed parent symlinks block writes and require re-review.
 - [ ] 2.7 Replace both orchestration and workflow-panel artifact writers with one recoverable undoable safe writer; verify multi-file acceptance, rejection/no writes, injected mid-batch failure/recovery and VFS/document refresh behavior in IDE tests.
 - [ ] 2.8 Prevent partial/canceled/timed-out output from reaching application and serialize concurrent target mutations; verify deterministic cancellation/commit-race tests and duplicate-run isolation.
 
 ## 3. P3 — Codex compatibility and subprocess transport (depends on P1–P2)
 
-- [ ] 3.1 Capture sanitized real no-inference version/help/app-server generated schema, initialization/account/model events for candidate CLI versions in isolated directories; verify provenance/version manifest and select a supported minimum/range from actual fixtures rather than hand-invented contracts.
+- [x] 3.1 Capture sanitized real no-inference version/help/app-server generated schema, initialization/account/model events for candidate CLI versions in isolated directories; verify provenance/version manifest and select a supported minimum/range from actual fixtures rather than hand-invented contracts.
 - [ ] 3.2 Define supported OS read-scope/tool restrictions from verified CLI schemas/config controls; verify no-inference permission captures and document unsupported profiles that must be blocked; do not read/copy auth files.
 - [ ] 3.3 Implement validated executable resolution and argument-array/stdin process launch with controlled environment; verify mock executable records exact args/stdin for spaces, Unicode, metacharacters, missing paths and unsupported wrappers without shell evaluation or secret logging.
 - [ ] 3.4 Implement concurrent bounded stdout/stderr readers and bidirectional JSON framing/correlation; verify mock subprocess partial lines, interleaved IDs, notifications, server requests, EOF, huge stderr, oversized/malformed frames and process crash.

@@ -16,7 +16,7 @@ The OpenSpec tool window (right sidebar, or **View > Tool Windows > OpenSpec**) 
 |-----|---------|
 | **Browse** | Changes-focused master/detail view: a tree of your changes (each with per-artifact status) beside a read-only rendered-markdown preview pane dedicated to change surfaces. Single-click to preview, double-click to open the file, right-click for context menu actions. Specs, archived changes, and `openspec/config.yaml` browse in the standard Project View and open in the editor; spec content search is via Search Everywhere. |
 | **Console** | Output panel for CLI commands (init, validate, update, etc.). |
-| **Explore** | *(Only when Direct API is configured)* Thinking-space panel with inline topic input, markdown-rendered AI responses, and Copy/Clear toolbar. Appears automatically when you configure a Direct API provider in Settings. |
+| **Explore** | *(When an integrated AI backend is configured)* Thinking-space panel with inline topic input, markdown-rendered AI responses, and Copy Response/New conversation/Cancel toolbar. Appears when integrated delivery and a configured backend are available. |
 | **Coordination** | *(Only when OpenSpec 1.4 coordination state or a coordination mode is detected)* Lists workspaces, context stores, and initiatives. See [Coordination Tab](#coordination-tab) below. |
 
 ### Coordination Tab
@@ -185,9 +185,9 @@ The panel includes a **change selector** dropdown for switching between multiple
 |--------|------|-------------|
 | **Init** | OpenSpec > Init | Initialize OpenSpec in the current project. Creates `openspec/` directory structure. |
 | **Propose** | OpenSpec > Propose... | Create a new change with name and description. Scaffolds artifact files. |
-| **Fast-Forward** | OpenSpec > Fast-Forward... | Create a change and generate all artifacts in one step via Direct API. |
-| **Continue** | OpenSpec > Continue | Generate the next ready artifact in the active change. Requires Direct API. |
-| **Explore** | OpenSpec > Explore... | Prompt for an optional topic, assemble the explore prompt (skill instructions + project context + topic), and deliver via configured delivery mode. With Direct API configured, the Explore tab appears in the tool window for inline input and rendered responses. Clipboard and Editor Tab modes use the topic dialog. |
+| **Fast-Forward** | OpenSpec > Fast-Forward... | Create a change and generate artifacts through the selected integrated backend with context and result review. Manual delivery scaffolds the change and delivers the first ready artifact prompt. |
+| **Continue** | OpenSpec > Continue | Generate the next ready artifact through the integrated backend or hand off its prompt through the selected Clipboard/Editor delivery. |
+| **Explore** | OpenSpec > Explore... | Prompt for an optional topic, assemble the explore prompt (skill instructions + project context + topic), and deliver via configured delivery mode. With integrated delivery and a configured backend, the Explore tab appears in the tool window for inline input and rendered responses. Clipboard and Editor Tab modes use the topic dialog. |
 | **Apply** | OpenSpec > Apply | Mark a change as applied. |
 | **Verify** | OpenSpec > Verify | Check artifact completeness and task progress. Opens report dialog. |
 | **Archive** | OpenSpec > Archive | Move a completed change to `openspec/changes/archive/`. Optionally syncs delta specs. |
@@ -228,7 +228,7 @@ When you click Generate, the plugin delivers the assembled prompt via your confi
 |------|-------------|
 | **Copy for [Tool]** | Copies the prompt to clipboard with tool-specific guidance (e.g., "Paste into GitHub Copilot"). One entry per detected tool. |
 | **Open in Editor Tab** | Opens the prompt in a temporary editor tab for review before pasting into any AI tool. |
-| **Generate via API** | Sends the prompt directly to an AI provider's API and writes the response to disk automatically. Requires an API key. |
+| **Integrated generation** | Sends reviewed context to the selected REST/Codex backend and previews validated artifact edits before writing. REST requires a key; Codex uses its CLI login. |
 
 ### AI Tool Detection
 
@@ -242,7 +242,7 @@ The plugin scans your project for AI tool configuration directories — **30 too
 | `.cline/` | Cline | IDE Panel |
 | `.claude/` | Claude Code | CLI |
 
-Detected tools appear in bold in the settings panel and are available as clipboard delivery targets. **CLI** tools receive save-path hints in the guidance text; **IDE Panel** tools receive paste-target guidance.
+Detected tools appear in bold in the settings panel and are available as clipboard delivery targets. Installed Codex execution is an explicit backend selection, separate from this detection. **CLI** tools receive save-path hints in the guidance text; **IDE Panel** tools receive paste-target guidance.
 
 ### Direct API Providers
 
@@ -344,16 +344,23 @@ Read-only display of the current profile name and description from `config.yaml`
 | **Detected tools** | AI tools found in your project (shown in bold). |
 | **Deliver via** | Unified dropdown: Copy for [Tool], Open in Editor Tab, or Generate via API. |
 
-### Direct API
+### AI generation
 
 | Setting | Purpose |
 |---------|---------|
-| **Provider** | `None`, `Claude`, `OpenAI`, or `Gemini`. |
-| **API key** | Stored securely in the OS keychain — never in project files. |
-| **Model** | Model to use (pre-populated per provider, editable). |
-| **Test** | Verify your API key and connection. |
+| **AI backend** | REST API (API billed) or Installed Codex CLI. Legacy settings retain REST. |
+| **REST provider / API key / REST model** | Claude, OpenAI or Gemini; PasswordSafe credentials and editable model preferences are preserved independently. |
+| **Test (API billed)** | Sends a live REST request; it can incur API charges. |
+| **Codex executable** | Native executable or PATH command, with a browse control. No shell arguments. |
+| **Codex model override** | Refreshed account catalog or manual model ID; blank uses the CLI default. |
+| **Refresh status and models (no inference)** | Shows CLI version, effective authentication and compatibility without generating text. |
+| **Codex timeout** | Request timeout in seconds. |
+| **Allow API billed Codex requests** | Explicit opt-in when Codex reports API key authentication. |
+| **Maximum context (UTF-8 bytes)** | User budget, capped at 48 KiB by the review policy. |
 
-> An API key is only needed for Direct API delivery. Clipboard and Editor Tab modes work without any API key.
+Integrated artifact generation, Explore and Verify share routing and an editable context preview. Codex Explore resumes CLI-owned history only with a verifiable ChatGPT workspace/account identity; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify but not persistent Explore. Artifact batches receive validated path checks and a result preview before writing. Explicit Clipboard/Editor delivery remains manual and prevents inference through a saved backend. Codex owns login/refresh; ChatGPT login uses subscription limits and online inference. Unsupported configurations fail without REST fallback.
+
+See the [local Codex guide](local-codex.md) for the exact version/OS baseline, prompt-only execution profile, persistent Explore identity/history boundaries and current build/acceptance blockers. OpenRouter and autonomous workspace-writing Apply are later phases.
 
 ---
 
@@ -371,7 +378,7 @@ The plugin works without the CLI, but some features (schema management, CLI-enha
 
 **Profile check:** If the tooltip says *"Requires expanded profile"*, your active profile doesn't include that workflow. Switch to an expanded or custom profile in **Settings → Tools → OpenSpec → Config Profile**.
 
-**API check:** Fast-Forward and Continue also require an AI provider and API key configured in **Settings → Tools → OpenSpec → Direct API**. Use the clipboard workflow instead if you prefer not to configure API keys.
+**Backend check:** Integrated Continue requires a configured backend in **Settings → Tools → OpenSpec → AI generation**. REST needs an API key; Codex needs a supported CLI and existing login. In manual delivery mode, Fast-Forward delivers the first artifact prompt after scaffolding.
 
 ### API test fails
 

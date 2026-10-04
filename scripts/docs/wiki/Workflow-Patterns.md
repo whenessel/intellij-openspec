@@ -23,28 +23,29 @@ flowchart LR
 **Pros:** No API key needed, use any AI tool, full control over the interaction.
 **Cons:** Manual copy-paste, slower iteration.
 
-## Pattern 2: Direct API Workflow
+## Pattern 2: Integrated Generation Workflow
 
 **Best for:** Solo developers, rapid prototyping, automated pipelines.
 
 ```mermaid
 flowchart LR
-    A[Generate Artifact] --> B[Direct API]
-    B --> C[AI Provider]
-    C --> D[Response written to file]
+    A[Generate Artifact] --> B[Review context]
+    B --> C[REST or installed Codex]
+    C --> D[Review validated artifact batch]
+    D --> E[Apply approved edits]
 ```
 
 **Steps:**
-1. Configure AI provider and API key (see [[AI-Configuration]])
+1. Configure REST credentials or supported installed Codex login (see [[AI-Configuration]])
 2. Select an artifact or use **Generate All Artifacts**
-3. The plugin calls the API and writes the result directly
+3. Review context, send to the selected backend, then review and apply validated artifact edits
 
-**Pros:** Fully automated, supports Generate All for batch processing.
-**Cons:** Requires API key, costs per API call, less control over prompting.
+**Pros:** Integrated generation and reviewed batches through either backend.
+**Cons:** Requires online inference; API charges or subscription limits apply. Review steps remain interactive.
 
 ## Pattern 3: Mixed Workflow
 
-**Best for:** Most teams — use Direct API for routine artifacts, clipboard for critical ones.
+**Best for:** Most teams — use integrated generation for routine artifacts, clipboard for critical ones.
 
 **Example flow:**
 1. **Generate All** to auto-generate `design.md` and `tasks.md`

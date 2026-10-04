@@ -101,6 +101,55 @@ class ExplorePromptServiceTest {
         }
 
         @Test
+        void oversizedSkillIsOmittedVisiblyWithoutReadingItsInstructions() throws IOException {
+            when(project.getBasePath()).thenReturn(tempDir.toString());
+            Path directory = tempDir.resolve(".claude/skills/openspec-explore");
+            Files.createDirectories(directory);
+            Files.writeString(directory.resolve("SKILL.md"), "s".repeat(ExplorePromptService.MAX_SKILL_BYTES + 1));
+            String instructions = service.loadSkillInstructions();
+            assertTrue(instructions.startsWith(ExplorePromptService.DEFAULT_EXPLORE_PROMPT));
+            assertTrue(instructions.contains("Context omission"));
+            assertFalse(instructions.contains("ssssssssssss"));
+        }
+
+        @Test
+        void skillAtByteLimitIsAccepted() throws IOException {
+            when(project.getBasePath()).thenReturn(tempDir.toString());
+            Path directory = tempDir.resolve(".claude/skills/openspec-explore");
+            Files.createDirectories(directory);
+            String content = "s".repeat(ExplorePromptService.MAX_SKILL_BYTES);
+            Files.writeString(directory.resolve("SKILL.md"), content);
+            assertEquals(content, service.loadSkillInstructions());
+        }
+
+        @Test
+        void symlinkedSkillAncestorIsRejected() throws IOException {
+            when(project.getBasePath()).thenReturn(tempDir.toString());
+            Path external = Files.createDirectories(tempDir.resolve("outside/skills/openspec-explore"));
+            Files.writeString(external.resolve("SKILL.md"), "outside instructions must not be loaded");
+            try { Files.createSymbolicLink(tempDir.resolve(".claude"), tempDir.resolve("outside")); }
+            catch (UnsupportedOperationException | java.nio.file.FileSystemException ex) {
+                org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symlinks unavailable on this test host");
+            }
+            String instructions = service.loadSkillInstructions();
+            assertTrue(instructions.contains("Context omission"));
+            assertFalse(instructions.contains("outside instructions"));
+        }
+
+        @Test
+        void symlinkedSkillFileIsRejected() throws IOException {
+            when(project.getBasePath()).thenReturn(tempDir.toString());
+            Path outside = tempDir.resolve("outside.md");
+            Files.writeString(outside, "outside instructions");
+            Path directory = Files.createDirectories(tempDir.resolve(".claude/skills/openspec-explore"));
+            try { Files.createSymbolicLink(directory.resolve("SKILL.md"), outside); }
+            catch (UnsupportedOperationException | java.nio.file.FileSystemException ex) {
+                org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symlinks unavailable on this test host");
+            }
+            assertTrue(service.loadSkillInstructions().contains("Context omission"));
+        }
+
+        @Test
         void stripsYamlFrontmatter() throws IOException {
             when(project.getBasePath()).thenReturn(tempDir.toString());
 
@@ -137,6 +186,20 @@ class ExplorePromptServiceTest {
             assertTrue(prompt.contains("Some context."));
             // Contains topic
             assertTrue(prompt.contains("**Topic:** How should we handle auth?"));
+        }
+
+        @Test
+        void topicChangesKeepScopeAndContextEditsInvalidateIt() {
+            when(project.getBasePath()).thenReturn("/nonexistent");
+            when(project.getService(ExploreContextService.class)).thenReturn(contextService);
+            when(contextService.assembleContext()).thenReturn("context", "context", "changed context");
+            var first = service.buildRequest("first topic");
+            var second = service.buildRequest("follow up");
+            var changed = service.buildRequest("follow up");
+            assertEquals(first.contextScope(), second.contextScope());
+            assertNotEquals(first.prompt(), second.prompt());
+            assertNotEquals(second.contextScope(), changed.contextScope());
+            verify(contextService, times(3)).assembleContext();
         }
 
         @Test

@@ -25,6 +25,21 @@ public final class ExploreContextService {
     private static final String[] CHANGE_ARTIFACTS = {"proposal.md", "design.md", "tasks.md"};
 
     private final Project project;
+    private volatile String selectedChange;
+
+    public void setSelectedChange(String changeName) { selectedChange = changeName; }
+
+    private static String readContextFile(Path root, Path path) throws IOException {
+        Path normalized = path.toAbsolutePath().normalize();
+        if (!normalized.startsWith(root.toAbsolutePath().normalize()) || !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Context path is outside permitted scope");
+        }
+        for (Path current = normalized; current != null; current = current.getParent()) {
+            if (Files.isSymbolicLink(current)) throw new IOException("Symlink context omitted");
+        }
+        if (Files.size(path) > 32 * 1024) throw new IOException("Oversized context omitted");
+        return Files.readString(path);
+    }
 
     public ExploreContextService(Project project) {
         this.project = project;
@@ -101,7 +116,10 @@ public final class ExploreContextService {
         if (changes.isEmpty()) {
             context.append("No active changes.\n");
         } else {
+            context.append("Other active changes are excluded unless explicitly included in reviewed context.\n");
+            String chosen = selectedChange != null ? selectedChange : changes.getFirst().getName();
             for (Change change : changes) {
+                if (!change.getName().equals(chosen)) continue;
                 context.append("\n### ").append(change.getName());
                 if (change.getMetadata() != null && change.getMetadata().getSchema() != null) {
                     context.append(" (").append(change.getMetadata().getSchema()).append(")");
@@ -126,10 +144,12 @@ public final class ExploreContextService {
             if (Files.exists(artifactPath)) {
                 String label = artifact.replace(".md", "");
                 try {
-                    String content = Files.readString(artifactPath);
-                    context.append("\n**").append(label).append(":**\n\n").append(content.strip()).append("\n");
+                    String content = readContextFile(changeDir, artifactPath);
+                    if (context.length() + content.length() > 48 * 1024) {
+                        context.append("\n[Artifact omitted: effective context budget]\n");
+                    } else context.append("\n**").append(label).append(":**\n\n").append(content.strip()).append("\n");
                 } catch (IOException ignored) {
-                    // Skip if unreadable
+                    context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
                 }
             }
         }
@@ -137,21 +157,22 @@ public final class ExploreContextService {
         // Read delta specs
         Path specsDir = changeDir.resolve("specs");
         if (Files.isDirectory(specsDir)) {
-            try (var dirs = Files.list(specsDir).sorted()) {
+            try (var dirs = Files.list(specsDir).limit(64).sorted()) {
                 dirs.filter(Files::isDirectory).forEach(dir -> {
                     Path specFile = dir.resolve("spec.md");
                     if (Files.exists(specFile)) {
                         try {
-                            String content = Files.readString(specFile);
+                            if (context.length() > 40 * 1024) { context.append("\n[Delta spec omitted: context budget]\n"); return; }
+                            String content = readContextFile(Path.of(basePath, "openspec"), specFile);
                             context.append("\n**delta spec (").append(dir.getFileName()).append("):**\n\n")
                                     .append(content.strip()).append("\n");
                         } catch (IOException ignored) {
-                            // Skip if unreadable
+                            context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
                         }
                     }
                 });
             } catch (IOException ignored) {
-                // Skip if unreadable
+                context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
             }
         }
     }
@@ -169,14 +190,15 @@ public final class ExploreContextService {
         if (!Files.isDirectory(specsDir)) return;
 
         context.append("## Specs\n");
-        try (var dirs = Files.list(specsDir).sorted()) {
+        try (var dirs = Files.list(specsDir).limit(64).sorted()) {
             dirs.filter(Files::isDirectory).forEach(dir -> {
                 Path specFile = dir.resolve("spec.md");
                 if (!Files.exists(specFile)) return;
 
+                if (context.length() > 40 * 1024) return;
                 context.append("\n### ").append(dir.getFileName()).append("\n");
                 try {
-                    String content = Files.readString(specFile);
+                    String content = readContextFile(Path.of(basePath, "openspec"), specFile);
                     Matcher reqMatcher = REQUIREMENT_PATTERN.matcher(content);
                     while (reqMatcher.find()) {
                         String reqName = reqMatcher.group(1).trim();
@@ -200,11 +222,11 @@ public final class ExploreContextService {
                         context.append("\n");
                     }
                 } catch (IOException ignored) {
-                    // Skip if unreadable
+                    context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
                 }
             });
         } catch (IOException ignored) {
-            // Skip if unreadable
+            context.append("\n[Unreadable, oversized or unsafe context file omitted]\n");
         }
         context.append("\n");
     }

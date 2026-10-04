@@ -46,10 +46,10 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Visual artifact pipeline (DAG) | Yes (chip row with arrows) | No | No | No | No |
 | Artifact status indicators | Yes (done/ready/blocked icons) | No | No | Partial | Yes (progress) |
 | One-click Generate button | Yes (smart default method) | No | No | No | No |
-| Generate All (walk full DAG) | Yes (Direct API) | No | No | Yes (fast-forward) | No |
+| Generate All (walk full DAG) | Yes (integrated REST/Codex; reviewed artifacts) | No | No | Yes (fast-forward) | No |
 | Delivery: Copy to Clipboard | Yes | Yes (via Copilot) | Yes | No | No |
 | Delivery: Open in Editor Tab | Yes | No | No | No | No |
-| Delivery: Direct API call | Yes (Claude/OpenAI/Gemini) | No | No | No | No |
+| Delivery: Integrated generation | Yes (Claude/OpenAI/Gemini REST; installed Codex) | No | No | No | No |
 | Split button (method dropdown) | Yes | No | No | No | No |
 | Post-generation guidance card | Yes (tool-aware) | No | No | No | No |
 | Next artifact indicator | Yes | No | No | No | No |
@@ -64,6 +64,11 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | Direct API: Claude (Anthropic) | Yes | No | No | No | No |
 | Direct API: OpenAI | Yes | No | No | No | No |
 | Direct API: Gemini | Yes | No | No | No | No |
+| Installed Codex CLI execution | Implemented MVP; [compatibility and validation limits](local-codex.md) | No | No | No | No |
+| CLI-owned ChatGPT login / account model catalog | Codex MVP, subscription limits apply | No | No | No | No |
+| Context preview and validated artifact batch review | Yes (integrated REST/Codex) | No | No | No | No |
+| Persistent Codex conversation resume | Explore: implemented with ChatGPT workspace identity/scope guards; pending live acceptance | — | — | — | — |
+| OpenRouter provider / autonomous workspace Apply | Deferred | — | — | — | — |
 | Secure credential storage (OS keychain) | Yes (PasswordSafe) | No | No | No | No |
 | API connection test | Yes | No | No | No | No |
 | AI tool auto-detection | Yes (30 tools) | No | No | No | No |
@@ -164,7 +169,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 - Consolidated change-deltas view — everything a change modifies at the spec level, grouped by capability/operation and badged, assembled from the CLI, cross-linked to the per-capability delta diff
 - Artifact-status badge overlays on tree node icons (done / ready / blocked / not-created) with X/Y task-progress on change nodes
 - Grouped, navigable validation console (by file, clickable file:line links, per-severity color) plus a Project-View context-menu Validate scoped to the clicked change or spec
-- Multi-provider Direct API generation with secure credential storage (Claude, OpenAI, Gemini)
+- Integrated generation through REST (Claude, OpenAI, Gemini) or the installed Codex CLI, with context and artifact review; [Codex MVP limits](local-codex.md)
 - Visual artifact pipeline with DAG-driven workflow
 - Scaffolding detection preventing false "complete" status
 - AI tool detection with type-aware guidance (CLI vs IDE panel)
