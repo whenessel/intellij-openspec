@@ -12,4 +12,4 @@
 
 - [x] 3.1 Update user documentation and validation evidence; record real zero-cost HTTP smoke separately from UI end-to-end.
 - [x] 3.2 Run full test/check/JaCoCo/buildPlugin/verifyPlugin and OpenSpec validation; record results and deliver local ZIP.
-- [ ] 3.3 Commit and push only plan/local-codex-provider-architecture; verify published SHA and clean tree.
+- [x] 3.3 Commit and push only plan/local-codex-provider-architecture; verify published SHA and clean tree.
