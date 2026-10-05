@@ -3,6 +3,8 @@ package com.johnnyblabs.openspec.ai.backend;
 import com.johnnyblabs.openspec.ai.AiApiException;
 import com.johnnyblabs.openspec.ai.AiProvider;
 import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.OpenRouterPolicy;
+import com.johnnyblabs.openspec.ai.OpenRouterProtocol;
 import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
@@ -16,6 +18,50 @@ import static org.mockito.Mockito.*;
 
 /** SDK-bound adapter checks: mocks replace transport calls, never paid HTTP inference. */
 class RestAiBackendTest {
+    @Test void openRouterStreamsCapturedPolicyAndPreservesActualRoute() throws Exception {
+        DirectApiService transport = mock(DirectApiService.class);
+        when(transport.isConfigured(AiProvider.OPENROUTER)).thenReturn(true);
+        OpenRouterPolicy policy = new OpenRouterPolicy(java.util.List.of("reviewed-provider"), java.util.List.of(), false, "deny", true, 500);
+        AiRequest request = new AiRequest("reviewed prompt", "unrelated model", Path.of("."), Duration.ofSeconds(1),
+                null, null, null, "", java.util.Set.of(BackendCapability.STREAMING));
+        when(transport.generateOpenRouter(eq(request), eq("reviewed/model"), eq(policy), any(BooleanSupplier.class), any()))
+                .thenAnswer(invocation -> {
+                    java.util.function.Consumer<String> delta = invocation.getArgument(4);
+                    delta.accept("first "); delta.accept("second");
+                    return new OpenRouterProtocol.Completion("first second", "actual/model", "actual-provider");
+                });
+        RestAiBackend backend = new RestAiBackend(transport, AiProvider.OPENROUTER, "reviewed/model", policy);
+        ArrayList<String> deltas = new ArrayList<>();
+        AiResult result = backend.generate(request, CancellationToken.NONE, deltas::add);
+        assertEquals(java.util.List.of("first ", "second"), deltas);
+        assertEquals("first second", result.text());
+        assertEquals("actual/model", result.model());
+        assertEquals("actual-provider", result.provider());
+        assertEquals("REST:OPENROUTER", result.backendId());
+        verify(transport, never()).generateRaw(anyString(), any(AiProvider.class), anyString(), any(BooleanSupplier.class));
+    }
+
+    @Test void openRouterStructuredCapabilityStillValidatesArtifactEnvelope() throws Exception {
+        DirectApiService transport = mock(DirectApiService.class);
+        when(transport.isConfigured(AiProvider.OPENROUTER)).thenReturn(true);
+        AiRequest request = new AiRequest("prompt", "", Path.of("."), Duration.ofSeconds(1), new com.google.gson.JsonObject(),
+                null, null, "", java.util.Set.of(BackendCapability.STRUCTURED_OUTPUT));
+        when(transport.generateOpenRouter(eq(request), anyString(), any(OpenRouterPolicy.class), any(BooleanSupplier.class), any()))
+                .thenReturn(new OpenRouterProtocol.Completion("invalid envelope", "model", "provider"));
+        RestAiBackend backend = new RestAiBackend(transport, AiProvider.OPENROUTER, "");
+        assertTrue(backend.capabilities().structuredOutput());
+        assertThrows(AiApiException.class, () -> backend.generate(request, CancellationToken.NONE, ignored -> {}));
+    }
+
+    @Test void canceledOpenRouterCompletionNeverBecomesSuccessfulResult() throws Exception {
+        DirectApiService transport = mock(DirectApiService.class);
+        when(transport.isConfigured(AiProvider.OPENROUTER)).thenReturn(true);
+        AtomicBoolean canceled = new AtomicBoolean();
+        when(transport.generateOpenRouter(any(AiRequest.class), anyString(), any(OpenRouterPolicy.class), any(BooleanSupplier.class), any()))
+                .thenAnswer(invocation -> { canceled.set(true); return new OpenRouterProtocol.Completion("late", "model", "provider"); });
+        RestAiBackend backend = new RestAiBackend(transport, AiProvider.OPENROUTER, "");
+        assertThrows(AiApiException.class, () -> backend.generate(request(), canceled::get, ignored -> fail("No delta expected")));
+    }
     private static AiRequest request() {
         return new AiRequest("reviewed prompt", "unrelated request model", Path.of("."), Duration.ofSeconds(1));
     }

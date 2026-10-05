@@ -6,6 +6,16 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AiResultTest {
+    @Test void actualRouteMetadataRetainsTypedPayloadAndLegacyConstructors() throws Exception {
+        var original = AiResult.fromResponse(ENVELOPE, "REST:OPENROUTER", "actual/model", true);
+        var routed = original.withProvider("actual-provider");
+        assertEquals("", original.provider());
+        assertEquals("actual-provider", routed.provider());
+        assertEquals("actual/model", routed.model());
+        assertInstanceOf(AiResult.ArtifactOutput.class, routed.payload());
+        assertEquals(ENVELOPE, routed.text());
+        assertEquals("", new AiResult(new AiResult.TextOutput("text"), "legacy", "model").provider());
+    }
     private static final String ENVELOPE="{\"schemaVersion\":1,\"artifactId\":\"specs\",\"files\":[{\"relativePath\":\"specs/a/spec.md\",\"operation\":\"create\",\"content\":\"# Spec\"}]}";
     @Test void successfulTextAndArtifactOutputsAreDiscriminatedWithoutChangingTextApi() throws Exception {
         var text=new AiResult("answer","local-codex","model");assertInstanceOf(AiResult.TextOutput.class,text.payload());assertEquals("answer",text.text());

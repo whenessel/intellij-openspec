@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.Set;
 
 /** Successful outputs are discriminated; failed/partial/cancelled turns never construct a result. */
-public record AiResult(Payload payload, String backendId, String model) {
+public record AiResult(Payload payload, String backendId, String model, String provider) {
     public sealed interface Payload permits TextOutput, ArtifactOutput { String text(); }
     public record TextOutput(String text) implements Payload {
         public TextOutput { Objects.requireNonNull(text); }
@@ -17,8 +17,10 @@ public record AiResult(Payload payload, String backendId, String model) {
         public ArtifactOutput { Objects.requireNonNull(text); envelope=Objects.requireNonNull(envelope).deepCopy(); }
         @Override public JsonObject envelope() { return envelope.deepCopy(); }
     }
-    public AiResult { Objects.requireNonNull(payload); Objects.requireNonNull(backendId); }
+    public AiResult { Objects.requireNonNull(payload); Objects.requireNonNull(backendId); provider = provider == null ? "" : provider; }
+    public AiResult(Payload payload, String backendId, String model) { this(payload, backendId, model, ""); }
     public AiResult(String text,String backendId,String model) { this(new TextOutput(text),backendId,model); }
+    public AiResult withProvider(String actualProvider) { return new AiResult(payload, backendId, model, actualProvider); }
     public String text() { return payload.text(); }
     public static AiResult fromResponse(String text,String backendId,String model,boolean structured) throws AiApiException {
         if (text==null || text.isBlank()) throw new AiApiException("AI backend completed without an output; no result was applied.");

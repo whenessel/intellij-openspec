@@ -63,6 +63,7 @@ public class OpenSpecConfigurable implements Configurable {
                 || !panel.getAiModel().equals(safe(settings.getAiModel()))
                 || !panel.getAiProviderModels().equals(settings.getAiProviderModels())
                 || !panel.getDefaultSchema().equals(safe(settings.getDefaultSchema()))
+                || !panel.getOpenRouterPolicy().equals(settings.getOpenRouterPolicy())
                 || isApiKeyModified();
     }
 
@@ -100,6 +101,7 @@ public class OpenSpecConfigurable implements Configurable {
         settings.setAiProvider(panel.getAiProvider());
         settings.setAiModel(panel.getAiModel());
         settings.setDefaultSchema(panel.getDefaultSchema());
+        settings.setOpenRouterPolicy(panel.getOpenRouterPolicy());
         // Store API key securely via PasswordSafe. set() is blocking (@RequiresBackgroundThread) and
         // apply() runs on the EDT, so persist off the EDT; the has-key cache is updated inside storeApiKey.
         String apiKey = panel.getApiKey();
@@ -170,6 +172,7 @@ public class OpenSpecConfigurable implements Configurable {
         panel.setAiProvider(settings.getAiProvider());
         panel.setAiModel(settings.getAiModel());
         panel.setDefaultSchema(settings.getDefaultSchema());
+        panel.setOpenRouterPolicy(settings.getOpenRouterPolicy());
 
         // D3 fallback refresh: catches the case where the user customized via the CLI
         // (or terminal handshake), closed Settings without confirming, and reopens.

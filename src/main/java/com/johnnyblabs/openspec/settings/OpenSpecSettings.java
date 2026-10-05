@@ -276,6 +276,23 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         return "spec-driven";
     }
 
+    public com.johnnyblabs.openspec.ai.OpenRouterPolicy getOpenRouterPolicy() {
+        return new com.johnnyblabs.openspec.ai.OpenRouterPolicy(state.openRouterOnly, state.openRouterOrder,
+                state.openRouterAllowFallbacks,
+                // Old/corrupt privacy values must not silently relax route requirements.
+                state.openRouterDataCollection == null || "allow".equals(state.openRouterDataCollection) ? "allow" : "deny",
+                state.openRouterZdr, state.openRouterMaxOutputTokens);
+    }
+    public void setOpenRouterPolicy(com.johnnyblabs.openspec.ai.OpenRouterPolicy policy) {
+        if (policy == null) policy = com.johnnyblabs.openspec.ai.OpenRouterPolicy.defaults();
+        state.openRouterOnly = new java.util.ArrayList<>(policy.only());
+        state.openRouterOrder = new java.util.ArrayList<>(policy.order());
+        state.openRouterAllowFallbacks = policy.allowFallbacks();
+        state.openRouterDataCollection = policy.dataCollection();
+        state.openRouterZdr = policy.zdr();
+        state.openRouterMaxOutputTokens = policy.maxOutputTokens();
+    }
+
     public static class State {
         public String versionOverride = "";
         public String cliPath = "";
@@ -302,6 +319,12 @@ public final class OpenSpecSettings implements PersistentStateComponent<OpenSpec
         public boolean codexApiBillingAcknowledged = false;
         public int aiContextMaxBytes = 262144;
         public int aiContextMaxInputTokens = 12000;
+        public java.util.List<String> openRouterOnly = new java.util.ArrayList<>();
+        public java.util.List<String> openRouterOrder = new java.util.ArrayList<>();
+        public boolean openRouterAllowFallbacks = true;
+        public String openRouterDataCollection = "allow";
+        public boolean openRouterZdr = false;
+        public int openRouterMaxOutputTokens = 4096;
         public String aiProvider = "NONE";
         public String aiModel = "";
         public String preferredDeliveryMethod = "";

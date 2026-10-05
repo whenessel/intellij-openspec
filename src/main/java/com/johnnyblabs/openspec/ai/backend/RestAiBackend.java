@@ -3,6 +3,7 @@ package com.johnnyblabs.openspec.ai.backend;
 import com.johnnyblabs.openspec.ai.AiApiException;
 import com.johnnyblabs.openspec.ai.AiProvider;
 import com.johnnyblabs.openspec.ai.DirectApiService;
+import com.johnnyblabs.openspec.ai.OpenRouterPolicy;
 import java.util.List;
 import java.util.function.Consumer;
 
@@ -11,13 +12,18 @@ public final class RestAiBackend implements AiBackend {
     private final DirectApiService transport;
     private final AiProvider provider;
     private final String selectedModel;
+    private final OpenRouterPolicy policy;
     public RestAiBackend(DirectApiService transport, AiProvider provider, String selectedModel) {
+        this(transport, provider, selectedModel, OpenRouterPolicy.defaults());
+    }
+    public RestAiBackend(DirectApiService transport, AiProvider provider, String selectedModel, OpenRouterPolicy policy) {
         this.transport = transport;
         this.provider = provider;
         this.selectedModel = selectedModel == null || selectedModel.isBlank() ? provider.getDefaultModel() : selectedModel;
+        this.policy = java.util.Objects.requireNonNull(policy);
     }
     @Override public String id() { return "REST:" + provider.name(); }
-    @Override public BackendCapabilities capabilities() { return new BackendCapabilities(false, true, false, false); }
+    @Override public BackendCapabilities capabilities() { return new BackendCapabilities(provider == AiProvider.OPENROUTER, true, provider == AiProvider.OPENROUTER, false); }
     @Override public BackendStatus probe() {
         return new BackendStatus(transport != null && transport.isConfigured(provider), "apikey", provider.getDisplayName() + " API billing", "HTTP");
     }
@@ -29,6 +35,12 @@ public final class RestAiBackend implements AiBackend {
         if (!request.reasoningEffort().isBlank()) throw new AiApiException("Reasoning effort selection is unsupported by the existing REST adapter");
         if (cancellation.isCancelled()) throw new AiApiException("AI request canceled");
         if (transport == null || !transport.isConfigured(provider)) throw new AiApiException("REST provider is not configured");
+        if (provider == AiProvider.OPENROUTER) {
+            var completion = transport.generateOpenRouter(request, selectedModel, policy, cancellation::isCancelled, onDelta);
+            if (cancellation.isCancelled()) throw new AiApiException("AI request canceled");
+            return AiResult.fromResponse(completion.text(), id(), completion.model(), request.outputSchema() != null)
+                    .withProvider(completion.provider());
+        }
         String text = transport.generateRaw(request.prompt(), provider, selectedModel, cancellation::isCancelled);
         if (cancellation.isCancelled()) throw new AiApiException("AI request canceled");
         onDelta.accept(text);

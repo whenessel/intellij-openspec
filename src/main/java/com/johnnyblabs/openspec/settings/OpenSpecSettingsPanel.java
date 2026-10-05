@@ -106,8 +106,17 @@ public class OpenSpecSettingsPanel {
     private JPanel restSettingsPanel;
     private JPanel codexSettingsPanel;
     private JButton apiTestButton;
+    private JPanel openRouterPolicyPanel;
+    private JTextField openRouterOnlyField, openRouterOrderField;
+    private JBCheckBox openRouterFallbacksCheckbox, openRouterZdrCheckbox;
+    private JComboBox<String> openRouterPrivacyCombo;
+    private JSpinner openRouterOutputSpinner;
+    private JButton openRouterKeyStatusButton;
+    private JBLabel openRouterKeyStatusLabel;
+    private SwingWorker<String, Void> openRouterKeyStatusWorker;
     private JButton openRouterRefreshButton;
     private JBLabel openRouterCatalogStatus;
+    private JBLabel openRouterModelDetails;
     private List<ModelDescriptor> openRouterCatalog = List.of();
     private SwingWorker<List<ModelDescriptor>, Void> openRouterCatalogWorker;
     private SwingWorker<String, Void> restTestWorker;
@@ -747,6 +756,7 @@ public class OpenSpecSettingsPanel {
         openRouterRefreshButton.setVisible(false);
         openRouterRefreshButton.addActionListener(e -> refreshOpenRouterModels());
         openRouterCatalogStatus = new JBLabel(" ");
+        openRouterModelDetails = new JBLabel(" ");
         JPanel modelRow = new JPanel();
         modelRow.setLayout(new BoxLayout(modelRow, BoxLayout.X_AXIS));
         modelRow.add(aiModelCombo);
@@ -755,12 +765,44 @@ public class OpenSpecSettingsPanel {
 
         aiTestResultLabel = new JBLabel(" ");
 
+        openRouterOnlyField = new JTextField();
+        openRouterOrderField = new JTextField();
+        openRouterOnlyField.setToolTipText("Comma-separated provider IDs; blank allows any eligible provider.");
+        openRouterOrderField.setToolTipText("Comma-separated provider IDs in preference order; blank uses OpenRouter defaults.");
+        watchRestInput(openRouterOnlyField, this::invalidateRestTest);
+        watchRestInput(openRouterOrderField, this::invalidateRestTest);
+        openRouterFallbacksCheckbox = new JBCheckBox("Allow provider fallback", true);
+        openRouterZdrCheckbox = new JBCheckBox("Require zero data retention (ZDR)");
+        openRouterPrivacyCombo = new JComboBox<>(new String[]{"allow", "deny"});
+        openRouterOutputSpinner = new JSpinner(new SpinnerNumberModel(4096, 1, 16000, 256));
+        openRouterFallbacksCheckbox.addActionListener(e -> invalidateRestTest());
+        openRouterZdrCheckbox.addActionListener(e -> invalidateRestTest());
+        openRouterPrivacyCombo.addActionListener(e -> invalidateRestTest());
+        openRouterOutputSpinner.addChangeListener(e -> invalidateRestTest());
+        openRouterKeyStatusButton = new JButton("Check key status (no inference)");
+        openRouterKeyStatusButton.addActionListener(e -> checkOpenRouterKeyStatus());
+        openRouterKeyStatusLabel = new JBLabel(" ");
+        openRouterPolicyPanel = FormBuilder.createFormBuilder()
+                .addLabeledComponent(new JBLabel("Allowed provider IDs:"), openRouterOnlyField)
+                .addLabeledComponent(new JBLabel("Preferred provider order:"), openRouterOrderField)
+                .addComponent(openRouterFallbacksCheckbox)
+                .addLabeledComponent(new JBLabel("Provider data collection:"), openRouterPrivacyCombo)
+                .addComponent(openRouterZdrCheckbox)
+                .addComponent(new JBLabel("<html>Privacy settings restrict eligible routes; unavailable requirements fail the request.</html>"))
+                .addLabeledComponent(new JBLabel("Maximum output tokens:"), openRouterOutputSpinner)
+                .addComponent(openRouterKeyStatusButton)
+                .addComponent(openRouterKeyStatusLabel)
+                .getPanel();
+        openRouterPolicyPanel.setVisible(false);
+
         restSettingsPanel = FormBuilder.createFormBuilder()
                 .addComponent(helpLabel)
                 .addLabeledComponent(new JBLabel("REST provider:"), aiProviderCombo)
                 .addLabeledComponent(new JBLabel("API key:"), apiKeyRow)
                 .addLabeledComponent(new JBLabel("REST model:"), modelRow)
                 .addComponent(openRouterCatalogStatus)
+                .addComponent(openRouterModelDetails)
+                .addComponent(openRouterPolicyPanel)
                 .addComponent(aiTestResultLabel)
                 .getPanel();
 
@@ -836,6 +878,14 @@ public class OpenSpecSettingsPanel {
     private void updateBackendControls() {
         if (restSettingsPanel == null || codexSettingsPanel == null) return;
         boolean codex = "LOCAL_CODEX".equals(getAiBackend());
+        if (codex) {
+            restAsync.providerChanged();
+            if (openRouterCatalogWorker != null) openRouterCatalogWorker.cancel(true);
+            if (restTestWorker != null) restTestWorker.cancel(true);
+            if (openRouterKeyStatusWorker != null) openRouterKeyStatusWorker.cancel(true);
+            invalidateRestTest();
+            if (openRouterRefreshButton != null) openRouterRefreshButton.setEnabled(true);
+        }
         restSettingsPanel.setVisible(!codex);
         codexSettingsPanel.setVisible(codex);
     }
@@ -930,6 +980,7 @@ public class OpenSpecSettingsPanel {
         if (codexProbeWorker != null) codexProbeWorker.cancel(true);
         restAsync.dispose();
         if (openRouterCatalogWorker != null) openRouterCatalogWorker.cancel(true);
+        if (openRouterKeyStatusWorker != null) openRouterKeyStatusWorker.cancel(true);
         if (restTestWorker != null) restTestWorker.cancel(true);
     }
 
@@ -988,10 +1039,15 @@ public class OpenSpecSettingsPanel {
         restAsync.providerChanged();
         var keyTicket = restAsync.start(RestSettingsAsyncGuard.Slot.KEY);
         if (openRouterCatalogWorker != null) openRouterCatalogWorker.cancel(true);
+        if (openRouterKeyStatusWorker != null) openRouterKeyStatusWorker.cancel(true);
         if (restTestWorker != null) restTestWorker.cancel(true);
         apiKeyField.setText("");
         aiTestResultLabel.setText(" ");
         openRouterCatalogStatus.setText(" ");
+        openRouterKeyStatusLabel.setText(" ");
+        openRouterKeyStatusButton.setEnabled(true);
+        openRouterPolicyPanel.setVisible(provider == AiProvider.OPENROUTER);
+        openRouterModelDetails.setVisible(provider == AiProvider.OPENROUTER);
         openRouterRefreshButton.setVisible(provider == AiProvider.OPENROUTER);
         openRouterRefreshButton.setEnabled(true);
         apiTestButton.setEnabled(provider != AiProvider.NONE);
@@ -1043,6 +1099,7 @@ public class OpenSpecSettingsPanel {
         String model = getAiModel();
         // Read the UI field on the EDT; the blocking PasswordSafe store/get happens in the worker below.
         final String uiKey = getApiKey();
+        final var policy = getOpenRouterPolicy();
 
         DirectApiService apiService = project.getService(DirectApiService.class);
         if (apiService == null) {
@@ -1067,7 +1124,8 @@ public class OpenSpecSettingsPanel {
                     // Masked key means use the already-stored one
                     key = AiCredentialStore.getApiKey(provider);
                 }
-                return apiService.testConnection(provider, key, apiModel);
+                return apiService.testConnection(provider, key, apiModel, policy,
+                        () -> isCancelled() || disposed || !restAsync.isCurrent(ticket));
             }
 
             @Override
@@ -1097,10 +1155,42 @@ public class OpenSpecSettingsPanel {
     }
 
     private void invalidateRestTest() {
+        restAsync.invalidate(RestSettingsAsyncGuard.Slot.KEY_STATUS);
+        if (openRouterKeyStatusWorker != null) openRouterKeyStatusWorker.cancel(true);
+        if (openRouterKeyStatusLabel != null) openRouterKeyStatusLabel.setText(" ");
+        if (openRouterKeyStatusButton != null) openRouterKeyStatusButton.setEnabled(true);
         restAsync.invalidate(RestSettingsAsyncGuard.Slot.TEST);
         if (restTestWorker != null) restTestWorker.cancel(true);
         if (apiTestButton != null) apiTestButton.setEnabled(getSelectedProvider() != AiProvider.NONE);
         if (aiTestResultLabel != null) aiTestResultLabel.setText(" ");
+    }
+
+    private void checkOpenRouterKeyStatus() {
+        if (disposed || getSelectedProvider() != AiProvider.OPENROUTER) return;
+        DirectApiService service = project.getService(DirectApiService.class);
+        if (service == null) { openRouterKeyStatusLabel.setText("Service not available"); return; }
+        String draftKey = getApiKey();
+        var ticket = restAsync.start(RestSettingsAsyncGuard.Slot.KEY_STATUS);
+        if (openRouterKeyStatusWorker != null) openRouterKeyStatusWorker.cancel(true);
+        openRouterKeyStatusButton.setEnabled(false);
+        openRouterKeyStatusLabel.setText("Checking key status...");
+        openRouterKeyStatusWorker = new SwingWorker<>() {
+            @Override protected String doInBackground() throws Exception {
+                String key = API_KEY_MASK.equals(draftKey) ? AiCredentialStore.getApiKey(AiProvider.OPENROUTER) : draftKey;
+                return service.checkOpenRouterKeyStatus(key, () -> isCancelled() || disposed || !restAsync.isCurrent(ticket));
+            }
+            @Override protected void done() {
+                if (disposed || !restAsync.isCurrent(ticket) || openRouterKeyStatusWorker != this || isCancelled()) return;
+                openRouterKeyStatusButton.setEnabled(true);
+                try { openRouterKeyStatusLabel.setText(get()); }
+                catch (Exception e) {
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    openRouterKeyStatusLabel.setText(cause instanceof com.johnnyblabs.openspec.ai.AiApiException
+                            ? cause.getMessage() : "Key status check failed");
+                }
+            }
+        };
+        openRouterKeyStatusWorker.execute();
     }
 
     private void refreshOpenRouterModels() {
@@ -1142,6 +1232,9 @@ public class OpenSpecSettingsPanel {
         ModelDescriptor model = getSelectedProvider() == AiProvider.OPENROUTER
                 ? openRouterCatalog.stream().filter(m -> m.id().equals(getAiModel())).findFirst().orElse(null) : null;
         aiModelCombo.setToolTipText(model == null ? "Manual model ID; pricing unknown until catalog refresh" : model.description());
+        if (openRouterModelDetails != null) openRouterModelDetails.setText(getSelectedProvider() != AiProvider.OPENROUTER ? " "
+                : "<html><div style='width:420px'>" + escapeHtml(model == null
+                ? "Model context/output limits and pricing unknown; refresh catalog. Conservative limits apply." : model.description()) + "</div></html>");
     }
 
     static void applyStoredKeyMask(JPasswordField field, boolean hasKey) {
@@ -1156,6 +1249,25 @@ public class OpenSpecSettingsPanel {
     }
 
     // --- Public accessors ---
+
+    public com.johnnyblabs.openspec.ai.OpenRouterPolicy getOpenRouterPolicy() {
+        return new com.johnnyblabs.openspec.ai.OpenRouterPolicy(splitProviderIds(openRouterOnlyField.getText()),
+                splitProviderIds(openRouterOrderField.getText()), openRouterFallbacksCheckbox.isSelected(),
+                String.valueOf(openRouterPrivacyCombo.getSelectedItem()), openRouterZdrCheckbox.isSelected(),
+                (Integer) openRouterOutputSpinner.getValue());
+    }
+    static List<String> splitProviderIds(String value) {
+        return value == null ? List.of() : java.util.Arrays.stream(value.split(",")).map(String::trim)
+                .filter(s -> !s.isEmpty()).distinct().toList();
+    }
+    public void setOpenRouterPolicy(com.johnnyblabs.openspec.ai.OpenRouterPolicy policy) {
+        openRouterOnlyField.setText(String.join(", ", policy.only()));
+        openRouterOrderField.setText(String.join(", ", policy.order()));
+        openRouterFallbacksCheckbox.setSelected(policy.allowFallbacks());
+        openRouterPrivacyCombo.setSelectedItem(policy.dataCollection());
+        openRouterZdrCheckbox.setSelected(policy.zdr());
+        openRouterOutputSpinner.setValue(policy.maxOutputTokens());
+    }
 
     public JPanel getPanel() {
         return mainPanel;

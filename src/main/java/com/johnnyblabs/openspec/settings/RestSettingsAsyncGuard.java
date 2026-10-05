@@ -4,7 +4,7 @@ import java.util.EnumMap;
 
 /** Owns settings callbacks across provider switches, repeat requests and panel disposal. */
 final class RestSettingsAsyncGuard {
-    enum Slot { KEY, CATALOG, TEST }
+    enum Slot { KEY, CATALOG, TEST, KEY_STATUS }
     record Ticket(long epoch, long sequence, Slot slot) { }
     private long epoch;
     private long sequence;

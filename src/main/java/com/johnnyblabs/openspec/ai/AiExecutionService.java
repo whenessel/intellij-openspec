@@ -29,6 +29,7 @@ import java.util.function.Consumer;
 public final class AiExecutionService implements Disposable {
     private final Project project;
     private final AtomicReference<AtomicBoolean> active = new AtomicReference<>();
+    private final AtomicReference<AtomicBoolean> latestOperation = new AtomicReference<>();
     private final AtomicReference<AtomicBoolean> activeExplore = new AtomicReference<>();
     private final AtomicBoolean probing = new AtomicBoolean();
     private final AtomicReference<CodexAppServerBackend> exploreBackend = new AtomicReference<>();
@@ -175,6 +176,7 @@ public final class AiExecutionService implements Disposable {
         AtomicBoolean canceled = new AtomicBoolean();
         if (disposed) throw new ProcessCanceledException();
         if (!active.compareAndSet(null, canceled)) throw new AiApiException("An AI request is already active. Stop it before starting another.");
+        latestOperation.set(canceled);
         return canceled;
     }
 
@@ -205,6 +207,7 @@ public final class AiExecutionService implements Disposable {
             String codexEffort = destination.reasoningEffort();
             String restProvider = destination.provider();
             String restModel = destination.model();
+            OpenRouterPolicy openRouterPolicy = settings.getOpenRouterPolicy();
             int timeout = settings.getCodexTimeoutSeconds();
             int budget = settings.getAiContextMaxBytes();
             int tokenBudget = settings.getAiContextMaxInputTokens();
@@ -238,7 +241,8 @@ public final class AiExecutionService implements Disposable {
                     ? AiProvider.fromString(restProvider).getDisplayName() + " · "
                       + (restModel.isBlank() ? AiProvider.fromString(restProvider).getDefaultModel() : restModel) + " · API billing"
                       + (AiProvider.fromString(restProvider) == AiProvider.OPENROUTER
-                         ? " · Context is sent to OpenRouter and its downstream model provider; their data policies apply" : "")
+                         ? " · " + openRouterPolicy.reviewSummary()
+                           + " · Context is sent to OpenRouter and its downstream model provider; their data policies apply" : "")
                     : "Local Codex · " + selection.wireModel() + (selection.defaultSelection() ? " (account default)" : "")
                       + " · effort: " + (codexEffort.isBlank() ? "CLI default" : codexEffort) + " · " + billingLabel(expectedAuth);
             CodexAppServerBackend previousConversation = exploreBackend.get();
@@ -249,6 +253,8 @@ public final class AiExecutionService implements Disposable {
                 if (canceled.get() || disposed || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
                 if (!configuredAtStart.equals(configuredSelection(settings))
                         || !java.util.Objects.equals(deliveryAtStart, settings.getPreferredDeliveryMethod())
+                        || "REST".equals(backend) && AiProvider.fromString(restProvider) == AiProvider.OPENROUTER
+                           && !openRouterPolicy.equals(settings.getOpenRouterPolicy())
                         || budget != settings.getAiContextMaxBytes() || tokenBudget != settings.getAiContextMaxInputTokens() || timeout != settings.getCodexTimeoutSeconds()
                         || local != null && "apikey".equals(expectedAuth) && !settings.isCodexApiBillingAcknowledged()) {
                     throw new AiApiException("AI destination or review settings changed. Review the request again before sending.");
@@ -288,10 +294,12 @@ public final class AiExecutionService implements Disposable {
                     result = response.text();
                 } else {
                     AiBackend rest = new RestAiBackend(project.getService(DirectApiService.class),
-                            AiProvider.fromString(restProvider), restModel);
-                    result = AiExecutionEvents.run(delta -> rest.generate(
+                            AiProvider.fromString(restProvider), restModel, openRouterPolicy);
+                    AiResult response = AiExecutionEvents.run(delta -> rest.generate(
                             new AiRequest(context.prompt(), restModel, context.root(), Duration.ofMinutes(5), outputSchema), token, delta),
-                            token, event -> { if (event instanceof AiEvent.Delta delta) onDelta.accept(delta.text()); }).text();
+                            token, event -> { if (event instanceof AiEvent.Delta delta) onDelta.accept(delta.text()); });
+                    if (AiProvider.fromString(restProvider) == AiProvider.OPENROUTER) reportOpenRouterCompletion(response, token, canceled);
+                    result = response.text();
                 }
                 if (canceled.get() || disposed || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
                 return result;
@@ -301,6 +309,25 @@ public final class AiExecutionService implements Disposable {
                     || indicator != null && indicator.isCanceled()) throw new ProcessCanceledException();
             throw ex;
         }
+    }
+
+    private void reportOpenRouterCompletion(AiResult result, CancellationToken token, AtomicBoolean operation) {
+        if (token.isCancelled() || project.isDisposed() || latestOperation.get() != operation) return;
+        var app = ApplicationManager.getApplication();
+        if (app == null) return;
+        String model = consoleMetadata(result.model());
+        String provider = consoleMetadata(result.provider());
+        app.invokeLater(() -> {
+            if (token.isCancelled() || project.isDisposed() || latestOperation.get() != operation) return;
+            var service = project.getService(com.johnnyblabs.openspec.toolwindow.OpenSpecConsoleService.class);
+            var console = service == null ? null : service.getConsolePanel();
+            if (console != null) console.printSystem("OpenRouter completed · model: " + model + " · provider: " + provider);
+        });
+    }
+
+    private static String consoleMetadata(String value) {
+        if (value == null || value.isBlank()) return "not reported";
+        return value.replaceAll("[\\p{Cntrl}]", " ").substring(0, Math.min(value.length(), 160));
     }
 
     private static BackendSelection configuredSelection(OpenSpecSettings settings) {

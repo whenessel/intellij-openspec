@@ -24,6 +24,137 @@ import static org.mockito.Mockito.*;
 
 /** Exercises orchestration gates with mocked platform services and no real subprocess or AI call. */
 class AiExecutionServiceTest {
+    private void configureOpenRouter() throws Exception {
+        settings.setAiBackend("REST"); settings.setAiProvider("OPENROUTER"); settings.setAiModel("reviewed/model");
+        when(rest.isConfigured()).thenReturn(true);
+        when(rest.isConfigured(AiProvider.OPENROUTER)).thenReturn(true);
+        when(review.review(anyString(), anyString(), anyInt())).thenAnswer(call -> {
+            ReviewedContext context = mock(ReviewedContext.class);
+            when(context.prompt()).thenReturn(call.getArgument(0));
+            when(context.root()).thenReturn(java.nio.file.Path.of("/unused-reviewed-context"));
+            return context;
+        });
+    }
+
+    @Test void openRouterTwoExploreTurnsAndVerifyUseSameReviewedStreamBoundary() throws Exception {
+        configureOpenRouter();
+        when(rest.generateOpenRouter(any(), eq("reviewed/model"), eq(settings.getOpenRouterPolicy()), any(), any()))
+                .thenAnswer(call -> {
+                    com.johnnyblabs.openspec.ai.backend.AiRequest request = call.getArgument(0);
+                    assertNull(request.outputSchema());
+                    java.util.function.Consumer<String> delta = call.getArgument(4);
+                    delta.accept("stream:"); delta.accept(request.prompt());
+                    return new OpenRouterProtocol.Completion("stream:" + request.prompt(), "actual/model", "actual-provider");
+                });
+        java.util.List<String> deltas = new java.util.ArrayList<>();
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class)) {
+            assertEquals("stream:explore one", execution.generateExplore("explore one", "scope", deltas::add));
+            assertEquals("stream:explore two", execution.generateExplore("explore two", "scope", deltas::add));
+            assertEquals("stream:verify synthetic requirement", execution.generateRaw("verify synthetic requirement", deltas::add));
+            assertEquals(java.util.List.of("stream:", "explore one", "stream:", "explore two", "stream:", "verify synthetic requirement"), deltas);
+            verify(rest, times(3)).generateOpenRouter(any(), eq("reviewed/model"), eq(settings.getOpenRouterPolicy()), any(), any());
+            verify(review, times(3)).review(anyString(), contains(settings.getOpenRouterPolicy().reviewSummary()), anyInt());
+            verify(rest, never()).generateRaw(anyString(), any(AiProvider.class), anyString(), any());
+            assertTrue(local.constructed().isEmpty());
+        }
+    }
+
+    @Test void openRouterGenerateHandsValidatedSyntheticEnvelopeToExistingSafeApplyBoundary(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path root) throws Exception {
+        configureOpenRouter();
+        var instruction = new com.johnnyblabs.openspec.model.ArtifactInstruction("synthetic", "specs", root.toString(),
+                "specs/a/spec.md", "Generate a synthetic spec", "", java.util.List.of(), java.util.List.of());
+        var snapshot = new com.johnnyblabs.openspec.ai.safety.ArtifactRequestSnapshot(root, "specs", "specs/a/spec.md", java.util.Map.of());
+        var writer = mock(com.johnnyblabs.openspec.ai.safety.SafeArtifactService.class);
+        var batch = mock(com.johnnyblabs.openspec.ai.safety.ReviewedArtifactBatch.class);
+        when(project.getService(com.johnnyblabs.openspec.ai.safety.SafeArtifactService.class)).thenReturn(writer);
+        when(writer.begin(instruction)).thenReturn(snapshot);
+        String envelope = "{\"schemaVersion\":1,\"artifactId\":\"specs\",\"files\":[{\"relativePath\":\"specs/a/spec.md\",\"operation\":\"create\",\"content\":\"# Synthetic spec\"}]}";
+        when(rest.generateOpenRouter(any(), eq("reviewed/model"), eq(settings.getOpenRouterPolicy()), any(), any()))
+                .thenAnswer(call -> {
+                    com.johnnyblabs.openspec.ai.backend.AiRequest request = call.getArgument(0);
+                    assertNotNull(request.outputSchema());
+                    assertEquals(AiExecutionService.artifactSchema("specs"), request.outputSchema());
+                    return new OpenRouterProtocol.Completion(envelope, "actual/model", "actual-provider");
+                });
+        when(writer.prepare(snapshot, envelope)).thenReturn(batch);
+        when(writer.apply(eq(batch), any())).thenReturn(java.util.List.of(root.resolve("specs/a/spec.md")));
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class)) {
+            assertEquals(java.util.List.of(root.resolve("specs/a/spec.md")), execution.generateAndApply(instruction));
+            verify(writer).prepare(snapshot, envelope); verify(writer).apply(eq(batch), any());
+            verify(rest, never()).generateRaw(anyString(), any(AiProvider.class), anyString(), any());
+            assertTrue(local.constructed().isEmpty());
+        }
+    }
+
+    @Test void openRouterPolicyChangeAfterReviewBlocksRequest() throws Exception {
+        configureOpenRouter();
+        ReviewedContext context = mock(ReviewedContext.class);
+        when(review.review(anyString(), anyString(), anyInt())).thenAnswer(call -> {
+            settings.setOpenRouterPolicy(new OpenRouterPolicy(java.util.List.of("different"), java.util.List.of(), false, "deny", true, 100));
+            return context;
+        });
+        try (MockedStatic<ProgressManager> progress = platformProgress()) {
+            assertTrue(assertThrows(AiApiException.class, () -> execution.generateRaw("synthetic")).getMessage().contains("changed"));
+            verify(rest, never()).generateOpenRouter(any(), anyString(), any(), any(), any());
+            verify(context).close();
+        }
+    }
+
+    @Test void openRouterCancellationAndDisposalAfterStreamPreventSuccessfulReturn() throws Exception {
+        configureOpenRouter();
+        when(rest.generateOpenRouter(any(), anyString(), any(), any(), any())).thenAnswer(call -> {
+            execution.cancelActive();
+            assertTrue(((java.util.function.BooleanSupplier) call.getArgument(3)).getAsBoolean());
+            return new OpenRouterProtocol.Completion("late", "model", "provider");
+        });
+        try (MockedStatic<ProgressManager> progress = platformProgress()) {
+            assertThrows(ProcessCanceledException.class, () -> execution.generateRaw("cancel synthetic"));
+            doAnswer(call -> {
+                execution.dispose();
+                return new OpenRouterProtocol.Completion("late", "model", "provider");
+            }).when(rest).generateOpenRouter(any(), anyString(), any(), any(), any());
+            assertThrows(ProcessCanceledException.class, () -> execution.generateRaw("dispose synthetic"));
+            assertFalse(execution.hasActiveRequest());
+        }
+    }
+
+    @Test void openRouterConsoleReceiptPreservesActualRouteAndRejectsStaleClosedOrCanceledCallbacks() throws Exception {
+        configureOpenRouter();
+        when(rest.generateOpenRouter(any(), anyString(), any(), any(), any()))
+                .thenReturn(new OpenRouterProtocol.Completion("answer", "actual/model", "actual-provider"));
+        var application = mock(com.intellij.openapi.application.Application.class);
+        java.util.List<Runnable> callbacks = new java.util.ArrayList<>();
+        doAnswer(call -> { callbacks.add(call.getArgument(0)); return null; }).when(application).invokeLater(any(Runnable.class));
+        var consoleService = mock(com.johnnyblabs.openspec.toolwindow.OpenSpecConsoleService.class);
+        var console = mock(com.johnnyblabs.openspec.toolwindow.OpenSpecConsolePanel.class);
+        when(project.getService(com.johnnyblabs.openspec.toolwindow.OpenSpecConsoleService.class)).thenReturn(consoleService);
+        when(consoleService.getConsolePanel()).thenReturn(console);
+        var manager = mock(ProgressManager.class);
+        var indicator = mock(com.intellij.openapi.progress.ProgressIndicator.class);
+        when(manager.getProgressIndicator()).thenReturn(indicator);
+        try (MockedStatic<ProgressManager> progress = mockStatic(ProgressManager.class);
+             MockedStatic<com.intellij.openapi.application.ApplicationManager> applications = mockStatic(com.intellij.openapi.application.ApplicationManager.class)) {
+            progress.when(ProgressManager::getInstance).thenReturn(manager);
+            applications.when(com.intellij.openapi.application.ApplicationManager::getApplication).thenReturn(application);
+            assertEquals("answer", execution.generateRaw("older synthetic"));
+            assertEquals("answer", execution.generateRaw("current synthetic"));
+            assertEquals(2, callbacks.size());
+            callbacks.get(0).run(); verifyNoInteractions(console);
+            callbacks.get(1).run();
+            verify(console).printSystem("OpenRouter completed · model: actual/model · provider: actual-provider");
+            clearInvocations(console);
+            execution.generateRaw("closed synthetic");
+            when(project.isDisposed()).thenReturn(true);
+            callbacks.get(2).run(); verifyNoInteractions(console);
+            when(project.isDisposed()).thenReturn(false);
+            execution.generateRaw("canceled synthetic");
+            when(indicator.isCanceled()).thenReturn(true);
+            callbacks.get(3).run(); verifyNoInteractions(console);
+        }
+    }
     private Project project;
     private OpenSpecSettings settings;
     private ContextReviewService review;
@@ -156,7 +287,8 @@ class AiExecutionServiceTest {
         when(context.root()).thenReturn(java.nio.file.Path.of("/unused-context"));
         when(review.review(anyString(), anyString(), anyInt())).thenReturn(context);
         when(rest.isConfigured(AiProvider.OPENROUTER)).thenReturn(true);
-        when(rest.generateRaw(eq("reviewed"), eq(AiProvider.OPENROUTER), eq("override-model"), any())).thenReturn("answer");
+        when(rest.generateOpenRouter(any(), eq("override-model"), eq(settings.getOpenRouterPolicy()), any(), any()))
+                .thenReturn(new OpenRouterProtocol.Completion("answer", "actual/model", "actual-provider"));
         var route = new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot(
                 DeliveryMode.DIRECT_API,
                 new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendSelection("REST", "OPENROUTER", "override-model", "", ""),
@@ -169,7 +301,10 @@ class AiExecutionServiceTest {
             assertFalse(execution.hasActiveRequest());
             assertTrue(local.constructed().isEmpty());
             verify(review).review(eq("prompt"), contains("override-model"), anyInt());
-            verify(rest).generateRaw(eq("reviewed"), eq(AiProvider.OPENROUTER), eq("override-model"), any());
+            verify(review).review(eq("prompt"), contains(settings.getOpenRouterPolicy().reviewSummary()), anyInt());
+            verify(rest).generateOpenRouter(argThat(request -> "reviewed".equals(request.prompt())),
+                    eq("override-model"), eq(settings.getOpenRouterPolicy()), any(), any());
+            verify(rest, never()).generateRaw(anyString(), any(AiProvider.class), anyString(), any());
         }
     }
 

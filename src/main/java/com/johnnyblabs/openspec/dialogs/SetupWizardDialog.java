@@ -508,6 +508,7 @@ public class SetupWizardDialog extends DialogWrapper {
         apiTestLabel.setForeground(JBColor.foreground());
 
         String selectedModel = selectedRestModel();
+        var routePolicy = com.johnnyblabs.openspec.settings.OpenSpecSettings.getInstance(project).getOpenRouterPolicy();
         DirectApiService apiService = project.getService(DirectApiService.class);
         if (apiService == null) {
             apiTestLabel.setText("Service not available");
@@ -519,7 +520,8 @@ public class SetupWizardDialog extends DialogWrapper {
         apiTestWorker = new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
-                return apiService.testConnection(provider, key, selectedModel);
+                return apiService.testConnection(provider, key, selectedModel, routePolicy,
+                        () -> isCancelled() || isDisposed() || project.isDisposed());
             }
 
             @Override

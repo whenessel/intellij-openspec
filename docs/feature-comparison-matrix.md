@@ -68,7 +68,7 @@ A comprehensive comparison of the OpenSpec IntelliJ plugin against known VS Code
 | CLI-owned ChatGPT login / account model catalog | Codex MVP, subscription limits apply | No | No | No | No |
 | Context preview and validated artifact batch review | Yes (integrated REST/Codex) | No | No | No | No |
 | Persistent Codex conversation resume | Explore: implemented with ChatGPT workspace identity/scope guards; pending live acceptance | — | — | — | — |
-| OpenRouter REST provider | Available | — | — | — | — |
+| OpenRouter REST provider (streaming, routing/privacy, limits) | Available | — | — | — | — |
 | Autonomous workspace Apply | Deferred | — | — | — | — |
 | Secure credential storage (OS keychain) | Yes (PasswordSafe) | No | No | No | No |
 | API connection test | Yes | No | No | No | No |

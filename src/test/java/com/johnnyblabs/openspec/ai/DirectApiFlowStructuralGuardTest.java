@@ -146,8 +146,11 @@ class DirectApiFlowStructuralGuardTest {
                 "the key must not be stored on the EDT before the worker");
         assertFalse(body.contains("AiCredentialStore.storeApiKey("), "unsaved wizard keys must not be persisted by Test");
         assertFalse(body.contains("settings.set"), "wizard Test must not change project settings");
-        assertTrue(body.substring(worker).contains("testConnection(provider, key, selectedModel)"),
+        assertTrue(body.substring(worker).contains("testConnection(provider, key, selectedModel, routePolicy,"),
                 "test must use the explicitly captured provider/key/model inside worker");
+        assertTrue(body.indexOf("getOpenRouterPolicy()") < worker, "route policy must be captured before background work");
+        assertTrue(body.substring(worker).contains("isCancelled() || isDisposed() || project.isDisposed()"),
+                "test transport must observe worker/dialog/project cancellation");
     }
 
     @Test

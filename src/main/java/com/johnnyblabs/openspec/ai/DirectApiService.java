@@ -20,6 +20,8 @@ public final class DirectApiService {
     private final Project project;
     private final HttpClient injectedClient;
     private final ThreadLocal<java.util.function.BooleanSupplier> cancellation = new ThreadLocal<>();
+    private volatile String openRouterCatalog;
+    private volatile long catalogFetchedAt;
 
     public String generateRaw(String prompt, java.util.function.BooleanSupplier canceled) throws AiApiException {
         AiProvider provider = getProvider();
@@ -37,7 +39,7 @@ public final class DirectApiService {
     private HttpResponse<String> sendRequest(HttpRequest request) throws Exception {
         checkRequestCanceled();
         var future = createHttpClient().sendAsync(request, HttpResponse.BodyHandlers.ofString());
-        long deadline = System.nanoTime() + TIMEOUT.toNanos();
+        long deadline = System.nanoTime() + request.timeout().orElse(TIMEOUT).toNanos();
         try {
             while (true) {
                 checkRequestCanceled();
@@ -80,7 +82,7 @@ public final class DirectApiService {
     private HttpClient createHttpClient() {
         if (injectedClient != null) return injectedClient;
         return HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(30))
+                .connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NEVER)
                 .build();
     }
 
@@ -195,6 +197,21 @@ public final class DirectApiService {
         } catch (AiApiException e) {
             throw new AiApiException("Connection test failed: " + e.getMessage(), e);
         }
+    }
+
+    /** Settings test uses the same immutable route/privacy requirements and cancelable stream as execution. */
+    public String testConnection(AiProvider provider, String key, String model, OpenRouterPolicy policy,
+                                 java.util.function.BooleanSupplier canceled) throws AiApiException {
+        if (provider != AiProvider.OPENROUTER) {
+            cancellation.set(canceled);
+            try { return testConnection(provider, key, model); } finally { cancellation.remove(); }
+        }
+        String selected = model == null || model.isBlank() ? provider.getDefaultModel() : model;
+        var capped = new OpenRouterPolicy(policy.only(), policy.order(), policy.allowFallbacks(), policy.dataCollection(),
+                policy.zdr(), Math.min(256, policy.maxOutputTokens()));
+        var result = streamOpenRouter(new com.johnnyblabs.openspec.ai.backend.AiRequest("Respond with exactly: OK", selected,
+                java.nio.file.Path.of("."), Duration.ofMinutes(5)), selected, capped, canceled, ignored -> {}, key);
+        return "Connected to OpenRouter (" + result.model() + "; provider: " + (result.provider().isBlank() ? "not reported" : result.provider()) + ")";
     }
 
     /**
@@ -325,15 +342,67 @@ public final class DirectApiService {
         catch (Exception e) { throw new AiApiException("OpenRouter request failed. Check network/proxy access to openrouter.ai and retry."); }
     }
 
+    public OpenRouterProtocol.Completion generateOpenRouter(
+            com.johnnyblabs.openspec.ai.backend.AiRequest request, String model, OpenRouterPolicy policy,
+            java.util.function.BooleanSupplier canceled, java.util.function.Consumer<String> delta) throws AiApiException {
+        String key = AiCredentialStore.getApiKey(AiProvider.OPENROUTER);
+        return streamOpenRouter(request, model, policy, canceled, delta, key);
+    }
+    private OpenRouterProtocol.Completion streamOpenRouter(
+            com.johnnyblabs.openspec.ai.backend.AiRequest request, String model, OpenRouterPolicy policy,
+            java.util.function.BooleanSupplier canceled, java.util.function.Consumer<String> delta, String key) throws AiApiException {
+        cancellation.set(canceled);
+        Duration timeout = request.timeout().compareTo(TIMEOUT) < 0 ? request.timeout() : TIMEOUT;
+        long started = System.nanoTime();
+        try {
+            if (key == null || key.isBlank()) throw new AiApiException("No OpenRouter API key configured");
+            checkRequestCanceled();
+            if (openRouterCatalog == null || System.nanoTime() - catalogFetchedAt > Duration.ofMinutes(5).toNanos()) {
+                try { refreshOpenRouterModels(canceled, timeout.compareTo(Duration.ofSeconds(30)) < 0 ? timeout : Duration.ofSeconds(30)); }
+                catch (AiApiException ignored) { /* Manual IDs remain usable with conservative unknown bounds. */ }
+                finally { cancellation.set(canceled); }
+            }
+            boolean structured = request.requiredCapabilities().contains(com.johnnyblabs.openspec.ai.backend.BackendCapability.STRUCTURED_OUTPUT);
+            if (structured) {
+                if (request.outputSchema() == null) throw new AiApiException("Native structured output requires a schema");
+                OpenRouterProtocol.requireStructured(openRouterCatalog, model);
+            }
+            int tokens = OpenRouterProtocol.limits(openRouterCatalog, model, request.prompt(), policy.maxOutputTokens());
+            Duration remaining = timeout.minusNanos(System.nanoTime() - started);
+            if (remaining.isNegative() || remaining.isZero()) throw new AiApiException("OpenRouter request timed out before inference");
+            return new OpenRouterTransport(createHttpClient()).stream(
+                    OpenRouterProtocol.streaming(model, key, request.prompt(), tokens, policy, structured ? request.outputSchema() : null),
+                    remaining, canceled, delta);
+        } finally { cancellation.remove(); }
+    }
+
+    public String checkOpenRouterKeyStatus(String key, java.util.function.BooleanSupplier canceled) throws AiApiException {
+        cancellation.set(canceled);
+        try {
+            var response = sendRequest(OpenRouterProtocol.keyStatus(key));
+            checkRequestCanceled();
+            if (response.statusCode() != 200) throw OpenRouterProtocol.error(response.statusCode());
+            return OpenRouterProtocol.parseKeyStatus(response.body());
+        } catch (AiApiException | com.intellij.openapi.progress.ProcessCanceledException e) { throw e; }
+        catch (Exception e) { throw new AiApiException("OpenRouter key status failed. Check network/proxy access to openrouter.ai."); }
+        finally { cancellation.remove(); }
+    }
+
     /** Explicit public catalog refresh. Must run off EDT. No key or inference request. */
     public java.util.List<com.johnnyblabs.openspec.ai.backend.ModelDescriptor> refreshOpenRouterModels(
             java.util.function.BooleanSupplier canceled) throws AiApiException {
+        return refreshOpenRouterModels(canceled, Duration.ofSeconds(30));
+    }
+    private java.util.List<com.johnnyblabs.openspec.ai.backend.ModelDescriptor> refreshOpenRouterModels(
+            java.util.function.BooleanSupplier canceled, Duration timeout) throws AiApiException {
         cancellation.set(canceled);
         try {
-            var response = sendRequest(OpenRouterProtocol.models());
+            var response = sendRequest(HttpRequest.newBuilder(OpenRouterProtocol.models().uri()).timeout(timeout).GET().build());
             checkRequestCanceled();
             if (response.statusCode() != 200) throw OpenRouterProtocol.error(response.statusCode());
-            return OpenRouterProtocol.parseModels(response.body());
+            var models = OpenRouterProtocol.parseModels(response.body());
+            openRouterCatalog = response.body(); catalogFetchedAt = System.nanoTime();
+            return models;
         } catch (AiApiException | com.intellij.openapi.progress.ProcessCanceledException e) { throw e; }
         catch (Exception e) { throw new AiApiException("OpenRouter catalog refresh failed. Check network/proxy access to openrouter.ai; manual model IDs remain available."); }
         finally { cancellation.remove(); }

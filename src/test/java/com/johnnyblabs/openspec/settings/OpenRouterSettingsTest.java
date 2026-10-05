@@ -27,6 +27,36 @@ class OpenRouterSettingsTest {
         assertEquals("vendor/model:free", reload.getAiModel());
         assertEquals("OPENROUTER", AiSettingsMigration.canonicalProvider("OpenRouter"));
     }
+    @Test void policySurvivesReloadAndProviderRoundTripWithoutAffectingModels() {
+        var settings = new OpenSpecSettings();
+        var policy = new com.johnnyblabs.openspec.ai.OpenRouterPolicy(List.of(" ProviderA ", "ProviderA"),
+                List.of("ProviderB", "ProviderA"), false, "deny", true, 2048);
+        settings.setOpenRouterPolicy(policy);
+        settings.setAiProvider("OPENROUTER");
+        settings.setAiModel("vendor/model");
+        settings.setAiProvider("OPENAI");
+        var reload = new OpenSpecSettings();
+        reload.loadState(settings.getState());
+        assertEquals(policy, reload.getOpenRouterPolicy());
+        assertEquals(List.of("ProviderA"), reload.getOpenRouterPolicy().only());
+        assertEquals("vendor/model", reload.getAiModel("OPENROUTER"));
+        assertEquals("deny", reload.getOpenRouterPolicy().dataCollection());
+    }
+    @Test void legacyStateGetsSafeDefaultPolicyAndMalformedBoundsAreNormalized() {
+        var settings = new OpenSpecSettings();
+        assertEquals(com.johnnyblabs.openspec.ai.OpenRouterPolicy.defaults(), settings.getOpenRouterPolicy());
+        settings.getState().openRouterMaxOutputTokens = Integer.MAX_VALUE;
+        settings.getState().openRouterDataCollection = "invalid";
+        settings.getState().openRouterOnly = null;
+        var policy = settings.getOpenRouterPolicy();
+        assertEquals(16000, policy.maxOutputTokens());
+        assertEquals("deny", policy.dataCollection());
+        assertThrows(IllegalArgumentException.class, () -> new com.johnnyblabs.openspec.ai.OpenRouterPolicy(
+                List.of(), List.of(), true, "invalid", false, 4096));
+        assertEquals(List.of(), policy.only());
+        assertThrows(UnsupportedOperationException.class, () -> policy.only().add("mutation"));
+        assertEquals(List.of("A", "B"), OpenSpecSettingsPanel.splitProviderIds(" A, B, A, ,"));
+    }
     @Test void catalogPreservesCurrentEditableModelIncludingManualIds() throws Exception {
         javax.swing.SwingUtilities.invokeAndWait(() -> {
             JComboBox<String> combo = new JComboBox<>(new String[]{"old"});

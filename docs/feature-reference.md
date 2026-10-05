@@ -361,7 +361,7 @@ Read-only display of the current profile name and description from `config.yaml`
 
 Integrated artifact generation, Explore and Verify share routing and an editable context preview. Codex Explore resumes CLI-owned history only with a verifiable ChatGPT workspace/account identity; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify but not persistent Explore. Artifact batches receive validated path/base checks and a result preview before create/replace/exact artifact patch operations. Context manifests disclose explicitly included files, redactions and omissions. Explicit Clipboard/Editor delivery remains manual and prevents inference through a saved backend. Codex owns login/refresh; ChatGPT login uses subscription limits and online inference. Unsupported configurations fail without REST fallback.
 
-See the [local Codex guide](local-codex.md) for the exact version/OS baseline, prompt-only execution profile, persistent Explore identity/history boundaries and current build/acceptance blockers. OpenRouter is available as a REST provider with an explicit model catalog refresh; see the [OpenRouter guide](openrouter.md). Autonomous workspace-writing Apply remains a later phase.
+See the [local Codex guide](local-codex.md) for the exact version/OS baseline, prompt-only execution profile, persistent Explore identity/history boundaries and current build/acceptance blockers. OpenRouter provides SSE streaming, model catalog limits/pricing, explicit downstream routing/privacy controls, optional key status and actual responding-provider details; see the [OpenRouter guide](openrouter.md). Autonomous workspace-writing Apply remains a later phase.
 
 ---
 

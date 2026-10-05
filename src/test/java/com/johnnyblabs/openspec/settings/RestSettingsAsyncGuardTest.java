@@ -6,6 +6,17 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RestSettingsAsyncGuardTest {
+    @Test void credentialEditAndProviderSwitchRejectKeyStatusButKeepIndependentCatalog() {
+        var guard = new RestSettingsAsyncGuard();
+        var key = guard.start(RestSettingsAsyncGuard.Slot.KEY_STATUS);
+        var catalog = guard.start(RestSettingsAsyncGuard.Slot.CATALOG);
+        guard.invalidate(RestSettingsAsyncGuard.Slot.KEY_STATUS);
+        assertFalse(guard.isCurrent(key));
+        assertTrue(guard.isCurrent(catalog));
+        var replacement = guard.start(RestSettingsAsyncGuard.Slot.KEY_STATUS);
+        guard.providerChanged();
+        assertFalse(guard.isCurrent(replacement));
+    }
     @Test void staleCatalogCannotReplaceAnotherProviderOrSameProviderAfterRoundTrip() {
         var guard = new RestSettingsAsyncGuard();
         var view = new AtomicReference<>("OpenAI model");
