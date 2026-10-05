@@ -53,3 +53,7 @@ The [manual acceptance checklist](../../../docs/local-codex-acceptance.md) recor
 OpenRouter and workspace-writing Apply remain their planned future phases. This checkpoint does not declare the MVP accepted or ready for release.
 
 OpenSpec progress: **10/51 complete**. Only pure criteria 1.1, 2.2, 2.4 and 3.3–3.6 were closed in this continuation; 2.5, 3.1 and 3.10 were already complete. Remaining checkboxes retain their full SDK/operator/release/future-phase criteria. Final independent source/test audit passed; the shared-dispatch concurrency mutant is detected by the bounded callback test.
+
+## Subsequent OpenRouter implementation
+
+This file records the earlier Codex MVP checkpoint. OpenRouter REST generation and catalog support were subsequently implemented in [add-openrouter-provider](../add-openrouter-provider/proposal.md); see that change’s validation for current build, tests and real HTTP acceptance. Its nonstreaming REST contract does not mark the original future SSE, advanced provider routing-policy or autonomous Apply tasks complete.

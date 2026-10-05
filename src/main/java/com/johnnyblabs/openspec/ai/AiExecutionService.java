@@ -237,6 +237,8 @@ public final class AiExecutionService implements Disposable {
             String reviewedDestination = local == null
                     ? AiProvider.fromString(restProvider).getDisplayName() + " · "
                       + (restModel.isBlank() ? AiProvider.fromString(restProvider).getDefaultModel() : restModel) + " · API billing"
+                      + (AiProvider.fromString(restProvider) == AiProvider.OPENROUTER
+                         ? " · Context is sent to OpenRouter and its downstream model provider; their data policies apply" : "")
                     : "Local Codex · " + selection.wireModel() + (selection.defaultSelection() ? " (account default)" : "")
                       + " · effort: " + (codexEffort.isBlank() ? "CLI default" : codexEffort) + " · " + billingLabel(expectedAuth);
             CodexAppServerBackend previousConversation = exploreBackend.get();

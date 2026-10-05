@@ -34,6 +34,24 @@ class AiCredentialStoreTest {
     }
 
     @Test
+    void openRouterCredentialsAreSeparateFromOpenAiAndRemovalDoesNotAffectOtherProvider() {
+        PasswordSafe safe = mock(PasswordSafe.class);
+        try (MockedStatic<PasswordSafe> ps = mockStatic(PasswordSafe.class)) {
+            ps.when(PasswordSafe::getInstance).thenReturn(safe);
+            AiCredentialStore.storeApiKey(AiProvider.OPENAI, "synthetic-openai");
+            AiCredentialStore.storeApiKey(AiProvider.OPENROUTER, "synthetic-router");
+            AiCredentialStore.removeApiKey(AiProvider.OPENROUTER);
+            var attributes = org.mockito.ArgumentCaptor.forClass(com.intellij.credentialStore.CredentialAttributes.class);
+            verify(safe, times(3)).set(attributes.capture(), any());
+            var stored = attributes.getAllValues();
+            org.junit.jupiter.api.Assertions.assertNotEquals(stored.get(0).getServiceName(), stored.get(1).getServiceName());
+            org.junit.jupiter.api.Assertions.assertEquals(stored.get(1).getServiceName(), stored.get(2).getServiceName());
+            assertTrue(AiCredentialStore.hasApiKeyCached(AiProvider.OPENAI));
+            assertFalse(AiCredentialStore.hasApiKeyCached(AiProvider.OPENROUTER));
+        }
+    }
+
+    @Test
     void storeApiKey_marksProviderHasKey_withoutAKeystoreRead() {
         PasswordSafe safe = mock(PasswordSafe.class);
         try (MockedStatic<PasswordSafe> ps = mockStatic(PasswordSafe.class)) {

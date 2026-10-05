@@ -13,7 +13,7 @@ OpenSpec can generate artifacts using AI providers. This page covers setup and u
 
 ## Setup
 
-Open **Settings → Tools → OpenSpec → AI generation**. Select **REST API (API billed)** for Claude, OpenAI or Gemini and configure the provider's key/model. PasswordSafe owns REST credential storage. **Test (API billed)** sends a live REST request.
+Open **Settings → Tools → OpenSpec → AI generation**. Select **REST API (API billed)** for Claude, OpenAI, Gemini or OpenRouter and configure the provider's key/model. PasswordSafe owns REST credential storage. **Test (API billed)** sends a live REST request.
 
 Select **Installed Codex CLI** to use your existing CLI login. Enter a native executable or PATH command, refresh status/models without inference, choose an account catalog entry or enter a manual model ID, and Apply. Blank uses the CLI default. The current adapter accepts Codex 0.160.0 on Linux/macOS with a verified restricted profile; unsupported versions, Windows, configured MCP/hooks/plugins or incompatible custom context fail visibly without REST fallback. Codex owns login/refresh; run `codex login` externally. The plugin never reads or copies auth files. ChatGPT inference is online and subject to subscription limits; CLI API key mode requires explicit billing opt-in.
 
@@ -61,3 +61,7 @@ Detected tools are shown in the tool window status bar, helping users know which
 ---
 
 **Previous:** [[Menu-and-Actions-Reference]] | **Next:** [[Validation]]
+
+## OpenRouter
+
+Select REST → OpenRouter in Settings → Tools → OpenSpec. PasswordSafe stores its key separately; the editable model ID is retained independently of other providers. Refresh models makes a public catalog request without credentials or inference. Test sends a live request to the selected model. See [the OpenRouter guide](../../../docs/openrouter.md) for privacy, billing, cancellation and acceptance details.

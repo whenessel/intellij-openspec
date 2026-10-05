@@ -6,6 +6,8 @@
 
 ### Added
 
+- **OpenRouter REST integration:** use an OpenRouter key stored in PasswordSafe, refresh the live text-model catalog or enter a model ID, and generate, explore or verify through the existing reviewed-context workflow. Provider switching keeps credentials and model preferences separate; canceled, blocked or incomplete responses are not applied.
+
 - **OpenSpec CLI 1.12.x is now a supported line.** 1.12 is an additive, safe-direction superset of 1.11 — verified by running the real 1.12.0 CLI over the shared parity corpus, its default and strict validation verdicts are unchanged, so nothing is re-gated and the built-in validator needs no change. 1.12 adds one new, verdict-neutral diagnostic: when validating a change, an informational note now flags a delta whose target spec does not yet exist ("archive would refuse this delta"). It never affects the pass/fail verdict, and the plugin already surfaces it at the correct severity. The plugin declares 1.12.x supported (minimum CLI remains 1.3.0), with per-generation contract coverage against captured real 1.12.0 output including a positive-control lock on the new diagnostic.
 
 ### Fixed

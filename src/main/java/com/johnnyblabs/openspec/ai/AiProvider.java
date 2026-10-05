@@ -14,7 +14,8 @@ public enum AiProvider {
     OPENAI("OpenAI", List.of("gpt-4o", "gpt-4o-mini", "o1-mini")),
     // Gemini 2.5 (pro/flash/flash-lite) is retiring 2026-10-16 (flash already deprecated), so its
     // defaults 404'd on fresh AI Studio keys. Current stable Flash line (free-tier friendly):
-    GEMINI("Gemini", List.of("gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite"));
+    GEMINI("Gemini", List.of("gemini-3.5-flash", "gemini-3.8-flash", "gemini-3.5-flash-lite")),
+    OPENROUTER("OpenRouter", List.of("openrouter/free"));
 
     private final String displayName;
     private final List<String> models;

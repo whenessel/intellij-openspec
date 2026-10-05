@@ -78,9 +78,10 @@ class DirectApiFlowStructuralGuardTest {
         assertFalse(body.substring(0, worker).contains("AiCredentialStore."),
                 "credential store I/O must not run on the EDT before the worker");
         String workerBody = body.substring(worker);
-        assertTrue(workerBody.contains("AiCredentialStore.storeApiKey(")
-                        && workerBody.contains("AiCredentialStore.getApiKey("),
-                "store/get must happen inside doInBackground (off the EDT)");
+        assertTrue(workerBody.contains("AiCredentialStore.getApiKey("),
+                "stored-key read must happen inside doInBackground (off the EDT)");
+        assertFalse(body.contains("AiCredentialStore.storeApiKey("),
+                "connection tests must not persist unsaved credentials; Apply owns writes");
     }
 
     @Test
@@ -137,14 +138,16 @@ class DirectApiFlowStructuralGuardTest {
     }
 
     @Test
-    void wizardTestConnection_writesKeyInsideTheWorker() throws IOException {
+    void wizardTestConnection_usesCapturedValuesWithoutPersistingOrMutatingSettings() throws IOException {
         String body = methodBody(read(WIZARD_DIALOG), "private void testApiConnection()");
         int worker = body.indexOf("new SwingWorker");
         assertTrue(worker >= 0, "testApiConnection must run its blocking work in a SwingWorker");
         assertFalse(body.substring(0, worker).contains("AiCredentialStore.storeApiKey("),
                 "the key must not be stored on the EDT before the worker");
-        assertTrue(body.substring(worker).contains("AiCredentialStore.storeApiKey("),
-                "the key must be stored inside doInBackground (off the EDT)");
+        assertFalse(body.contains("AiCredentialStore.storeApiKey("), "unsaved wizard keys must not be persisted by Test");
+        assertFalse(body.contains("settings.set"), "wizard Test must not change project settings");
+        assertTrue(body.substring(worker).contains("testConnection(provider, key, selectedModel)"),
+                "test must use the explicitly captured provider/key/model inside worker");
     }
 
     @Test

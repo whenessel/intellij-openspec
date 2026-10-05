@@ -106,6 +106,12 @@ public class OpenSpecSettingsPanel {
     private JPanel restSettingsPanel;
     private JPanel codexSettingsPanel;
     private JButton apiTestButton;
+    private JButton openRouterRefreshButton;
+    private JBLabel openRouterCatalogStatus;
+    private List<ModelDescriptor> openRouterCatalog = List.of();
+    private SwingWorker<List<ModelDescriptor>, Void> openRouterCatalogWorker;
+    private SwingWorker<String, Void> restTestWorker;
+    private final RestSettingsAsyncGuard restAsync = new RestSettingsAsyncGuard();
     private SwingWorker<CodexProbe, Void> codexProbeWorker;
     private volatile boolean disposed;
     private JComboBox<String> aiProviderCombo;
@@ -711,6 +717,7 @@ public class OpenSpecSettingsPanel {
 
         // API key + test button
         apiKeyField = new JPasswordField(30);
+        watchRestInput(apiKeyField, this::invalidateRestTest);
         apiTestButton = new JButton("Test (API billed)");
         apiTestButton.setToolTipText("Sends a live request to the selected REST provider using your API key.");
         apiTestButton.addActionListener(e -> testApiConnection());
@@ -724,6 +731,27 @@ public class OpenSpecSettingsPanel {
         // Model dropdown
         aiModelCombo = new JComboBox<>();
         aiModelCombo.setEditable(true);
+        if (aiModelCombo.getEditor().getEditorComponent() instanceof javax.swing.text.JTextComponent editor)
+            watchRestInput(editor, this::invalidateRestTest);
+        aiModelCombo.setRenderer(new DefaultListCellRenderer() {
+            @Override public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+                    boolean selected, boolean focused) {
+                var component = super.getListCellRendererComponent(list, value, index, selected, focused);
+                ModelDescriptor metadata = openRouterCatalog.stream().filter(m -> m.id().equals(value)).findFirst().orElse(null);
+                if (component instanceof javax.swing.JComponent jc) jc.setToolTipText(metadata == null ? null : metadata.description());
+                return component;
+            }
+        });
+        aiModelCombo.addActionListener(e -> { updateOpenRouterModelDetails(); invalidateRestTest(); });
+        openRouterRefreshButton = new JButton("Refresh models (no inference)");
+        openRouterRefreshButton.setVisible(false);
+        openRouterRefreshButton.addActionListener(e -> refreshOpenRouterModels());
+        openRouterCatalogStatus = new JBLabel(" ");
+        JPanel modelRow = new JPanel();
+        modelRow.setLayout(new BoxLayout(modelRow, BoxLayout.X_AXIS));
+        modelRow.add(aiModelCombo);
+        modelRow.add(Box.createHorizontalStrut(4));
+        modelRow.add(openRouterRefreshButton);
 
         aiTestResultLabel = new JBLabel(" ");
 
@@ -731,7 +759,8 @@ public class OpenSpecSettingsPanel {
                 .addComponent(helpLabel)
                 .addLabeledComponent(new JBLabel("REST provider:"), aiProviderCombo)
                 .addLabeledComponent(new JBLabel("API key:"), apiKeyRow)
-                .addLabeledComponent(new JBLabel("REST model:"), aiModelCombo)
+                .addLabeledComponent(new JBLabel("REST model:"), modelRow)
+                .addComponent(openRouterCatalogStatus)
                 .addComponent(aiTestResultLabel)
                 .getPanel();
 
@@ -899,6 +928,9 @@ public class OpenSpecSettingsPanel {
     public void dispose() {
         disposed = true;
         if (codexProbeWorker != null) codexProbeWorker.cancel(true);
+        restAsync.dispose();
+        if (openRouterCatalogWorker != null) openRouterCatalogWorker.cancel(true);
+        if (restTestWorker != null) restTestWorker.cancel(true);
     }
 
     // --- CLI detection ---
@@ -953,6 +985,16 @@ public class OpenSpecSettingsPanel {
 
     private void onProviderChanged() {
         AiProvider provider = getSelectedProvider();
+        restAsync.providerChanged();
+        var keyTicket = restAsync.start(RestSettingsAsyncGuard.Slot.KEY);
+        if (openRouterCatalogWorker != null) openRouterCatalogWorker.cancel(true);
+        if (restTestWorker != null) restTestWorker.cancel(true);
+        apiKeyField.setText("");
+        aiTestResultLabel.setText(" ");
+        openRouterCatalogStatus.setText(" ");
+        openRouterRefreshButton.setVisible(provider == AiProvider.OPENROUTER);
+        openRouterRefreshButton.setEnabled(true);
+        apiTestButton.setEnabled(provider != AiProvider.NONE);
         if (AiSettingsMigration.canonicalProvider(lastRestProvider) != null) restModelDrafts.put(lastRestProvider, getAiModel());
         lastRestProvider = provider.name();
         aiModelCombo.removeAllItems();
@@ -981,9 +1023,7 @@ public class OpenSpecSettingsPanel {
         com.intellij.openapi.application.ApplicationManager.getApplication().executeOnPooledThread(() -> {
             boolean hasKey = AiCredentialStore.hasApiKey(provider);
             com.intellij.openapi.application.ApplicationManager.getApplication().invokeLater(() -> {
-                if (getSelectedProvider() == provider && hasKey) {
-                    apiKeyField.setText(API_KEY_MASK);
-                }
+                restAsync.apply(keyTicket, () -> applyStoredKeyMask(apiKeyField, hasKey));
             }, modality);
         });
     }
@@ -1013,13 +1053,16 @@ public class OpenSpecSettingsPanel {
 
         // Pass current UI values directly — don't rely on persisted settings
         final String apiModel = model;
-        new SwingWorker<String, Void>() {
+        final var ticket = restAsync.start(RestSettingsAsyncGuard.Slot.TEST);
+        if (restTestWorker != null) restTestWorker.cancel(true);
+        apiTestButton.setEnabled(false);
+        restTestWorker = new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
                 // Credential store I/O is blocking (@RequiresBackgroundThread) — do it here, off the EDT.
                 String key = uiKey;
                 if (key != null && !key.isBlank() && !key.equals(API_KEY_MASK)) {
-                    AiCredentialStore.storeApiKey(provider, key);
+                    // Test the unsaved field without persisting it; Apply owns credential writes.
                 } else if (key != null && key.equals(API_KEY_MASK)) {
                     // Masked key means use the already-stored one
                     key = AiCredentialStore.getApiKey(provider);
@@ -1029,6 +1072,8 @@ public class OpenSpecSettingsPanel {
 
             @Override
             protected void done() {
+                if (disposed || !restAsync.isCurrent(ticket) || restTestWorker != this || isCancelled()) return;
+                apiTestButton.setEnabled(true);
                 try {
                     String result = get();
                     aiTestResultLabel.setText(result);
@@ -1039,7 +1084,75 @@ public class OpenSpecSettingsPanel {
                     aiTestResultLabel.setForeground(JBColor.RED);
                 }
             }
-        }.execute();
+        };
+        restTestWorker.execute();
+    }
+
+    static void watchRestInput(javax.swing.text.JTextComponent field, Runnable onEdit) {
+        field.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { onEdit.run(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { onEdit.run(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { onEdit.run(); }
+        });
+    }
+
+    private void invalidateRestTest() {
+        restAsync.invalidate(RestSettingsAsyncGuard.Slot.TEST);
+        if (restTestWorker != null) restTestWorker.cancel(true);
+        if (apiTestButton != null) apiTestButton.setEnabled(getSelectedProvider() != AiProvider.NONE);
+        if (aiTestResultLabel != null) aiTestResultLabel.setText(" ");
+    }
+
+    private void refreshOpenRouterModels() {
+        if (disposed || getSelectedProvider() != AiProvider.OPENROUTER) return;
+        DirectApiService service = project.getService(DirectApiService.class);
+        if (service == null) {
+            openRouterCatalogStatus.setText("Service not available; enter a model ID manually");
+            return;
+        }
+        var ticket = restAsync.start(RestSettingsAsyncGuard.Slot.CATALOG);
+        if (openRouterCatalogWorker != null) openRouterCatalogWorker.cancel(true);
+        openRouterRefreshButton.setEnabled(false);
+        openRouterCatalogStatus.setText("Loading OpenRouter models...");
+        openRouterCatalogWorker = new SwingWorker<>() {
+            @Override protected List<ModelDescriptor> doInBackground() throws Exception {
+                return service.refreshOpenRouterModels(() -> isCancelled() || disposed || !restAsync.isCurrent(ticket));
+            }
+            @Override protected void done() {
+                if (disposed || !restAsync.isCurrent(ticket) || openRouterCatalogWorker != this || isCancelled()) return;
+                openRouterRefreshButton.setEnabled(true);
+                try {
+                    List<ModelDescriptor> catalog = get();
+                    openRouterCatalog = catalog;
+                    applyRestCatalog(aiModelCombo, catalog);
+                    updateOpenRouterModelDetails();
+                    openRouterCatalogStatus.setText(catalog.size() + " text models loaded; hover model for prices/source/time; availability varies");
+                } catch (Exception e) {
+                    Throwable cause = e.getCause() == null ? e : e.getCause();
+                    openRouterCatalogStatus.setText(cause instanceof com.johnnyblabs.openspec.ai.AiApiException
+                            ? cause.getMessage() : "Catalog refresh failed; enter a model ID manually");
+                }
+            }
+        };
+        openRouterCatalogWorker.execute();
+    }
+
+    private void updateOpenRouterModelDetails() {
+        if (aiModelCombo == null) return;
+        ModelDescriptor model = getSelectedProvider() == AiProvider.OPENROUTER
+                ? openRouterCatalog.stream().filter(m -> m.id().equals(getAiModel())).findFirst().orElse(null) : null;
+        aiModelCombo.setToolTipText(model == null ? "Manual model ID; pricing unknown until catalog refresh" : model.description());
+    }
+
+    static void applyStoredKeyMask(JPasswordField field, boolean hasKey) {
+        if (hasKey && field.getPassword().length == 0) field.setText(API_KEY_MASK);
+    }
+
+    static void applyRestCatalog(JComboBox<String> combo, List<ModelDescriptor> catalog) {
+        Object selection = combo.getEditor().getItem();
+        combo.removeAllItems();
+        for (ModelDescriptor model : catalog) combo.addItem(model.id());
+        if (selection != null && !selection.toString().isBlank()) combo.setSelectedItem(selection);
     }
 
     // --- Public accessors ---

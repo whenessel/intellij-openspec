@@ -91,7 +91,7 @@ Paste this HTML into the "Description" field on the plugin edit page:
   <li>Visual artifact pipeline with status chips (done / ready / blocked)</li>
   <li>Fast-Forward: one-click change creation + artifact generation</li>
   <li>Generate All: walk the full artifact DAG with progress reporting</li>
-  <li>REST support for Claude, OpenAI, and Gemini with secure credential storage; installed Codex CLI backend with existing login, model selection and context review</li>
+  <li>REST support for Claude, OpenAI, Gemini, and OpenRouter with secure credential storage; installed Codex CLI backend with existing login, model selection and context review</li>
   <li>Detects AI tool configuration in your project and provides tool-specific delivery guidance</li>
   <li>Real-time editor inspections for spec format, RFC 2119 keywords, and delta spec structure</li>
   <li>Delta spec sync: merge ADDED / MODIFIED / REMOVED sections into main specs with preview</li>
@@ -146,7 +146,7 @@ Paste this HTML into the "Getting Started" field:
   <li><strong>Archive</strong> — Merge delta specs into your main specs and archive the change.</li>
 </ol>
 
-<p><strong>Installed Codex MVP:</strong> requires Codex 0.160.0 on Linux/macOS and a compatible restricted profile. Codex owns login and refresh; ChatGPT usage is online and subject to plan limits, while API key mode requires billing opt-in. Reviewed, bounded context manifests are supplied through stdin without native filesystem/execution tools or autonomous writes; extra files require explicit inclusion. Explore resumes CLI-owned history under ChatGPT workspace/account identity and scope guards; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify, while persistent Explore requires verifiable ChatGPT identity. Unsupported configurations fail without REST fallback. OpenRouter and autonomous Apply remain planned.</p>
+<p><strong>Installed Codex MVP:</strong> requires Codex 0.160.0 on Linux/macOS and a compatible restricted profile. Codex owns login and refresh; ChatGPT usage is online and subject to plan limits, while API key mode requires billing opt-in. Reviewed, bounded context manifests are supplied through stdin without native filesystem/execution tools or autonomous writes; extra files require explicit inclusion. Explore resumes CLI-owned history under ChatGPT workspace/account identity and scope guards; New conversation discards reuse without deleting CLI history. Acknowledged API key mode supports one-shot generation/Verify, while persistent Explore requires verifiable ChatGPT identity. Unsupported configurations fail without REST fallback. OpenRouter is available separately as a REST provider with its own API key and model catalog. Autonomous Apply remains planned.</p>
 <p><strong>Development status:</strong> this source description includes the branch implementation; full build, Plugin Verifier and IDE acceptance are pending because SDK downloads are blocked. Live Codex inference has not been validated in this environment.</p>
 <p>The plugin hands prompts to GitHub Copilot, Claude Code, Cursor and other tools, or generates through REST providers and a supported installed Codex CLI.</p>
 

@@ -18,6 +18,7 @@ public final class DirectApiService {
     private static final Duration TIMEOUT = Duration.ofMinutes(5);
 
     private final Project project;
+    private final HttpClient injectedClient;
     private final ThreadLocal<java.util.function.BooleanSupplier> cancellation = new ThreadLocal<>();
 
     public String generateRaw(String prompt, java.util.function.BooleanSupplier canceled) throws AiApiException {
@@ -34,24 +35,34 @@ public final class DirectApiService {
     }
 
     private HttpResponse<String> sendRequest(HttpRequest request) throws Exception {
+        checkRequestCanceled();
         var future = createHttpClient().sendAsync(request, HttpResponse.BodyHandlers.ofString());
         long deadline = System.nanoTime() + TIMEOUT.toNanos();
         try {
             while (true) {
-                com.intellij.openapi.progress.ProgressManager.checkCanceled();
-                var token = cancellation.get();
-                if (Thread.currentThread().isInterrupted() || token != null && token.getAsBoolean()) {
-                    throw new com.intellij.openapi.progress.ProcessCanceledException();
-                }
+                checkRequestCanceled();
                 if (System.nanoTime() > deadline) throw new java.util.concurrent.TimeoutException("AI request timed out");
                 try { return future.get(100, java.util.concurrent.TimeUnit.MILLISECONDS); }
                 catch (java.util.concurrent.TimeoutException ignored) { /* poll cancellation */ }
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new com.intellij.openapi.progress.ProcessCanceledException();
         } finally { if (!future.isDone()) future.cancel(true); }
     }
 
-    public DirectApiService(Project project) {
+    private void checkRequestCanceled() {
+        com.intellij.openapi.progress.ProgressManager.checkCanceled();
+        var token = cancellation.get();
+        if (Thread.currentThread().isInterrupted() || token != null && token.getAsBoolean())
+            throw new com.intellij.openapi.progress.ProcessCanceledException();
+    }
+
+    public DirectApiService(Project project) { this(project, null); }
+
+    DirectApiService(Project project, HttpClient client) {
         this.project = project;
+        this.injectedClient = client;
         // Warm the has-key cache off the EDT so isConfigured() (reached from ~8 UI paths) never does a
         // synchronous PasswordSafe read on the EDT. Guard on a live Application so plain unit tests
         // (no IntelliJ Application) can construct the service.
@@ -67,6 +78,7 @@ public final class DirectApiService {
     }
 
     private HttpClient createHttpClient() {
+        if (injectedClient != null) return injectedClient;
         return HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
@@ -106,6 +118,7 @@ public final class DirectApiService {
             case CLAUDE -> callClaude(apiKey, model, prompt);
             case OPENAI -> callOpenAi(apiKey, model, prompt);
             case GEMINI -> callGemini(apiKey, model, prompt);
+            case OPENROUTER -> callOpenRouter(apiKey, model, prompt, 4096);
             case NONE -> throw new AiApiException("No AI provider configured");
         };
     }
@@ -136,6 +149,7 @@ public final class DirectApiService {
             case CLAUDE -> callClaude(apiKey, model, prompt);
             case OPENAI -> callOpenAi(apiKey, model, prompt);
             case GEMINI -> callGemini(apiKey, model, prompt);
+            case OPENROUTER -> callOpenRouter(apiKey, model, prompt, 4096);
             case NONE -> throw new AiApiException("No AI provider configured");
         };
     }
@@ -174,6 +188,7 @@ public final class DirectApiService {
                 case CLAUDE -> callClaude(apiKey, model, testPrompt);
                 case OPENAI -> callOpenAi(apiKey, model, testPrompt);
                 case GEMINI -> callGemini(apiKey, model, testPrompt);
+                case OPENROUTER -> callOpenRouter(apiKey, model, testPrompt, 256);
                 case NONE -> throw new AiApiException("No provider");
             };
             return "Connected to " + provider.getDisplayName() + " (" + model + ")";
@@ -298,6 +313,30 @@ public final class DirectApiService {
         } catch (Exception e) {
             throw new AiApiException("Gemini API call failed: " + e.getMessage(), e);
         }
+    }
+
+    private String callOpenRouter(String apiKey, String model, String prompt, int maxTokens) throws AiApiException {
+        try {
+            var response = sendRequest(OpenRouterProtocol.completion(model, apiKey, prompt, maxTokens));
+            checkRequestCanceled();
+            if (response.statusCode() != 200) throw OpenRouterProtocol.error(response.statusCode());
+            return OpenRouterProtocol.parseCompletion(response.body());
+        } catch (AiApiException | com.intellij.openapi.progress.ProcessCanceledException e) { throw e; }
+        catch (Exception e) { throw new AiApiException("OpenRouter request failed. Check network/proxy access to openrouter.ai and retry."); }
+    }
+
+    /** Explicit public catalog refresh. Must run off EDT. No key or inference request. */
+    public java.util.List<com.johnnyblabs.openspec.ai.backend.ModelDescriptor> refreshOpenRouterModels(
+            java.util.function.BooleanSupplier canceled) throws AiApiException {
+        cancellation.set(canceled);
+        try {
+            var response = sendRequest(OpenRouterProtocol.models());
+            checkRequestCanceled();
+            if (response.statusCode() != 200) throw OpenRouterProtocol.error(response.statusCode());
+            return OpenRouterProtocol.parseModels(response.body());
+        } catch (AiApiException | com.intellij.openapi.progress.ProcessCanceledException e) { throw e; }
+        catch (Exception e) { throw new AiApiException("OpenRouter catalog refresh failed. Check network/proxy access to openrouter.ai; manual model IDs remain available."); }
+        finally { cancellation.remove(); }
     }
 
     private AiApiException buildApiError(String providerName, int statusCode, String responseBody) {

@@ -150,6 +150,30 @@ class AiExecutionServiceTest {
     }
 
     @Test
+    void openRouterUsesSharedReviewedExecutionWithoutConstructingCodex() throws Exception {
+        ReviewedContext context = mock(ReviewedContext.class);
+        when(context.prompt()).thenReturn("reviewed");
+        when(context.root()).thenReturn(java.nio.file.Path.of("/unused-context"));
+        when(review.review(anyString(), anyString(), anyInt())).thenReturn(context);
+        when(rest.isConfigured(AiProvider.OPENROUTER)).thenReturn(true);
+        when(rest.generateRaw(eq("reviewed"), eq(AiProvider.OPENROUTER), eq("override-model"), any())).thenReturn("answer");
+        var route = new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.RoutingSnapshot(
+                DeliveryMode.DIRECT_API,
+                new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendSelection("REST", "OPENROUTER", "override-model", "", ""),
+                new com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.BackendReadiness(false, "Unprobed override"),
+                com.johnnyblabs.openspec.ai.routing.AiRoutingPolicy.Source.RUN_OVERRIDE, "Override");
+        try (MockedStatic<ProgressManager> progress = platformProgress();
+             MockedConstruction<CodexAppServerBackend> local = mockConstruction(CodexAppServerBackend.class)) {
+            assertEquals("answer", execution.generateRaw("prompt", ignored -> {}, route));
+            assertEquals("LOCAL_CODEX", settings.getAiBackend());
+            assertFalse(execution.hasActiveRequest());
+            assertTrue(local.constructed().isEmpty());
+            verify(review).review(eq("prompt"), contains("override-model"), anyInt());
+            verify(rest).generateRaw(eq("reviewed"), eq(AiProvider.OPENROUTER), eq("override-model"), any());
+        }
+    }
+
+    @Test
     void inputTokenBudgetChangedAfterPreviewPreventsInference() throws Exception {
         ReviewedContext context = mock(ReviewedContext.class);
         when(review.review(anyString(), anyString(), anyInt())).thenAnswer(call -> {

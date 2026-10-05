@@ -9,7 +9,6 @@ import com.intellij.ui.components.JBLabel;
 import com.intellij.ui.components.JBPasswordField;
 import com.intellij.ui.components.JBTextField;
 import com.intellij.util.ui.JBUI;
-import com.johnnyblabs.openspec.ai.AiCredentialStore;
 import com.johnnyblabs.openspec.ai.AiProvider;
 import com.johnnyblabs.openspec.ai.DirectApiService;
 import com.johnnyblabs.openspec.settings.OpenSpecSettings;
@@ -57,6 +56,7 @@ public class SetupWizardDialog extends DialogWrapper {
     private ComboBox<String> modelCombo;
     private JBLabel apiTestLabel;
     private JPanel directApiPanel;
+    private SwingWorker<String, Void> apiTestWorker;
 
     // Init step components
     private JBLabel initStatusLabel;
@@ -217,7 +217,7 @@ public class SetupWizardDialog extends DialogWrapper {
         apiGbc.gridx = 0; apiGbc.gridy = 0;
         directApiPanel.add(new JBLabel("Provider:"), apiGbc);
         apiGbc.gridx = 1;
-        providerCombo = new ComboBox<>(new AiProvider[]{AiProvider.CLAUDE, AiProvider.OPENAI, AiProvider.GEMINI});
+        providerCombo = new ComboBox<>(SetupWizardModel.restProviders());
         providerCombo.setRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean sel, boolean focus) {
@@ -239,12 +239,17 @@ public class SetupWizardDialog extends DialogWrapper {
         directApiPanel.add(new JBLabel("Model:"), apiGbc);
         apiGbc.gridx = 1;
         modelCombo = new ComboBox<>();
+        modelCombo.setEditable(true);
+        modelCombo.addActionListener(e -> cancelConnectionTest());
+        if (modelCombo.getEditor().getEditorComponent() instanceof javax.swing.text.JTextComponent editor)
+            watchConnectionInput(editor);
+        watchConnectionInput(apiKeyField);
         directApiPanel.add(modelCombo, apiGbc);
 
         apiGbc.gridx = 0; apiGbc.gridy = 3;
         apiGbc.gridwidth = 2;
         JPanel testRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        JButton testBtn = new JButton("Test Connection");
+        JButton testBtn = new JButton("Test (API billed)");
         testBtn.addActionListener(e -> testApiConnection());
         testRow.add(testBtn);
         apiTestLabel = new JBLabel("");
@@ -465,20 +470,21 @@ public class SetupWizardDialog extends DialogWrapper {
             if (!key.isBlank()) {
                 model.setApiKey(key);
             }
-            if (modelCombo.getSelectedItem() != null) {
-                model.setAiModel(modelCombo.getSelectedItem().toString());
-            }
+            model.setAiModel(selectedRestModel());
         }
     }
 
     // --- AI step helpers ---
 
     private void updateDirectApiVisibility() {
+        cancelConnectionTest();
         boolean show = "Direct API".equals(deliveryCombo.getSelectedItem());
         directApiPanel.setVisible(show);
     }
 
     private void updateModelCombo() {
+        cancelConnectionTest();
+        if (apiKeyField != null) apiKeyField.setText("");
         AiProvider provider = (AiProvider) providerCombo.getSelectedItem();
         modelCombo.removeAllItems();
         if (provider != null) {
@@ -501,33 +507,24 @@ public class SetupWizardDialog extends DialogWrapper {
         apiTestLabel.setIcon(null);
         apiTestLabel.setForeground(JBColor.foreground());
 
-        // The key is persisted off the EDT in the worker below (PasswordSafe.set is blocking), before
-        // testConnection() reads it back.
-        OpenSpecSettings settings = OpenSpecSettings.getInstance(project);
-        String prevProvider = settings.getAiProvider();
-        String prevModel = settings.getAiModel();
-        settings.setAiProvider(provider.name());
-        String selectedModel = modelCombo.getSelectedItem() != null ? modelCombo.getSelectedItem().toString() : provider.getDefaultModel();
-        settings.setAiModel(selectedModel);
-
+        String selectedModel = selectedRestModel();
         DirectApiService apiService = project.getService(DirectApiService.class);
         if (apiService == null) {
             apiTestLabel.setText("Service not available");
             apiTestLabel.setForeground(JBColor.RED);
-            settings.setAiProvider(prevProvider);
-            settings.setAiModel(prevModel);
             return;
         }
+        if (apiTestWorker != null) apiTestWorker.cancel(true);
 
-        new SwingWorker<String, Void>() {
+        apiTestWorker = new SwingWorker<String, Void>() {
             @Override
             protected String doInBackground() throws Exception {
-                AiCredentialStore.storeApiKey(provider, key);
-                return apiService.testConnection();
+                return apiService.testConnection(provider, key, selectedModel);
             }
 
             @Override
             protected void done() {
+                if (isDisposed() || project.isDisposed() || isCancelled() || apiTestWorker != this) return;
                 try {
                     String result = get();
                     apiTestLabel.setText(result);
@@ -538,12 +535,35 @@ public class SetupWizardDialog extends DialogWrapper {
                     apiTestLabel.setText("Failed: " + msg);
                     apiTestLabel.setIcon(AllIcons.General.Error);
                     apiTestLabel.setForeground(JBColor.RED);
-                    // Restore previous settings on failure
-                    settings.setAiProvider(prevProvider);
-                    settings.setAiModel(prevModel);
                 }
             }
-        }.execute();
+        };
+        apiTestWorker.execute();
+    }
+
+    private String selectedRestModel() {
+        Object selected = modelCombo.getEditor().getItem();
+        return selected == null ? "" : selected.toString();
+    }
+
+    private void watchConnectionInput(javax.swing.text.JTextComponent field) {
+        field.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { cancelConnectionTest(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { cancelConnectionTest(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { cancelConnectionTest(); }
+        });
+    }
+
+    private void cancelConnectionTest() {
+        var previous = apiTestWorker;
+        apiTestWorker = null;
+        if (previous != null) previous.cancel(true);
+        if (apiTestLabel != null) { apiTestLabel.setText(""); apiTestLabel.setIcon(null); }
+    }
+
+    @Override protected void dispose() {
+        cancelConnectionTest();
+        super.dispose();
     }
 
     // --- Navigation ---
@@ -563,6 +583,7 @@ public class SetupWizardDialog extends DialogWrapper {
     protected void doOKAction() {
         if (currentStep < TOTAL_STEPS - 1) {
             collectCurrentStepData();
+            cancelConnectionTest();
             currentStep++;
             cardLayout.show(cardPanel, STEP_NAMES[currentStep]);
             onEnterStep(currentStep);
@@ -588,6 +609,7 @@ public class SetupWizardDialog extends DialogWrapper {
 
     public void doBackAction() {
         if (currentStep > 0) {
+            cancelConnectionTest();
             currentStep--;
             cardLayout.show(cardPanel, STEP_NAMES[currentStep]);
             updateButtons();

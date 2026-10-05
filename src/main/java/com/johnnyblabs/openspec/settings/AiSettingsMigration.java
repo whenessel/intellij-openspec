@@ -8,7 +8,7 @@ import java.util.Set;
 /** Pure migration of plugin-owned preferences. Legacy fields remain available for rollback. */
 public final class AiSettingsMigration {
     public static final int CURRENT_VERSION = 1;
-    private static final Set<String> REST_PROVIDERS = Set.of("CLAUDE", "OPENAI", "GEMINI");
+    private static final Set<String> REST_PROVIDERS = Set.of("CLAUDE", "OPENAI", "GEMINI", "OPENROUTER");
     private AiSettingsMigration() {}
 
     public record Result(int version, String backend, Map<String, String> providerModels) {

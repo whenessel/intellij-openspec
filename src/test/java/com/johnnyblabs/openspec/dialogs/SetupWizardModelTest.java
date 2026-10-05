@@ -13,6 +13,17 @@ class SetupWizardModelTest {
 
     private SetupWizardModel model;
 
+    @Test
+    void wizardOffersAllExecutableRestProvidersIncludingOpenRouter() {
+        var providers = java.util.Arrays.asList(SetupWizardModel.restProviders());
+        assertTrue(providers.containsAll(List.of(AiProvider.CLAUDE, AiProvider.OPENAI, AiProvider.GEMINI, AiProvider.OPENROUTER)));
+        assertFalse(providers.contains(AiProvider.NONE));
+        model.setAiProvider(AiProvider.OPENROUTER);
+        model.setAiModel("vendor/model:free");
+        assertEquals(AiProvider.OPENROUTER, model.getAiProvider());
+        assertEquals("vendor/model:free", model.getAiModel());
+    }
+
     @BeforeEach
     void setUp() {
         model = new SetupWizardModel();

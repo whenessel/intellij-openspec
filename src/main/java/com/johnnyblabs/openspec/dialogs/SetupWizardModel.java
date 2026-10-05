@@ -11,6 +11,10 @@ import java.util.List;
 
 public final class SetupWizardModel {
 
+    static AiProvider[] restProviders() {
+        return java.util.Arrays.stream(AiProvider.values()).filter(p -> p != AiProvider.NONE).toArray(AiProvider[]::new);
+    }
+
     private String cliPath = "";
     private boolean cliFound = false;
     private String cliVersion = "";

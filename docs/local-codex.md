@@ -42,7 +42,7 @@ Explore and Verify return text rather than applying workspace edits. Explore con
 
 ## Later phases and acceptance
 
-OpenRouter has an architectural extension seam but no executable provider, key flow or hosted authorization in this phase. Autonomous workspace-writing Apply is also deferred; the existing Apply action retains its existing OpenSpec lifecycle role.
+OpenRouter is available separately through the [REST provider integration](openrouter.md), using its own PasswordSafe key and model selection; it does not use Codex login or ChatGPT entitlement. Autonomous workspace-writing Apply is also deferred; the existing Apply action retains its existing OpenSpec lifecycle role.
 
 Release acceptance must include the supported CLI on Linux and macOS, both subscription and explicitly acknowledged API billing modes, unsupported-version/configuration errors, model catalog/manual override, every delivery mode, cancellation/timeout, persistent Explore thread resume and account/scope guards, New-conversation semantics, context reduction and multi-file preview/stale-edit rejection. Use fixtures and mocks for automated tests; a deliberate live inference check requires separate authorization. Full build, Plugin Verifier and IDE/UI checks must pass before claiming release readiness.
 
