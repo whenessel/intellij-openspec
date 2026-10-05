@@ -1,4 +1,4 @@
-# OpenRouter validation
+# Initial OpenRouter validation (nonstreaming baseline)
 
 Validated on 2026-10-05 in the cloud workspace, starting from `b6f2f8b79c70d099e269ec6cc00995362f11220f` on `plan/local-codex-provider-architecture`. Java 21, Gradle 9.0.0, IntelliJ Platform Gradle plugin 2.18.1, build SDK 2024.2. No coverage threshold, verifier failure level or security gate was reduced.
 
@@ -34,6 +34,8 @@ Logs and result files are under `/workspace/openrouter-validation-20261005/`: `v
 
 Network access used the normal environment proxy and supported sandbox network permission. Successful OpenRouter requests and cached JetBrains verifier SDKs do not prove unrestricted internet. The headless searchable-options IDE emitted a nonfatal background `Connection refused` diagnostic while its task still completed; this was not an OpenRouter inference failure.
 
-Acceptance limits: real HTTP smoke sent no project/personal content and used only a free model. It does not establish generation from a running IDE, PasswordSafe behavior on every OS or GUI workflow acceptance. The adapter exposes nonstreaming text REST, local artifact validation and cancelable HTTP; advanced downstream policy controls, SSE streaming and autonomous workspace Apply remain outside this change, as recorded separately in the original architecture plan.
+Historical acceptance limits (superseded for SSE/policy scope by architecture P6 validation): real HTTP smoke sent no project/personal content and used only a free model. It does not establish generation from a running IDE, PasswordSafe behavior on every OS or GUI workflow acceptance. The adapter exposes nonstreaming text REST, local artifact validation and cancelable HTTP; advanced downstream policy controls, SSE streaming and autonomous workspace Apply remain outside this change, as recorded separately in the original architecture plan.
 
 Implementation commit `c3ea9b671b4219b879afaf92aa620e99057a472c` was pushed to `whenessel/intellij-openspec`, branch `plan/local-codex-provider-architecture`. Publication used the normal pre-push hook; no bypass flag, PR, main merge, tag or release was created. The follow-up acceptance commit changes documentation only.
+
+Subsequent SSE/policy/key-status/limits/retry work is complete under architecture P6; see [current P6 validation](../local-codex-provider-architecture/p6-validation.md). This file preserves the initial nonstreaming baseline.

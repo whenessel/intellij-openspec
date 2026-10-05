@@ -1,4 +1,14 @@
-# Planning validation — 2026-10-04
+# Validation evidence — 2026-10-05
+
+Current completed baseline is `062f454c6c2a10681f58cbfc368b90abde689d47`. Compilation, 1716 tests (four skipped, zero failures/errors), `check`, JaCoCo, local ZIP build and four-version Plugin Verifier passed. Nine SDK-backed artifact writer tests passed; actual GUI/Undo/service lifecycle and live installed Codex generation remain unverified. The baseline OpenRouter HTTP smoke used a free model and synthetic text, with reported cost zero; it does not validate subsequent P6 streaming/policy changes. Current P6 source `343452b8aad4cde3b81b00128c839e229773d531` additionally passed explicit `build`, 1761 tests, check/coverage/buildPlugin/four-version verifier and integration Kotlin compilation; see [P6 validation](p6-validation.md).
+
+See [implementation-status.md](implementation-status.md) for stage-specific evidence and limits. P6 automated validation passed and tasks 6.1–6.5 are checked; GUI/manual/release criteria remain open. The earlier SDK CONNECT403 failure below is historical, not a current compilation blocker. No network bypass was used.
+
+## Historical planning-only snapshot
+
+The following record preserves the original planning execution. Claims of untracked-only files, no implementation/publication and no SDK tests apply solely to that checkpoint.
+
+### Planning validation — 2026-10-04
 
 This records the original planning-only checkpoint before later implementation/publication authorization. For current implementation evidence and blockers, see [implementation-status.md](implementation-status.md).
 

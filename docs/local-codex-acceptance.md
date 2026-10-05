@@ -2,7 +2,7 @@
 
 > **Maintenance: Living** — retain evidence per implementation SHA; source and mock checks do not replace IDE/runtime acceptance.
 
-Use a disposable lifecycle-testdrive project and mock transports. No live paid inference or existing authentication-file capture is part of this checklist. Record IDE/build, OS/architecture, Java, installed CLI version, implementation SHA, outcome and sanitized evidence for each row. **All operator outcomes below are pending** until recorded in a permitted SDK/runtime environment.
+Use a disposable lifecycle-testdrive project and mock transports. No live paid inference or existing authentication-file capture is part of this checklist. Record IDE/build, OS/architecture, Java, installed CLI version, implementation SHA, outcome and sanitized evidence for each row. **All operator outcomes below are pending** until individually recorded. SDK-dependent automated checks now run; they do not fill operator acceptance rows.
 
 The self-contained UI journey uses mock OpenSpec and Codex executables with spaces in their paths, captured no-inference metadata and explicitly synthetic account/turn events:
 
@@ -40,8 +40,8 @@ Its source and offline Python protocol harness can be reviewed independently. Ko
 | Project close/executable change during discovery and inference | Own process/descendants and streams cleaned; no late UI/file application | Pending |
 | Every Apply entry point | Reviewed manual handoff; no autonomous workspace-writing turn | Pending |
 | Linux and macOS supported native CLI profile | No-inference permission/runtime acceptance recorded separately per platform | Pending |
-| Full build/coverage, verifier and UI journey | Successful exit/logs for exact SHA; visible CI checked separately | Pending |
+| Full build/coverage, verifier and UI journey | Successful exit/logs for exact SHA; visible CI checked separately | Automated build/coverage/verifier and harness compilation passed; GUI/CI pending |
 
-The execution environment's earlier SDK attempts received proxy CONNECT 403 before compilation. Repeated blocked downloads and access-policy workarounds are excluded; use a permitted SDK environment. The current GitHub-remote hook skips test/verifier gates, so push success is not evidence. CI topology and release eligibility remain separate decisions.
+The earlier proxy CONNECT403 SDK failure is historical. On 2026-10-05, baseline 062f454 passed Java/IntelliJ compilation, 1716 tests (four skipped), check/JaCoCo, buildPlugin and four-version verifier; nine SDK writer tests cover document/VFS/recovery behavior. Actual Undo, service lifecycle, GUI journey and live authenticated Codex generation remain unverified. Explicit build, 1761 tests, coverage/verifier and integration harness compilation now passed for P6 source 343452b; [P6 evidence](../openspec/changes/local-codex-provider-architecture/p6-validation.md) retains the exact SHA/logs. UI/manual/live Codex/actual Undo/service-lifecycle acceptance remains pending. Successful downloads do not prove unrestricted internet, and no network bypass was used. The current GitHub-remote hook skips test/verifier gates, so push success is not evidence. CI topology and release eligibility remain separate decisions.
 
 See [setup and behavior](local-codex.md), [implementation evidence](../openspec/changes/local-codex-provider-architecture/implementation-status.md) and [distribution decision](../openspec/changes/local-codex-provider-architecture/distribution-decision.md).

@@ -48,9 +48,9 @@ The plugin SHALL distinguish backend protocol compatibility from OpenSpec schema
 - **WHEN** a new backend satisfies the existing request/result/capability contracts
 - **THEN** workflows SHALL use it without provider-specific routing behavior
 
-### Requirement: Future router model and policy boundary
+### Requirement: Router model and policy boundary
 
-When a future router backend is enabled, the plugin SHALL retain provider-qualified model identities, source/timestamp and exact price units; negotiate required parameters at model and route level; honor explicit routing/privacy constraints; and normalize credit/rate/auth/stream failures without hidden fallback.
+When a router backend is enabled, the plugin SHALL retain provider-qualified model identities, source/timestamp and exact price units; negotiate required parameters at model and route level; honor explicit routing/privacy constraints; and normalize credit/rate/auth/stream failures without hidden fallback.
 
 #### Scenario: Pricing metadata
 - **WHEN** a router catalog supplies decimal-string token prices or omits a cost

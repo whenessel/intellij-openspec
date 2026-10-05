@@ -1,3 +1,5 @@
+> **Status update — 2026-10-05:** this proposal began as planning-only work; implementation and publication were subsequently authorized. The completed 062f454 baseline has automated SDK/tests/coverage/buildPlugin/verifier evidence. OpenRouter REST was delivered separately and P6 SSE/policy/key-status completion passed its automated criteria; [P6 evidence](p6-validation.md) records current results and operator limits. Workspace-writing Apply, live Codex, GUI and release-owner gates remain open. See [implementation-status.md](implementation-status.md).
+
 ## Why
 
 Codex is currently detected as a paste target, so users cannot run their installed Codex with an existing ChatGPT login from OpenSpec workflows. A backend-neutral execution boundary is needed now so local Codex, existing REST providers, and a later OpenRouter adapter share model selection, privacy controls, cancellation, and safe artifact application.
@@ -9,7 +11,7 @@ Codex is currently detected as a paste target, so users cannot run their install
 - Add provider/executable/model settings and visible subscription-versus-API billing state, dynamic catalogs, manual model override, migration, context preview, redaction, and budgets.
 - Route every AI action through one policy, including Verify and inline Explore; retain deterministic local Verify and manual clipboard/editor delivery.
 - Replace unrestricted single-string artifact writes with validated multi-file results, scoped previews, conflict checks, and one safe writer. OpenSpec output globs remain patterns rather than literal filenames.
-- Reserve workspace-writing Apply, tool approvals, and OpenRouter implementation for subsequent independently gated phases. No Java/UI/provider implementation, dependency, CI, or hook edits are part of this planning delivery.
+- Keep workspace-writing Apply and tool approvals in independently gated P7. OpenRouter P6 was subsequently authorized; the original planning delivery itself made no Java/UI/provider, dependency, CI or hook edits.
 
 ## Capabilities
 
@@ -39,4 +41,4 @@ Baseline: `27adb08d7ce197e998bfb897ecce6d7d49a2a609`, also current origin/main o
 
 Tracker reference is pending: the clone lacks the custom tracker-mirroring skill and its connector. CLAUDE.md's sidecar/no-inline-ID convention takes precedence over the stale config rule asking for inline references. Do not invent an issue or create external tracker content in this documentation-only request.
 
-[design.md](design.md) contains stages, dependencies, acceptance criteria, alternatives, sources, and release decisions. [tasks.md](tasks.md) is future implementation work and remains unchecked. Planning does not authorize implementation, commit, push, or PR.
+[design.md](design.md) contains stages, dependencies, acceptance criteria, alternatives, sources, and release decisions. [tasks.md](tasks.md) separates verified implementation from remaining operator/release criteria. Subsequent authorization permits implementation and publication in the existing fork branch; PR, merge and release remain outside this work.

@@ -1,6 +1,6 @@
 ## Context
 
-See [proposal.md](proposal.md) for motivation and capability inventory. This is a planning deliverable; every implementation task remains future work.
+See [proposal.md](proposal.md) for motivation and capability inventory. This preserves the original design decisions. Implementation was subsequently authorized; completed baseline evidence and outstanding combined acceptance criteria are tracked in [implementation-status.md](implementation-status.md) and [tasks.md](tasks.md).
 
 ### Verified baseline and discovery limits
 
@@ -86,7 +86,7 @@ Proposed configurable defaults: process/handshake/catalog 10 seconds; generation
 
 ### 4. Authentication, model catalogs, compatibility and UX
 
-Settings → Tools → OpenSpec is the durable home: execution backend (`Existing REST`, `Local Codex`, later `OpenRouter`), manual delivery (`Clipboard`, `Editor Tab`), executable browse/detect/version, effective auth/account/billing, model picker/refresh/manual ID, optional effort, context limits and timeouts. Keep OpenSpec executable distinct. Workflow tool selector gains an explicit Local Codex execution option alongside `Codex [CLI]` paste guidance; discovering `.codex` alone must not enable execution. Show selected backend/model with concise auth/billing detail and View Context/Cancel in existing Workflow/Explore surfaces, with detail on demand rather than a new tool window. Use textual statuses, labeled controls, keyboard access and predictable focus; color alone is insufficient.
+Settings → Tools → OpenSpec is the durable home: execution backend (`REST`, `LOCAL_CODEX`; OpenRouter is a REST provider), manual delivery (`Clipboard`, `Editor Tab`), executable browse/detect/version, effective auth/account/billing, model picker/refresh/manual ID, optional effort, context limits and timeouts. Keep OpenSpec executable distinct. Workflow tool selector gains an explicit Local Codex execution option alongside `Codex [CLI]` paste guidance; discovering `.codex` alone must not enable execution. Show selected backend/model with concise auth/billing detail and View Context/Cancel in existing Workflow/Explore surfaces, with detail on demand rather than a new tool window. Use textual statuses, labeled controls, keyboard access and predictable focus; color alone is insufficient.
 
 Codex owns login and refresh. MVP offers status check and instructions to run `codex login` outside the plugin, without logging in/out automatically. Never read/copy `auth.json`, OS credential entries or tokens, and do not implement external-token refresh or a new SIWC grant. Distinguish ChatGPT plan usage, API billing, signed out, unsupported/unknown auth and any non-goal auth modes returned by newer CLI. API mode requires visible acknowledgement when first choosing Local Codex expecting subscription; do not reject intentional API use or label unknown mode as subscription. Account change invalidates catalog/session caches and reviewed billing state. Limits are advisory and may be absent; show unknown, avoid automatic credit purchases/emails/reset redemption. Local/open-source versus commercial/hosted eligibility is a release gate, with SIWC feasibility evaluated independently. [Auth contract](https://learn.chatgpt.com/docs/app-server#authentication), [CLI billing](https://learn.chatgpt.com/docs/auth).
 
@@ -116,7 +116,7 @@ Show all-file diff preview including additions, replacements and removals (remov
 
 MVP Codex is read-only/no escalation, returns artifacts to plugin writer, Explore/Verify write no workspace files. Artifact acceptance is separate from AI execution permission. Workspace-writing Apply is later: project trust check, implementation prompt/context preview, explicit permission/run grant, disposable worktree or isolated workspace first, capability-gated commands/patch approvals, final diff review and conflict-safe merge/application. Approval requests use typed IDs, action/path/command/scope and response validation; unknown or unsupported approval is denied/canceled. Reject/timeout means no escalation. A workspace-write sandbox grants a scope; it does not guarantee an approval prompt for every file or command. Preview cannot undo a command's external side effect, so tool execution needs a distinct reviewed policy. Preserve existing manual Apply prompt delivery in MVP; REST generation never implies autonomous Apply capability.
 
-### 7. Future OpenRouter adapter (separate implementation phase)
+### 7. OpenRouter adapter (separately authorized P6 implementation)
 
 Use `https://openrouter.ai/api/v1/chat/completions`, Bearer key in PasswordSafe, `GET /api/v1/models` catalog and optional `GET /api/v1/key` status. No dependency on Codex auth; no redirect of ChatGPT subscription entitlement. Pin public HTTPS endpoint initially and prevent key leakage to arbitrary bases/redirect hosts. Headers and optional app attribution follow official docs, not copied provider defaults. [API](https://openrouter.ai/docs/api_reference/overview), [auth](https://openrouter.ai/docs/api_reference/authentication), [limits](https://openrouter.ai/docs/api_reference/limits).
 
@@ -141,7 +141,7 @@ Normalize 400/401/402/403/408/429/5xx, no-content/truncation, SSE errors even af
 | P6 OpenRouter implementation | P1–P2, separate authorization; P4 reference tests | HTTP adapter/catalog/privacy/routing | Swap adapter without workflow edits; model/provider capabilities negotiated; error/pricing/privacy fixtures pass. |
 | P7 Workspace-writing Apply | P4–P5; separate permission design/authorization | Isolated execution, typed approvals and final diff review | Untrusted projects blocked; denials/timeouts honored; no promise of per-file approval; conflict-safe controlled apply. |
 
-P6 and P7 are independent future phases; OpenRouter does not automatically gain agent/workspace capabilities. Exact estimates and staffing follow implementation review, not this documentation run.
+P6 is authorized, implemented and automated criteria passed: SSE, routing/privacy controls, key status, bounds and retries share the existing backend boundary. [P6 validation](p6-validation.md) records full checks and the free synthetic capture; GUI/operator criteria remain open. P7 remains a separate future phase. OpenRouter does not gain agent/workspace capabilities.
 
 ## Risks / Trade-offs
 
@@ -164,7 +164,7 @@ Deploy feature-gated contract/router first, then writer/context, then Codex and 
 
 ## Release Decisions to Confirm
 
-The architectural default is app-server MVP with read-only generation/Explore/Verify, no automatic workspace Apply and future OpenRouter. Remaining release gates do not authorize work in this branch:
+The architectural default is app-server MVP with read-only generation/Explore/Verify, no automatic workspace Apply and future OpenRouter. Subsequent implementation authorization permits current P6 work, but does not close the remaining release gates:
 
 1. Confirm local/open-source distribution eligibility; any commercial/hosted evolution requires separate SIWC and terms review, without reusing this auth design unchanged.
 2. Accept app-server engineering investment or explicitly re-scope to limited exec MVP and revise capabilities/tasks before implementation.

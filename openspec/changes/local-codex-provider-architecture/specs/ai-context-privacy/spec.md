@@ -29,7 +29,7 @@ The plugin SHALL distinguish local subprocess execution from model inference des
 - **THEN** the UI SHALL disclose online inference and the enforced local read/tool scope
 
 #### Scenario: Router backend
-- **WHEN** a future router backend is selected
+- **WHEN** a router backend is selected
 - **THEN** the preview SHALL disclose router and downstream-provider privacy policy constraints
 
 #### Scenario: Scope changed

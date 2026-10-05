@@ -1,3 +1,5 @@
+> **Current status — 2026-10-05:** SDK, full build/check/verifier and integration Kotlin compilation are available and passed through the normal environment proxy; see [P6 validation](p6-validation.md). Any SDK access failure below records the earlier investigation, not a current blocker. No network bypass was used.
+
 # IntelliJ Platform SDK connection review — 2026-10-04
 
 This is documentation research against the existing build, not an SDK/dependency change or successful build claim.
